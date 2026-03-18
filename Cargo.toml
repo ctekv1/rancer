@@ -10,3 +10,4 @@ keywords = ["graphics", "art", "canvas", "drawing"]
 categories = ["graphics"]
 
 [dependencies]
+winit = "0.30"

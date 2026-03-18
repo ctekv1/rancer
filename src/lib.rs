@@ -4,6 +4,7 @@
 //! Currently in early development with basic structure placeholders.
 
 pub mod canvas;
+pub mod window;
 
 /// Core application state and configuration
 pub struct RancerApp {
