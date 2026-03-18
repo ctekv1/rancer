@@ -4,6 +4,9 @@
 
 A digital art application built in Rust with cross-platform support.
 
+**Version:** 0.0.1  
+**License:** [GNU GPL-3.0](LICENSE)
+
 ## Features
 
 - Real-time GPU-accelerated drawing with WGPU 28.0
@@ -45,4 +48,4 @@ cargo run
 
 ## License
 
-MIT
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.

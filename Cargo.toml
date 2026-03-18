@@ -1,11 +1,11 @@
 [package]
 name = "rancer"
-version = "0.1.0"
-edition = "2024"
+version = "0.0.1"
+edition = "2026"
 rust-version = "1.94"
 description = "A high-performance digital art application built in Rust with cross-platform support"
 authors = ["Your Name <your.email@example.com>"]
-license = "MIT"
+license = "GPL-3.0-or-later"
 repository = "https://github.com/yourusername/rancer"
 keywords = ["graphics", "art", "canvas", "drawing"]
 categories = ["graphics"]
