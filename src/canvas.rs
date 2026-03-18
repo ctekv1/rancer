@@ -172,8 +172,8 @@ impl Default for ColorPalette {
             Color { r: 255, g: 255, b: 0, a: 255 },   // 5 - Yellow
             Color { r: 255, g: 0, b: 255, a: 255 },   // 6 - Magenta
             Color { r: 0, g: 255, b: 255, a: 255 },   // 7 - Cyan
-            Color { r: 128, g: 128, b: 128, a: 255 }, // 8 - Gray
-            Color { r: 255, g: 165, b: 0, a: 255 },   // 9 - Orange
+            Color { r: 64, g: 64, b: 64, a: 255 },    // 8 - Dark Gray
+            Color { r: 139, g: 69, b: 19, a: 255 },   // 9 - Brown
         ];
         
         Self {
@@ -375,7 +375,8 @@ mod tests {
         assert_eq!(colors[0], Color::BLACK);
         assert_eq!(colors[1], Color::WHITE);
         assert_eq!(colors[2], Color { r: 255, g: 0, b: 0, a: 255 }); // Red
-        assert_eq!(colors[9], Color { r: 255, g: 165, b: 0, a: 255 }); // Orange
+        assert_eq!(colors[8], Color { r: 64, g: 64, b: 64, a: 255 }); // Dark Gray
+        assert_eq!(colors[9], Color { r: 139, g: 69, b: 19, a: 255 }); // Brown
     }
 
     #[test]

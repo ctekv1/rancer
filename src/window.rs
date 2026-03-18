@@ -156,7 +156,7 @@ impl WindowApp {
             );
 
             // Set up keyboard events
-            setup_keyboard_events_for_window(&window, &palette);
+            setup_keyboard_events_for_window(&window, &palette, &drawing_area);
 
             // Set up close handler
             setup_close_handler_for_window(&window);
@@ -206,6 +206,8 @@ fn setup_mouse_events_for_window(
 ) {
     // Set up draw callback to render the canvas content
     drawing_area.set_draw_func(glib::clone!(@weak canvas, @weak palette, @weak active_stroke => move |_, cr, width, height| {
+        println!("Draw callback called - width: {}, height: {}", width, height);
+        
         // Clear the drawing area with white background
         cr.set_source_rgb(1.0, 1.0, 1.0);
         cr.paint().unwrap();
@@ -214,12 +216,19 @@ fn setup_mouse_events_for_window(
         let canvas_ref = canvas.borrow();
         let palette_ref = palette.borrow();
         
+        println!("Canvas has {} committed strokes", canvas_ref.strokes().len());
+        
         // Draw all committed strokes
-        for stroke in canvas_ref.strokes() {
+        for (i, stroke) in canvas_ref.strokes().iter().enumerate() {
             if let Some(first_point) = stroke.points.first() {
-                // Set stroke color
+                println!("Drawing committed stroke {} with {} points", i, stroke.points.len());
+                // Set stroke color - convert u8 (0-255) to f64 (0.0-1.0) for cairo
                 let color = stroke.color;
-                cr.set_source_rgb(color.r as f64, color.g as f64, color.b as f64);
+                cr.set_source_rgb(
+                    color.r as f64 / 255.0, 
+                    color.g as f64 / 255.0, 
+                    color.b as f64 / 255.0
+                );
                 
                 // Set line width
                 cr.set_line_width(stroke.width as f64);
@@ -240,11 +249,20 @@ fn setup_mouse_events_for_window(
         }
         
         // Draw active stroke if there is one
-        if let Some(active_stroke) = &*active_stroke.borrow() {
+        let active_stroke_ref = active_stroke.borrow();
+        println!("Active stroke exists: {}", active_stroke_ref.is_some());
+        
+        if let Some(active_stroke) = &*active_stroke_ref {
+            println!("Drawing active stroke with {} points", active_stroke.points().len());
             if let Some(first_point) = active_stroke.points().first() {
-                // Set stroke color for active stroke
+                // Set stroke color for active stroke - convert u8 (0-255) to f64 (0.0-1.0) for cairo
                 let color = active_stroke.color();
-                cr.set_source_rgb(color.r as f64, color.g as f64, color.b as f64);
+                println!("Active stroke color: RGB({}, {}, {})", color.r, color.g, color.b);
+                cr.set_source_rgb(
+                    color.r as f64 / 255.0, 
+                    color.g as f64 / 255.0, 
+                    color.b as f64 / 255.0
+                );
                 
                 // Set line width
                 cr.set_line_width(active_stroke.width() as f64);
@@ -262,17 +280,18 @@ fn setup_mouse_events_for_window(
                 // Stroke the path
                 cr.stroke().unwrap();
             }
+        } else {
+            println!("No active stroke to draw");
         }
         
         // Draw a simple color palette indicator at the top
         draw_color_palette_indicator(cr, &palette_ref, width, height);
     }));
+    
     // Mouse motion event handler
     let drawing_area_clone = drawing_area.clone();
-    let canvas_clone = canvas.clone();
-    let palette_clone = palette.clone();
     let mouse_state_clone = Rc::new(RefCell::new(mouse_state));
-    let mouse_position_clone = Rc::new(RefCell::new(mouse_position));
+    let mouse_state_clone_for_motion = mouse_state_clone.clone();
     let active_stroke_clone = active_stroke.clone();
 
     let motion_controller = EventControllerMotion::new();
@@ -283,36 +302,37 @@ fn setup_mouse_events_for_window(
             y: y as f32,
         };
 
-        *mouse_position_clone.borrow_mut() = point;
-
         // If we're drawing, add the point to the active stroke
-        if *mouse_state_clone.borrow() == MouseState::Drawing {
+        if *mouse_state_clone_for_motion.borrow() == MouseState::Drawing {
+            // Access the shared active stroke and add the point
             if let Some(active_stroke) = &mut *active_stroke_clone.borrow_mut() {
                 active_stroke.add_point(point);
+                println!("Added point to active stroke: ({}, {})", point.x, point.y);
+                println!("Active stroke now has {} points", active_stroke.points().len());
+                // Trigger a redraw to show the updated active stroke
+                drawing_area_clone.queue_draw();
             }
         }
     });
-    drawing_area_clone.add_controller(motion_controller);
+    drawing_area.add_controller(motion_controller);
 
     // Mouse click event handler
     let drawing_area_clone2 = drawing_area.clone();
     let canvas_clone2 = canvas.clone();
     let palette_clone2 = palette.clone();
-    let mouse_state_clone2 = Rc::new(RefCell::new(mouse_state));
-    let mouse_position_clone2 = Rc::new(RefCell::new(mouse_position));
     let active_stroke_clone2 = active_stroke.clone();
 
     let click_gesture = GestureClick::new();
     
     // Create clones for the pressed closure
-    let mouse_state_pressed = mouse_state_clone2.clone();
+    let mouse_state_pressed = mouse_state_clone.clone();
     let canvas_pressed = canvas_clone2.clone();
     let palette_pressed = palette_clone2.clone();
     let active_stroke_pressed = active_stroke_clone2.clone();
-    let mouse_position_pressed = mouse_position_clone2.clone();
     
     click_gesture.connect_pressed(move |_, n_press, x, y| {
         if n_press == 1 {
+            println!("Mouse button pressed at ({}, {})", x, y);
             // Mouse button pressed
             *mouse_state_pressed.borrow_mut() = MouseState::Drawing;
             
@@ -324,17 +344,23 @@ fn setup_mouse_events_for_window(
                 3.0,  // Default stroke width
                 1.0,  // Default opacity
             );
+            println!("Created active stroke with color RGB({}, {}, {})", color.r, color.g, color.b);
+            
+            // Store the active stroke in the shared state
             *active_stroke_pressed.borrow_mut() = Some(active_stroke);
             
             // Add the current mouse position as the first point
+            let point = Point { x: x as f32, y: y as f32 };
             if let Some(active_stroke) = &mut *active_stroke_pressed.borrow_mut() {
-                active_stroke.add_point(*mouse_position_pressed.borrow());
+                active_stroke.add_point(point);
+                println!("Added first point to active stroke: ({}, {})", point.x, point.y);
+                println!("Active stroke now has {} points", active_stroke.points().len());
             }
         }
     });
 
     // Create clones for the released closure
-    let mouse_state_released = mouse_state_clone2.clone();
+    let mouse_state_released = mouse_state_clone.clone();
     let canvas_released = canvas_clone2.clone();
     let active_stroke_released = active_stroke_clone2.clone();
     
@@ -360,9 +386,11 @@ fn setup_mouse_events_for_window(
 fn setup_keyboard_events_for_window(
     window: &ApplicationWindow,
     palette: &Rc<RefCell<ColorPalette>>,
+    drawing_area: &DrawingArea,
 ) {
     // Keyboard event handler for color selection
     let palette_clone = palette.clone();
+    let drawing_area_clone = drawing_area.clone();
     
     // Use a key controller instead of connect_key_pressed
     let key_controller = gtk4::EventControllerKey::new();
@@ -374,6 +402,9 @@ fn setup_keyboard_events_for_window(
                 let new_index = (current_index + 1) % palette.color_count();
                 if let Err(e) = palette.select_color(new_index) {
                     eprintln!("Failed to change color: {}", e);
+                } else {
+                    // Trigger a redraw to update the color palette indicator
+                    drawing_area_clone.queue_draw();
                 }
             }
             gdk::Key::Down => {
@@ -386,6 +417,9 @@ fn setup_keyboard_events_for_window(
                 };
                 if let Err(e) = palette.select_color(new_index) {
                     eprintln!("Failed to change color: {}", e);
+                } else {
+                    // Trigger a redraw to update the color palette indicator
+                    drawing_area_clone.queue_draw();
                 }
             }
             _ => {}
@@ -428,8 +462,12 @@ fn draw_color_palette_indicator(
         let color = palette.colors()[i];
         let x = 10.0 + (color_width + spacing) * i as f64;
         
-        // Draw color swatch
-        cr.set_source_rgb(color.r as f64, color.g as f64, color.b as f64);
+        // Draw color swatch - convert u8 (0-255) to f64 (0.0-1.0) for cairo
+        cr.set_source_rgb(
+            color.r as f64 / 255.0, 
+            color.g as f64 / 255.0, 
+            color.b as f64 / 255.0
+        );
         cr.rectangle(x, palette_y + 5.0, color_width, palette_height - 10.0);
         cr.fill().unwrap();
         
