@@ -20,7 +20,7 @@ use crate::canvas::{ActiveStroke, Canvas, ColorPalette, Point};
 
 /// Represents the current state of mouse interaction
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum MouseState {
+pub enum MouseState {
     /// No mouse button is pressed
     Idle,
     /// Left mouse button is pressed and drawing
@@ -118,8 +118,8 @@ impl WindowApp {
     pub fn run(&self) {
         let canvas = self.canvas.clone();
         let palette = self.palette.clone();
-        let mouse_state = self.mouse_state;
-        let mouse_position = self.mouse_position;
+        let _mouse_state = self.mouse_state;
+        let _mouse_position = self.mouse_position;
         let active_stroke = self.active_stroke.clone();
 
         self.app.connect_activate(move |app| {
@@ -150,8 +150,8 @@ impl WindowApp {
                 &drawing_area,
                 &canvas,
                 &palette,
-                mouse_state,
-                mouse_position,
+                _mouse_state,
+                _mouse_position,
                 &active_stroke
             );
 
@@ -200,11 +200,12 @@ fn setup_mouse_events_for_window(
     drawing_area: &DrawingArea,
     canvas: &Rc<RefCell<Canvas>>,
     palette: &Rc<RefCell<ColorPalette>>,
-    mouse_state: MouseState,
-    mouse_position: Point,
+    _mouse_state: MouseState,
+    _mouse_position: Point,
     active_stroke: &Rc<RefCell<Option<ActiveStroke>>>,
 ) {
     // Set up draw callback to render the canvas content
+    #[allow(deprecated)] // glib::clone macro is deprecated but still widely used
     drawing_area.set_draw_func(glib::clone!(@weak canvas, @weak palette, @weak active_stroke => move |_, cr, width, height| {
         println!("Draw callback called - width: {}, height: {}", width, height);
         
@@ -290,7 +291,7 @@ fn setup_mouse_events_for_window(
     
     // Mouse motion event handler
     let drawing_area_clone = drawing_area.clone();
-    let mouse_state_clone = Rc::new(RefCell::new(mouse_state));
+    let mouse_state_clone = Rc::new(RefCell::new(_mouse_state));
     let mouse_state_clone_for_motion = mouse_state_clone.clone();
     let active_stroke_clone = active_stroke.clone();
 
@@ -444,8 +445,8 @@ fn setup_close_handler_for_window(window: &ApplicationWindow) {
 fn draw_color_palette_indicator(
     cr: &cairo::Context,
     palette: &ColorPalette,
-    width: i32,
-    height: i32,
+    _width: i32,
+    _height: i32,
 ) {
     let palette_height = 30.0;
     let palette_y = 10.0;
