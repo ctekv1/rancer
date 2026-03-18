@@ -55,9 +55,8 @@ pub struct Canvas {
     redo_stack: Vec<Stroke>,
 }
 
-impl Canvas {
-    /// Create a new canvas with default settings
-    pub fn new() -> Self {
+impl Default for Canvas {
+    fn default() -> Self {
         Self {
             width: 1920,
             height: 1080,
@@ -66,6 +65,13 @@ impl Canvas {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
         }
+    }
+}
+
+impl Canvas {
+    /// Create a new canvas with default settings
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Create a new canvas with specified dimensions
@@ -154,9 +160,8 @@ pub struct ColorPalette {
     selected_index: usize,
 }
 
-impl ColorPalette {
-    /// Create a new color palette with a default set of colors
-    pub fn new() -> Self {
+impl Default for ColorPalette {
+    fn default() -> Self {
         let colors = vec![
             Color::BLACK,           // 0 - Black
             Color::WHITE,           // 1 - White
@@ -174,6 +179,13 @@ impl ColorPalette {
             colors,
             selected_index: 0, // Default to black
         }
+    }
+}
+
+impl ColorPalette {
+    /// Create a new color palette with a default set of colors
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Get the currently selected color
