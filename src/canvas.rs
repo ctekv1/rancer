@@ -40,6 +40,7 @@ pub struct Stroke {
 }
 
 /// The main canvas for drawing operations
+#[derive(Clone)]
 pub struct Canvas {
     /// Canvas width in pixels
     width: u32,
