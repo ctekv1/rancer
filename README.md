@@ -1,5 +1,7 @@
 # Rancer
 
+![Rancer Demo](assets/demo.png)
+
 A digital art application built in Rust with cross-platform support.
 
 ## Features
