@@ -24,7 +24,7 @@ jobs:
             libcairo2-dev \
             libpango1.0-dev \
             libglib2.0-dev \
-            libgobject-2.0-dev
+            libgobject-2.0-0-dev
 
       - name: Cache dependencies
         uses: actions/cache@v4
