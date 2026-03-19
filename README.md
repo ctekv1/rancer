@@ -4,7 +4,7 @@
 
 A digital art application built in Rust with cross-platform support.
 
-**Version:** 0.0.1  
+**Version:** 0.0.2
 **License:** [GNU GPL-3.0](LICENSE)
 
 ## Features
@@ -31,6 +31,7 @@ cargo run
 - **Draw**: Left click and drag
 - **Colors**: Up/Down arrows to change
 - **Window**: 1280x720 "Rancer" window
+- **Brush Size**: Click boxes to change brush size
 
 ## Tech Stack
 
