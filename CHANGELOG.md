@@ -1,7 +1,3 @@
-# Changelog
-
-All notable changes to Rancer will be documented in this file.
-
 ## [0.0.3] - 2026-03-19
 
 ### Added
@@ -33,11 +29,3 @@ All notable changes to Rancer will be documented in this file.
 ### Platform Support
 - **Windows**: Full WGPU support with winit window management
 - **Linux**: GTK4 backend with Cairo rendering (Wayland compatible)
-
-## [0.0.2] - Previous Release
-- Basic window creation and rendering
-- Initial stroke drawing functionality
-
-## [0.0.1] - Initial Release
-- Project initialization
-- Basic canvas structure
