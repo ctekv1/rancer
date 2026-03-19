@@ -1,37 +1,43 @@
-# Rancer v0.0.2 Release Notes
+# Changelog
 
-## 🎉 New Features & Improvements
+All notable changes to Rancer will be documented in this file.
 
-### Brush Size Selection
-- **New**: Added brush size selector with 5 different sizes (3px, 5px, 10px, 25px, 50px)
-- **New**: Individual gray background boxes behind each brush size button for better visual distinction
-- **Fixed**: Brush size now correctly reflects on canvas strokes
-- **Fixed**: Brush size persists between strokes and during active drawing
+## [0.0.3] - 2026-03-19
 
-### UI Improvements
-- **Improved**: Brush size selector redesigned with horizontal layout
-- **Improved**: Better visual feedback for brush size selection
-- **Improved**: Individual button backgrounds for clearer UI separation
+### Added
+- **Cross-platform window backends**: GTK4 for Linux/Wayland, winit for Windows
+- **GPU-accelerated rendering**: WGPU backend for high-performance graphics
+- **Color palette UI**: Interactive 10-color palette with selection indicator
+- **Brush size selector**: 5 preset brush sizes (3, 5, 10, 25, 50 pixels)
+- **Real-time stroke rendering**: Active strokes render as you draw
+- **Smooth stroke rendering**: Triangle strip topology for gapless strokes
+- **Thick line support**: Variable brush widths with proper line rendering
+- **Mouse event handling**: Click, drag, and release detection
+- **Keyboard shortcuts**: Arrow keys for color selection
+- **Window resize handling**: Automatic canvas resize on window resize
 
-### Bug Fixes
-- **Fixed**: Stroke width not changing based on selected brush size
-- **Fixed**: Brush size parameter not being passed correctly through closures
-- **Fixed**: Individual gray boxes not being drawn behind each button
+### Technical Implementation
+- **WGPU rendering pipeline**: GPU-accelerated graphics with shader support
+- **Cairo fallback**: Software rendering for Linux/GTK4 compatibility
+- **Vertex generation**: Quad-based thick line rendering with proper normals
+- **Separate UI pipeline**: Independent rendering for UI elements
+- **Cross-platform compilation**: Conditional compilation for Windows/Linux
 
-## 🛠 Technical Changes
-- Enhanced shared state management for brush size using `Rc<RefCell<f32>>`
-- Improved mouse event handling for brush size selection
-- Better integration between UI components and drawing system
-- Added comprehensive debugging output for brush size operations
+### Dependencies
+- winit 0.30 for Windows window management
+- wgpu 28.0 for GPU-accelerated rendering
+- GTK4 0.9 for Linux/Wayland support
+- Cairo-rs 0.20 for Linux rendering
+- tokio for async runtime support
 
-## 📋 Version History
-- **v0.0.1**: Initial release with basic canvas and color selection
-- **v0.0.2**: Added brush size selection and fixed UI issues
+### Platform Support
+- **Windows**: Full WGPU support with winit window management
+- **Linux**: GTK4 backend with Cairo rendering (Wayland compatible)
 
-## 🚀 Getting Started
-Run the application with:
-```bash
-cargo run
-```
+## [0.0.2] - Previous Release
+- Basic window creation and rendering
+- Initial stroke drawing functionality
 
-Use the brush size selector (below the color palette) to change stroke widths, then draw on the canvas to see the different brush sizes in action!
+## [0.0.1] - Initial Release
+- Project initialization
+- Basic canvas structure
