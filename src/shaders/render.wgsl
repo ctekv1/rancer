@@ -1,9 +1,10 @@
 // Rancer WGPU Shader
-// Simple vertex and fragment shader for rendering strokes
+// Vertex and fragment shader for rendering strokes with line width support
 
 struct VertexInput {
     @location(0) position: vec2<f32>,
     @location(1) color: vec4<f32>,
+    @location(2) line_width: f32,
 };
 
 struct VertexOutput {

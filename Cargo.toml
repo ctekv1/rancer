@@ -11,10 +11,16 @@ keywords = ["graphics", "art", "canvas", "drawing"]
 categories = ["graphics"]
 
 [dependencies]
-gtk4 = "0.9"
+winit = "0.30"
 wgpu = "28.0"
 tokio = { version = "1.0", features = ["full"] }
 bytemuck = "1.25.0"
 futures = "0.3"
 raw-window-handle = "0.6"
 chrono = "0.4"
+log = "0.4"
+env_logger = "0.11"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk4 = "0.9"
+cairo-rs = "0.20"

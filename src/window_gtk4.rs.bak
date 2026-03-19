@@ -19,6 +19,7 @@ use std::cell::RefCell;
 use crate::canvas::{ActiveStroke, Canvas, ColorPalette, Point};
 use crate::renderer::{Renderer, RendererConfig, RenderBackend};
 use crate::logger;
+use crate::window_backend::{WindowBackend, MouseState as BackendMouseState};
 
 /// Represents the current state of mouse interaction
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -709,5 +710,44 @@ mod tests {
         mouse_position = Point { x: 100.0, y: 200.0 };
         
         assert_eq!(mouse_position, Point { x: 100.0, y: 200.0 });
+    }
+}
+
+/// Implementation of WindowBackend trait for GTK4
+impl WindowBackend for WindowApp {
+    fn init(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // GTK4 initialization happens in new()
+        Ok(())
+    }
+
+    fn run(&self) {
+        self.run();
+    }
+
+    fn canvas(&self) -> &Rc<RefCell<Canvas>> {
+        &self.canvas
+    }
+
+    fn palette(&self) -> &Rc<RefCell<ColorPalette>> {
+        &self.palette
+    }
+
+    fn mouse_position(&self) -> Point {
+        self.mouse_position
+    }
+
+    fn mouse_state(&self) -> BackendMouseState {
+        match self.mouse_state {
+            MouseState::Idle => BackendMouseState::Idle,
+            MouseState::Drawing => BackendMouseState::Drawing,
+        }
+    }
+
+    fn has_active_stroke(&self) -> bool {
+        self.has_active_stroke()
+    }
+
+    fn active_stroke_point_count(&self) -> usize {
+        self.active_stroke_point_count()
     }
 }

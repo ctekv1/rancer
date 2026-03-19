@@ -4,9 +4,13 @@
 //! Currently in early development with basic structure placeholders.
 
 pub mod canvas;
-pub mod window;
+pub mod window_winit;
+pub mod window_backend;
 pub mod renderer;
 pub mod logger;
+
+#[cfg(target_os = "linux")]
+pub mod window_gtk4;
 
 /// Core application state and configuration
 pub struct RancerApp {
