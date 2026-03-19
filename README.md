@@ -4,7 +4,7 @@
 
 A digital art application built in Rust with cross-platform support.
 
-**Version:** 0.0.2
+**Version:** 0.0.3
 **License:** [GNU GPL-3.0](LICENSE)
 
 ## Features
