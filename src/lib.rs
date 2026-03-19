@@ -6,6 +6,7 @@
 pub mod canvas;
 pub mod window;
 pub mod renderer;
+pub mod logger;
 
 /// Core application state and configuration
 pub struct RancerApp {
