@@ -45,6 +45,8 @@ pub struct WindowApp {
     mouse_state: MouseState,
     /// Current mouse position
     mouse_position: Point,
+    /// Current brush size in pixels
+    brush_size: f32,
 }
 
 impl WindowApp {
@@ -68,6 +70,7 @@ impl WindowApp {
             active_stroke: Rc::new(RefCell::new(None)),
             mouse_state: MouseState::Idle,
             mouse_position: Point { x: 0.0, y: 0.0 },
+            brush_size: 3.0, // Default brush size
         })
     }
 
@@ -146,13 +149,15 @@ impl WindowApp {
             println!("Window title: {}", window.title().unwrap_or_default());
 
             // Set up mouse event handlers
+            let brush_size = Rc::new(RefCell::new(3.0f32)); // Default brush size as shared state
             setup_mouse_events_for_window(
                 &drawing_area,
                 &canvas,
                 &palette,
                 _mouse_state,
                 _mouse_position,
-                &active_stroke
+                &active_stroke,
+                brush_size.clone()
             );
 
             // Set up keyboard events
@@ -193,6 +198,16 @@ impl WindowApp {
     pub fn drawing_area(&self) -> &DrawingArea {
         self.drawing_area.as_ref().unwrap()
     }
+
+    /// Get the current brush size
+    pub fn brush_size(&self) -> f32 {
+        self.brush_size
+    }
+
+    /// Set the brush size
+    pub fn set_brush_size(&mut self, size: f32) {
+        self.brush_size = size;
+    }
 }
 
 /// Set up mouse event handlers for a window
@@ -203,6 +218,7 @@ fn setup_mouse_events_for_window(
     _mouse_state: MouseState,
     _mouse_position: Point,
     active_stroke: &Rc<RefCell<Option<ActiveStroke>>>,
+    brush_size: Rc<RefCell<f32>>, // Brush size as shared mutable state
 ) {
     // Set up draw callback to render the canvas content
     #[allow(deprecated)] // glib::clone macro is deprecated but still widely used
@@ -232,6 +248,7 @@ fn setup_mouse_events_for_window(
                 );
                 
                 // Set line width
+                println!("Rendering stroke with width: {}", stroke.width);
                 cr.set_line_width(stroke.width as f64);
                 cr.set_line_cap(cairo::LineCap::Round);
                 cr.set_line_join(cairo::LineJoin::Round);
@@ -266,6 +283,7 @@ fn setup_mouse_events_for_window(
                 );
                 
                 // Set line width
+                println!("Rendering active stroke with width: {}", active_stroke.width());
                 cr.set_line_width(active_stroke.width() as f64);
                 cr.set_line_cap(cairo::LineCap::Round);
                 cr.set_line_join(cairo::LineJoin::Round);
@@ -287,6 +305,9 @@ fn setup_mouse_events_for_window(
         
         // Draw a simple color palette indicator at the top
         draw_color_palette_indicator(cr, &palette_ref, width, height);
+        
+        // Draw brush size selector below the color palette
+        draw_brush_size_selector(cr, width, height);
     }));
     
     // Mouse motion event handler
@@ -319,6 +340,7 @@ fn setup_mouse_events_for_window(
 
     // Mouse click event handler
     let drawing_area_clone2 = drawing_area.clone();
+    let drawing_area_clone3 = drawing_area.clone(); // Separate clone for queue_draw
     let canvas_clone2 = canvas.clone();
     let palette_clone2 = palette.clone();
     let active_stroke_clone2 = active_stroke.clone();
@@ -334,28 +356,39 @@ fn setup_mouse_events_for_window(
     click_gesture.connect_pressed(move |_, n_press, x, y| {
         if n_press == 1 {
             println!("Mouse button pressed at ({}, {})", x, y);
-            // Mouse button pressed
-            *mouse_state_pressed.borrow_mut() = MouseState::Drawing;
             
-            // Begin a new active stroke with current palette color
-            let color = palette_pressed.borrow().current_color();
-            let mut canvas = canvas_pressed.borrow_mut();
-            let active_stroke = canvas.begin_stroke_with_palette(
-                &palette_pressed.borrow(),
-                3.0,  // Default stroke width
-                1.0,  // Default opacity
-            );
-            println!("Created active stroke with color RGB({}, {}, {})", color.r, color.g, color.b);
-            
-            // Store the active stroke in the shared state
-            *active_stroke_pressed.borrow_mut() = Some(active_stroke);
-            
-            // Add the current mouse position as the first point
-            let point = Point { x: x as f32, y: y as f32 };
-            if let Some(active_stroke) = &mut *active_stroke_pressed.borrow_mut() {
-                active_stroke.add_point(point);
-                println!("Added first point to active stroke: ({}, {})", point.x, point.y);
-                println!("Active stroke now has {} points", active_stroke.points().len());
+            // Check if click is on brush size selector
+            if let Some(new_brush_size) = check_brush_size_click(x as f32, y as f32) {
+                println!("Brush size selected: {}px", new_brush_size);
+                // Update the shared brush size state
+                *brush_size.borrow_mut() = new_brush_size;
+                println!("Updated brush size to: {}px", new_brush_size);
+                // Trigger a redraw to update the brush size selector visual feedback
+                drawing_area_clone3.queue_draw();
+            } else {
+                // Mouse button pressed for drawing
+                *mouse_state_pressed.borrow_mut() = MouseState::Drawing;
+                
+                // Begin a new active stroke with current palette color and brush size
+                let color = palette_pressed.borrow().current_color();
+                let mut canvas = canvas_pressed.borrow_mut();
+                let active_stroke = canvas.begin_stroke_with_palette(
+                    &palette_pressed.borrow(),
+                    *brush_size.borrow(),  // Use the current brush size from shared state
+                    1.0,  // Default opacity
+                );
+                println!("Created active stroke with color RGB({}, {}, {}) and width {}", color.r, color.g, color.b, brush_size.borrow());
+                
+                // Store the active stroke in the shared state
+                *active_stroke_pressed.borrow_mut() = Some(active_stroke);
+                
+                // Add the current mouse position as the first point
+                let point = Point { x: x as f32, y: y as f32 };
+                if let Some(active_stroke) = &mut *active_stroke_pressed.borrow_mut() {
+                    active_stroke.add_point(point);
+                    println!("Added first point to active stroke: ({}, {})", point.x, point.y);
+                    println!("Active stroke now has {} points", active_stroke.points().len());
+                }
             }
         }
     });
@@ -480,6 +513,82 @@ fn draw_color_palette_indicator(
             cr.stroke().unwrap();
         }
     }
+}
+
+/// Draw brush size selector below the color palette
+fn draw_brush_size_selector(
+    cr: &cairo::Context,
+    _width: i32,
+    _height: i32,
+) {
+    let brush_sizes = [3.0, 5.0, 10.0, 25.0, 50.0];
+    let palette_height = 30.0;
+    let palette_y = 10.0;
+    let brush_selector_y = palette_y + palette_height + 20.0; // Space below color palette
+    let brush_selector_x = 20.0;
+    let spacing = 24.0; // Reduced spacing for horizontal layout
+    
+    // Draw brush size buttons horizontally with individual gray boxes
+    let mut current_x = brush_selector_x;
+    for &size in brush_sizes.iter() {
+        let y = brush_selector_y + 30.0; // Center vertically
+        
+        // Draw individual gray box behind each button
+        let box_padding = 5.0;
+        let box_width = size + box_padding * 2.0;
+        let box_height = size + box_padding * 2.0;
+        let box_x = current_x - size / 2.0 - box_padding;
+        let box_y = y - size / 2.0 - box_padding;
+        
+        cr.set_source_rgb(0.85, 0.85, 0.85); // Light gray background for each button
+        cr.rectangle(box_x, box_y, box_width, box_height);
+        cr.fill().unwrap();
+        
+        // Draw the brush size circle
+        cr.set_source_rgb(0.6, 0.6, 0.6); // Gray color for buttons
+        cr.arc(current_x, y, size / 2.0, 0.0, 2.0 * std::f64::consts::PI);
+        cr.fill().unwrap();
+        
+        // Draw border around the circle
+        cr.set_source_rgb(0.3, 0.3, 0.3);
+        cr.set_line_width(1.0);
+        cr.arc(current_x, y, size / 2.0, 0.0, 2.0 * std::f64::consts::PI);
+        cr.stroke().unwrap();
+        
+        // Move to next position
+        current_x += size/0.5 + spacing;
+    }
+}
+
+/// Check if a mouse click is on the brush size selector
+fn check_brush_size_click(x: f32, y: f32) -> Option<f32> {
+    let brush_sizes = [3.0, 5.0, 10.0, 25.0, 50.0];
+    let palette_height = 30.0;
+    let palette_y = 10.0;
+    let brush_selector_y = palette_y + palette_height + 20.0; // Space below color palette
+    let brush_selector_x = 10.0;
+    let spacing = 8.0; // Match the new horizontal layout spacing
+    
+    // Check each brush size button
+    let mut current_x = brush_selector_x;
+    for &size in &brush_sizes {
+        let button_y = brush_selector_y + 30.0; // Center vertically in the gray box
+        
+        // Calculate distance from click to center of button
+        let dx = x as f64 - current_x;
+        let dy = y as f64 - button_y;
+        let distance = (dx * dx + dy * dy).sqrt();
+        
+        // If click is within the button radius, return the size
+        if distance <= size / 2.0 {
+            return Some(size as f32);
+        }
+        
+        // Move to next position
+        current_x += size + spacing;
+    }
+    
+    None
 }
 
 /// Run the window application using GTK4
