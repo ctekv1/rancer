@@ -1,3 +1,4 @@
 /target
 CONTEXT.md
 /releases
+*.log
