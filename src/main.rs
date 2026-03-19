@@ -6,7 +6,7 @@
 use rancer::window;
 
 fn main() {
-    println!("Starting Rancer application with GTK4 window and WGPU rendering...");
+    println!("Starting Rancer v0.0.2 application with GTK4 window and WGPU rendering...");
     
     // Initialize GTK4
     gtk4::init().expect("Failed to initialize GTK4");

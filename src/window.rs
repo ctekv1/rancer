@@ -566,26 +566,32 @@ fn check_brush_size_click(x: f32, y: f32) -> Option<f32> {
     let palette_height = 30.0;
     let palette_y = 10.0;
     let brush_selector_y = palette_y + palette_height + 20.0; // Space below color palette
-    let brush_selector_x = 10.0;
-    let spacing = 8.0; // Match the new horizontal layout spacing
+    let brush_selector_x = 20.0; // Match the drawing function
+    let spacing = 24.0; // Match the drawing function spacing
     
-    // Check each brush size button
+    // Check each brush size button using box boundaries (same as drawing function)
     let mut current_x = brush_selector_x;
     for &size in &brush_sizes {
         let button_y = brush_selector_y + 30.0; // Center vertically in the gray box
         
-        // Calculate distance from click to center of button
-        let dx = x as f64 - current_x;
-        let dy = y as f64 - button_y;
-        let distance = (dx * dx + dy * dy).sqrt();
+        // Calculate box boundaries (same as drawing function)
+        let box_padding = 5.0;
+        let box_width = size + box_padding * 2.0;
+        let box_height = size + box_padding * 2.0;
+        let box_x = current_x - size / 2.0 - box_padding;
+        let box_y = button_y - size / 2.0 - box_padding;
         
-        // If click is within the button radius, return the size
-        if distance <= size / 2.0 {
+        // Check if click is within the box boundaries
+        let click_x = x as f64;
+        let click_y = y as f64;
+        
+        if click_x >= box_x && click_x <= box_x + box_width &&
+           click_y >= box_y && click_y <= box_y + box_height {
             return Some(size as f32);
         }
         
-        // Move to next position
-        current_x += size + spacing;
+        // Move to next position - use same calculation as drawing function
+        current_x += size/0.5 + spacing;
     }
     
     None
