@@ -111,6 +111,11 @@ impl Canvas {
         (self.width, self.height)
     }
 
+    /// Get background color
+    pub fn background_color(&self) -> Color {
+        self.background_color
+    }
+
     /// Get all current strokes
     pub fn strokes(&self) -> &[Stroke] {
         &self.strokes

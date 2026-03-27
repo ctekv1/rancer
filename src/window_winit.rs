@@ -67,6 +67,29 @@ impl WindowApp {
             preferences,
         }
     }
+
+    /// Export canvas to PNG file
+    fn export_canvas_to_file(&self) {
+        let canvas = self.canvas.borrow();
+        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+        let filename = format!("rancer_export_{}.png", timestamp);
+        
+        // Get user's Pictures directory or use current directory
+        let export_path = dirs::picture_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(filename);
+        
+        logger::info(&format!("Attempting to export canvas to: {:?}", export_path));
+        
+        match crate::export::export_to_png(&canvas, &export_path) {
+            Ok(_) => {
+                logger::info(&format!("Export successful: {:?}", export_path));
+            }
+            Err(e) => {
+                logger::error(&format!("Export failed: {}", e));
+            }
+        }
+    }
 }
 
 impl ApplicationHandler for WindowApp {
@@ -308,6 +331,14 @@ impl ApplicationHandler for WindowApp {
             }
             WindowEvent::KeyboardInput { event: key_event, .. } => {
                 if key_event.state == winit::event::ElementState::Pressed {
+                    // Check for 's' key (save/export)
+                    // Note: Ctrl modifier detection may need additional handling
+                    if let winit::keyboard::Key::Character(ref c) = key_event.logical_key {
+                        if c == "s" {
+                            self.export_canvas_to_file();
+                        }
+                    }
+                    
                     match key_event.logical_key.as_ref() {
                         winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowUp) => {
                             let mut palette = self.palette.borrow_mut();

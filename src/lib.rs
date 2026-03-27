@@ -9,6 +9,7 @@ pub mod window_backend;
 pub mod renderer;
 pub mod logger;
 pub mod preferences;
+pub mod export;
 
 #[cfg(target_os = "linux")]
 pub mod window_gtk4;
