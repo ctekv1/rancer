@@ -8,6 +8,7 @@ pub mod window_winit;
 pub mod window_backend;
 pub mod renderer;
 pub mod logger;
+pub mod preferences;
 
 #[cfg(target_os = "linux")]
 pub mod window_gtk4;

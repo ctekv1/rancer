@@ -4,6 +4,7 @@
 //! Uses winit on Windows and GTK4 on Linux for window management.
 
 use rancer::logger;
+use rancer::preferences;
 
 #[cfg(target_os = "windows")]
 use rancer::window_winit;
@@ -15,16 +16,20 @@ fn main() {
     // Initialize logger
     logger::init().expect("Failed to initialize logger");
     
+    // Load preferences
+    let prefs = preferences::load();
+    logger::info(&format!("Config file: {:?}", preferences::get_config_path()));
+    
     #[cfg(target_os = "windows")]
     {
-        logger::info("Starting Rancer v0.0.2 application with winit window and WGPU rendering...");
-        window_winit::run_window_app();
+        logger::info("Starting Rancer v0.0.3 with winit window and WGPU rendering...");
+        window_winit::run_window_app(prefs);
     }
     
     #[cfg(target_os = "linux")]
     {
-        logger::info("Starting Rancer v0.0.2 application with GTK4 window and WGPU rendering...");
-        window_gtk4::run_window_app();
+        logger::info("Starting Rancer v0.0.3 with GTK4 window and WGPU rendering...");
+        window_gtk4::run_window_app(prefs);
     }
     
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]

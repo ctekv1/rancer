@@ -59,8 +59,8 @@ pub struct Canvas {
 impl Default for Canvas {
     fn default() -> Self {
         Self {
-            width: 1920,
-            height: 1080,
+            width: 1280,
+            height: 720,
             background_color: Color::WHITE,
             strokes: Vec::new(),
             undo_stack: Vec::new(),
@@ -329,7 +329,7 @@ mod tests {
     #[test]
     fn test_canvas_creation() {
         let canvas = Canvas::new();
-        assert_eq!(canvas.size(), (1920, 1080));
+        assert_eq!(canvas.size(), (1280, 720));
         assert_eq!(canvas.strokes().len(), 0);
     }
 

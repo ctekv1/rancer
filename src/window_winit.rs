@@ -14,6 +14,7 @@ use winit::window::{Window, WindowId};
 use crate::canvas::{ActiveStroke, Canvas, ColorPalette, Point};
 use crate::renderer::{Renderer, RendererConfig};
 use crate::logger;
+use crate::preferences::Preferences;
 use crate::window_backend::{WindowBackend, MouseState as BackendMouseState};
 
 /// Represents the current state of mouse interaction
@@ -45,11 +46,13 @@ pub struct WindowApp {
     mouse_position: Point,
     /// Current brush size in pixels
     brush_size: f32,
+    /// User preferences
+    preferences: Preferences,
 }
 
 impl WindowApp {
     /// Create a new window application
-    pub fn new() -> Self {
+    pub fn new(preferences: Preferences) -> Self {
         logger::info("Creating winit window application...");
         
         Self {
@@ -60,7 +63,8 @@ impl WindowApp {
             active_stroke: Rc::new(RefCell::new(None)),
             mouse_state: MouseState::Idle,
             mouse_position: Point { x: 0.0, y: 0.0 },
-            brush_size: 3.0,
+            brush_size: preferences.brush.default_size,
+            preferences,
         }
     }
 }
@@ -71,15 +75,20 @@ impl ApplicationHandler for WindowApp {
             logger::info("=== WINDOW CREATION ===");
             
             let attributes = Window::default_attributes()
-                .with_title("Rancer")
-                .with_inner_size(winit::dpi::LogicalSize::new(1280, 720));
+                .with_title(&self.preferences.window.title)
+                .with_inner_size(winit::dpi::LogicalSize::new(
+                    self.preferences.window.width,
+                    self.preferences.window.height
+                ));
             
             let window = event_loop.create_window(attributes).unwrap();
             let window = Rc::new(window);
             
             logger::info("winit window created successfully");
-            logger::info(&format!("Window size: 1280x720"));
-            logger::info("Window title: Rancer");
+            logger::info(&format!("Window size: {}x{}", 
+                self.preferences.window.width, 
+                self.preferences.window.height));
+            logger::info(&format!("Window title: {}", self.preferences.window.title));
             logger::info("========================");
             
             // Initialize WGPU renderer
@@ -120,6 +129,18 @@ impl ApplicationHandler for WindowApp {
             }
             WindowEvent::Resized(physical_size) => {
                 logger::info(&format!("Window resized to {}x{}", physical_size.width, physical_size.height));
+                
+                // Update preferences with new window size
+                self.preferences.window.width = physical_size.width;
+                self.preferences.window.height = physical_size.height;
+                self.preferences.canvas.width = physical_size.width;
+                self.preferences.canvas.height = physical_size.height;
+                
+                // Save preferences on change
+                if let Err(e) = crate::preferences::save(&self.preferences) {
+                    logger::error(&format!("Failed to save preferences: {}", e));
+                }
+                
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize((physical_size.width, physical_size.height));
                 }
@@ -177,6 +198,12 @@ impl ApplicationHandler for WindowApp {
                                             eprintln!("Failed to select color: {}", e);
                                         } else {
                                             println!("Selected color at index {}", i);
+                                            self.preferences.palette.selected_index = i;
+                                            
+                                            // Save preferences on change
+                                            if let Err(e) = crate::preferences::save(&self.preferences) {
+                                                logger::error(&format!("Failed to save preferences: {}", e));
+                                            }
                                         }
                                         if let Some(window) = &self.window {
                                             window.request_redraw();
@@ -197,6 +224,13 @@ impl ApplicationHandler for WindowApp {
                                     let button_x = selector_x + (button_size + spacing) * i as f32;
                                     if x >= button_x && x <= button_x + button_size {
                                         self.brush_size = size;
+                                        self.preferences.brush.default_size = size;
+                                        
+                                        // Save preferences on change
+                                        if let Err(e) = crate::preferences::save(&self.preferences) {
+                                            logger::error(&format!("Failed to save preferences: {}", e));
+                                        }
+                                        
                                         // Update renderer with new brush size
                                         if let Some(renderer) = &mut self.renderer {
                                             renderer.set_brush_size(size);
@@ -349,11 +383,11 @@ impl WindowBackend for WindowApp {
 }
 
 /// Run the winit event loop with the window application
-pub fn run_window_app() {
+pub fn run_window_app(preferences: Preferences) {
     logger::info("Starting winit event loop...");
     
     let event_loop = EventLoop::new().unwrap();
-    let mut app = WindowApp::new();
+    let mut app = WindowApp::new(preferences);
     
     event_loop.run_app(&mut app).unwrap();
     
@@ -363,10 +397,12 @@ pub fn run_window_app() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::preferences::Preferences;
 
     #[test]
     fn test_window_app_creation() {
-        let app = WindowApp::new();
+        let preferences = Preferences::default();
+        let app = WindowApp::new(preferences);
         assert_eq!(app.mouse_state, MouseState::Idle);
         assert_eq!(app.brush_size, 3.0);
     }

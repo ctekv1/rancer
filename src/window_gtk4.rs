@@ -15,6 +15,7 @@ use gtk4::glib;
 use crate::canvas::{ActiveStroke, Canvas, ColorPalette, Point};
 use crate::renderer::{Renderer, RendererConfig};
 use crate::logger;
+use crate::preferences::Preferences;
 use crate::window_backend::{WindowBackend, MouseState as BackendMouseState};
 
 /// Represents the current state of mouse interaction
@@ -51,11 +52,13 @@ pub struct WindowApp {
     mouse_position: Point,
     /// Current brush size in pixels
     brush_size: f32,
+    /// User preferences
+    preferences: Preferences,
 }
 
 impl WindowApp {
     /// Create a new window application
-    pub fn new() -> Self {
+    pub fn new(preferences: Preferences) -> Self {
         logger::info("Creating GTK4 window application...");
         
         let app = Application::builder()
@@ -72,7 +75,8 @@ impl WindowApp {
             active_stroke: Rc::new(RefCell::new(None)),
             mouse_state: MouseState::Idle,
             mouse_position: Point { x: 0.0, y: 0.0 },
-            brush_size: 3.0,
+            brush_size: preferences.brush.default_size,
+            preferences,
         }
     }
 }
@@ -432,10 +436,10 @@ fn draw_brush_size_selector(cr: &cairo::Context, selected_size: f32, _width: i32
 }
 
 /// Run the GTK4 window application
-pub fn run_window_app() {
+pub fn run_window_app(preferences: Preferences) {
     logger::info("Starting GTK4 window application...");
     
-    let mut app = WindowApp::new();
+    let mut app = WindowApp::new(preferences);
     
     if let Err(e) = app.init() {
         logger::error(&format!("Failed to initialize GTK4 window: {}", e));
