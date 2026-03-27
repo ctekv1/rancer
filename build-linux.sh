@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Building Rancer v0.0.3 for Linux from Windows..."
+echo "Building Rancer v0.0.4 for Linux from Windows..."
 echo ""
 
 # Check if Rust is installed

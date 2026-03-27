@@ -1,5 +1,5 @@
 @echo off
-echo Building Rancer v0.0.3 for Windows...
+echo Building Rancer v0.0.4 for Windows...
 echo.
 
 REM Check if Rust is installed
