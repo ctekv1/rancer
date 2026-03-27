@@ -60,12 +60,6 @@ pub struct Renderer {
     render_pipeline: Option<wgpu::RenderPipeline>,
     /// WGPU render pipeline for UI elements
     ui_pipeline: Option<wgpu::RenderPipeline>,
-    /// Vertex buffer for strokes
-    vertex_buffer: Option<wgpu::Buffer>,
-    /// Uniform buffer for canvas size
-    uniform_buffer: Option<wgpu::Buffer>,
-    /// Number of vertices to render
-    vertex_count: u32,
     /// Window size
     window_size: (u32, u32),
 }
@@ -97,38 +91,32 @@ impl Renderer {
                     backend: RenderBackend::Wgpu,
                     device: Some(device),
                     queue: Some(queue),
-                    surface: Some(surface),
-                    surface_config: Some(surface_config),
-                    render_pipeline: Some(render_pipeline),
-                    ui_pipeline: Some(ui_pipeline),
-                    vertex_buffer: None,
-                    uniform_buffer: None,
-                    vertex_count: 0,
-                    window_size,
+                     surface: Some(surface),
+                     surface_config: Some(surface_config),
+                     render_pipeline: Some(render_pipeline),
+                     ui_pipeline: Some(ui_pipeline),
+                     window_size,
                 })
             }
             Err(e) => {
                 logger::error(&format!("❌ WGPU initialization failed: {}", e));
                 logger::warn("   Falling back to Cairo software rendering");
                 logger::info("   - Backend: Cairo (CPU)");
-                Ok(Self {
-                    canvas: Canvas::new(),
-                    palette: crate::canvas::ColorPalette::new(),
-                    active_stroke: None,
-                    brush_size: 3.0, // Default brush size
-                    config,
-                    backend: RenderBackend::Cairo,
-                    device: None,
-                    queue: None,
-                    surface: None,
-                    surface_config: None,
-                    render_pipeline: None,
-                    ui_pipeline: None,
-                    vertex_buffer: None,
-                    uniform_buffer: None,
-                    vertex_count: 0,
-                    window_size,
-                })
+                 Ok(Self {
+                     canvas: Canvas::new(),
+                     palette: crate::canvas::ColorPalette::new(),
+                     active_stroke: None,
+                     brush_size: 3.0, // Default brush size
+                     config,
+                     backend: RenderBackend::Cairo,
+                     device: None,
+                     queue: None,
+                     surface: None,
+                     surface_config: None,
+                     render_pipeline: None,
+                     ui_pipeline: None,
+                     window_size,
+                 })
             }
         }
     }
@@ -427,7 +415,7 @@ impl Renderer {
         let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         // Generate vertices from canvas strokes (one continuous buffer)
-        let vertices = self.generate_vertices();
+        let _vertices = self.generate_vertices();
         
         // Create uniform buffer for canvas size
         let uniform_data = [self.window_size.0 as f32, self.window_size.1 as f32];

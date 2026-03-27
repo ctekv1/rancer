@@ -2,3 +2,5 @@
 CONTEXT.md
 /releases
 *.log
+/.claude
+CLAUDE.md

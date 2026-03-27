@@ -25,8 +25,7 @@ pub enum MouseState {
     Drawing,
 }
 
-/// Brush size options
-const BRUSH_SIZES: [f32; 5] = [3.0, 5.0, 10.0, 25.0, 50.0];
+
 
 /// Window application state using winit
 pub struct WindowApp {
