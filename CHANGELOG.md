@@ -1,3 +1,32 @@
+## [0.0.4] - 2026-03-27
+
+### Added
+- **User preferences system**: TOML-based configuration with platform-specific storage
+- **Auto-saving preferences**: Settings saved on window resize, brush size change, color selection
+- **Config file management**: Auto-creates config with defaults if not found
+- **Hex color support**: Colors stored as hex strings (e.g., "#FFFFFF") in preferences
+
+### Fixed
+- **Clippy warnings**: Removed unused variables and dead code
+- **Canvas default size**: Changed from 1920x1080 to 1280x720 to match window size
+- **Documentation accuracy**: Removed misleading TODOs from lib.rs
+
+### Documentation
+- **Updated CLAUDE.md**: Added preferences module and configuration details
+- **Updated README.md**: Added preferences features, config file locations, version 0.0.4
+- **Updated CHANGELOG.md**: Added v0.0.4 entry
+- **Updated lib.rs**: Removed outdated TODOs, improved module documentation
+
+### Dependencies
+- Added dirs 5.0 for platform-specific config directories
+- Added serde 1.0 with derive feature for serialization
+- Added toml 0.8 for configuration file format
+
+### Configuration
+- **Windows**: `%APPDATA%\rancer\config.toml`
+- **Linux**: `~/.config/rancer/config.toml`
+- **Settings**: Window size, canvas size, brush defaults, color palette, renderer config
+
 ## [0.0.3] - 2026-03-19
 
 ### Added

@@ -1,4 +1,4 @@
-# Windows Build Guide for Rancer v0.0.2
+# Windows Build Guide for Rancer v0.0.4
 
 This guide helps Windows users build Rancer from source.
 
@@ -27,7 +27,7 @@ Install the Windows SDK and development tools:
 ### Option 1: Using the Build Script (Recommended)
 ```bash
 # Download the build script
-curl -O https://raw.githubusercontent.com/ctekv1/rancer/v0.0.2/build-windows.bat
+curl -O https://raw.githubusercontent.com/ctekv1/rancer/v0.0.4/build-windows.bat
 
 # Run the build script
 build-windows.bat
@@ -38,7 +38,7 @@ build-windows.bat
 # Clone the repository
 git clone https://github.com/ctekv1/rancer.git
 cd rancer
-git checkout v0.0.2
+git checkout v0.0.4
 
 # Add Windows target
 rustup target add x86_64-pc-windows-gnu
@@ -93,5 +93,5 @@ rancer.exe
 If you encounter issues:
 1. Check that all prerequisites are installed
 2. Verify environment variables are set correctly
-3. Ensure you're using the v0.0.2 tag: `git checkout v0.0.2`
+3. Ensure you're using the v0.0.4 tag: `git checkout v0.0.4`
 4. Report issues on the [GitHub repository](https://github.com/ctekv1/rancer/issues)

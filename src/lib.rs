@@ -1,7 +1,7 @@
 //! Rancer - A high-performance digital art application
 //!
 //! This library provides the core canvas and drawing engine for the Rancer application.
-//! Currently in early development with basic structure placeholders.
+//! Features GPU-accelerated rendering, stroke management, and user preferences.
 
 pub mod canvas;
 pub mod window_winit;
@@ -55,19 +55,18 @@ impl RancerApp {
     }
 
     /// Initialize the application
+    /// 
+    /// Note: Window system, GPU context, and preferences are initialized
+    /// in the platform-specific window backends (winit/GTK4).
     pub fn init(&mut self) {
-        // TODO: Initialize window system (Tauri v2)
-        // TODO: Initialize GPU context (wgpu)
-        // TODO: Load user preferences
         println!("Rancer application initialized");
     }
 
     /// Main application loop
+    /// 
+    /// Note: The main event loop, window event handling, canvas rendering,
+    /// and input processing are handled by the platform-specific window backends.
     pub fn run(&mut self) {
-        // TODO: Implement main event loop
-        // TODO: Handle window events
-        // TODO: Render canvas
-        // TODO: Process input
         println!("Rancer application running...");
     }
 }

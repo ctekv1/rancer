@@ -1,6 +1,6 @@
 [package]
 name = "rancer"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2024"
 rust-version = "1.94"
 description = "A high-performance digital art application built in Rust with cross-platform support"
