@@ -92,7 +92,7 @@ fn render_line_segment(
     let ny = dx / length * half_width;
 
     // Generate quad vertices (two triangles)
-    let vertices = vec![
+    let vertices = [
         [p1.x + nx, p1.y + ny],
         [p1.x - nx, p1.y - ny],
         [p2.x + nx, p2.y + ny],

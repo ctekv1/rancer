@@ -79,7 +79,7 @@ impl Renderer {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         logger::info("=== RENDERER INITIALIZATION START ===");
         logger::info("Attempting WGPU initialization...");
-        
+
         // Try to initialize WGPU
         match Self::init_wgpu(window, window_size, &config).await {
             Ok((device, queue, surface, surface_config, render_pipeline, ui_pipeline)) => {
@@ -97,32 +97,32 @@ impl Renderer {
                     backend: RenderBackend::Wgpu,
                     device: Some(device),
                     queue: Some(queue),
-                     surface: Some(surface),
-                     surface_config: Some(surface_config),
-                     render_pipeline: Some(render_pipeline),
-                     ui_pipeline: Some(ui_pipeline),
-                     window_size,
+                    surface: Some(surface),
+                    surface_config: Some(surface_config),
+                    render_pipeline: Some(render_pipeline),
+                    ui_pipeline: Some(ui_pipeline),
+                    window_size,
                 })
             }
             Err(e) => {
                 logger::error(&format!("❌ WGPU initialization failed: {}", e));
                 logger::warn("   Falling back to Cairo software rendering");
                 logger::info("   - Backend: Cairo (CPU)");
-                 Ok(Self {
-                     canvas: Canvas::new(),
-                     palette: crate::canvas::ColorPalette::new(),
-                     active_stroke: None,
-                     brush_size: 3.0, // Default brush size
-                     config,
-                     backend: RenderBackend::Cairo,
-                     device: None,
-                     queue: None,
-                     surface: None,
-                     surface_config: None,
-                     render_pipeline: None,
-                     ui_pipeline: None,
-                     window_size,
-                 })
+                Ok(Self {
+                    canvas: Canvas::new(),
+                    palette: crate::canvas::ColorPalette::new(),
+                    active_stroke: None,
+                    brush_size: 3.0, // Default brush size
+                    config,
+                    backend: RenderBackend::Cairo,
+                    device: None,
+                    queue: None,
+                    surface: None,
+                    surface_config: None,
+                    render_pipeline: None,
+                    ui_pipeline: None,
+                    window_size,
+                })
             }
         }
     }
@@ -151,6 +151,7 @@ impl Renderer {
 
         // Create surface from window
         // SAFETY: The surface is valid for the lifetime of the window, which is managed by GTK4
+        #[allow(clippy::missing_transmute_annotations)]
         let surface = unsafe { std::mem::transmute(instance.create_surface(window)?) };
 
         // Request adapter
@@ -349,22 +350,30 @@ impl Renderer {
             cache: None,
         });
 
-        Ok((device, queue, surface, surface_config, render_pipeline, ui_pipeline))
+        Ok((
+            device,
+            queue,
+            surface,
+            surface_config,
+            render_pipeline,
+            ui_pipeline,
+        ))
     }
 
     /// Resize the renderer for a new window size
     pub fn resize(&mut self, new_size: (u32, u32)) {
         self.window_size = new_size;
-        
-        if let (Some(surface), Some(device), Some(config)) = 
-            (&self.surface, &self.device, &self.surface_config) {
-            if new_size.0 > 0 && new_size.1 > 0 {
-                let mut new_config = config.clone();
-                new_config.width = new_size.0;
-                new_config.height = new_size.1;
-                surface.configure(device, &new_config);
-                self.surface_config = Some(new_config);
-            }
+
+        if let (Some(surface), Some(device), Some(config)) =
+            (&self.surface, &self.device, &self.surface_config)
+            && new_size.0 > 0
+            && new_size.1 > 0
+        {
+            let mut new_config = config.clone();
+            new_config.width = new_size.0;
+            new_config.height = new_size.1;
+            surface.configure(device, &new_config);
+            self.surface_config = Some(new_config);
         }
     }
 
@@ -406,7 +415,7 @@ impl Renderer {
     /// Render using WGPU
     fn render_wgpu(&mut self) -> Result<(), wgpu::SurfaceError> {
         use wgpu::util::DeviceExt;
-        
+
         let (surface, device, queue, pipeline) = match (
             &self.surface,
             &self.device,
@@ -418,11 +427,13 @@ impl Renderer {
         };
 
         let output = surface.get_current_texture()?;
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
 
         // Generate vertices from canvas strokes (one continuous buffer)
         let _vertices = self.generate_vertices();
-        
+
         // Create uniform buffer for canvas size
         let uniform_data = [self.window_size.0 as f32, self.window_size.1 as f32];
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -478,11 +489,12 @@ impl Renderer {
                     let vertices = self.generate_stroke_vertices(stroke);
                     let vertex_count = vertices.len() as u32;
                     if vertex_count > 0 {
-                        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("Stroke Vertex Buffer"),
-                            contents: bytemuck::cast_slice(&vertices),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
+                        let vertex_buffer =
+                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("Stroke Vertex Buffer"),
+                                contents: bytemuck::cast_slice(&vertices),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
                         render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                         render_pass.draw(0..vertex_count, 0..1);
                     }
@@ -496,11 +508,12 @@ impl Renderer {
                     let vertices = self.generate_active_stroke_vertices(active_stroke);
                     let vertex_count = vertices.len() as u32;
                     if vertex_count > 0 {
-                        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("Active Stroke Vertex Buffer"),
-                            contents: bytemuck::cast_slice(&vertices),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
+                        let vertex_buffer =
+                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("Active Stroke Vertex Buffer"),
+                                contents: bytemuck::cast_slice(&vertices),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
                         render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                         render_pass.draw(0..vertex_count, 0..1);
                     }
@@ -509,13 +522,15 @@ impl Renderer {
 
             // Draw UI elements (color palette)
             if let Some(ui_pipeline) = &self.ui_pipeline {
-                let palette_vertices = self.generate_palette_vertices(self.palette.selected_index());
+                let palette_vertices =
+                    self.generate_palette_vertices(self.palette.selected_index());
                 if !palette_vertices.is_empty() {
-                    let ui_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("UI Vertex Buffer"),
-                        contents: bytemuck::cast_slice(&palette_vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
+                    let ui_vertex_buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("UI Vertex Buffer"),
+                            contents: bytemuck::cast_slice(&palette_vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
                     render_pass.set_pipeline(ui_pipeline);
                     render_pass.set_vertex_buffer(0, ui_vertex_buffer.slice(..));
                     render_pass.draw(0..palette_vertices.len() as u32, 0..1);
@@ -524,11 +539,12 @@ impl Renderer {
                 // Draw brush size selector
                 let brush_size_vertices = self.generate_brush_size_vertices(self.brush_size);
                 if !brush_size_vertices.is_empty() {
-                    let brush_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Brush Size Vertex Buffer"),
-                        contents: bytemuck::cast_slice(&brush_size_vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
+                    let brush_vertex_buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("Brush Size Vertex Buffer"),
+                            contents: bytemuck::cast_slice(&brush_size_vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
                     render_pass.set_vertex_buffer(0, brush_vertex_buffer.slice(..));
                     render_pass.draw(0..brush_size_vertices.len() as u32, 0..1);
                 }
@@ -548,7 +564,10 @@ impl Renderer {
     }
 
     /// Generate vertices for an active stroke being drawn (as a smooth triangle strip)
-    fn generate_active_stroke_vertices(&self, active_stroke: &crate::canvas::ActiveStroke) -> Vec<[f32; 7]> {
+    fn generate_active_stroke_vertices(
+        &self,
+        active_stroke: &crate::canvas::ActiveStroke,
+    ) -> Vec<[f32; 7]> {
         let flat = geometry::generate_active_stroke_vertices(active_stroke);
         to_vertices_7(&flat, active_stroke.width())
     }
@@ -634,11 +653,14 @@ impl Renderer {
     }
 }
 
-
 /// Convert flat vertex data (6 floats/vertex) to WGPU format (7 floats/vertex with line_width)
 fn to_vertices_7(flat: &[f32], line_width: f32) -> Vec<[f32; 7]> {
     flat.chunks(6)
-        .map(|chunk| [chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], line_width])
+        .map(|chunk| {
+            [
+                chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], line_width,
+            ]
+        })
         .collect()
 }
 

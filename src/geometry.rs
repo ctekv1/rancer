@@ -101,6 +101,7 @@ pub fn generate_active_stroke_vertices(active: &ActiveStroke) -> Vec<f32> {
 /// Generate vertices for a filled rectangle (two triangles)
 ///
 /// Each vertex is [x, y, r, g, b, a].
+#[allow(clippy::too_many_arguments)]
 pub fn generate_rect(x: f32, y: f32, w: f32, h: f32, r: f32, g: f32, b: f32, a: f32) -> Vec<f32> {
     vec![
         x,

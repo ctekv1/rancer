@@ -189,7 +189,7 @@ impl GlRenderer {
         unsafe {
             let byte_data = std::slice::from_raw_parts(
                 vertices.as_ptr() as *const u8,
-                vertices.len() * std::mem::size_of::<f32>(),
+                std::mem::size_of_val(vertices),
             );
             self.gl
                 .buffer_data_u8_slice(glow::ARRAY_BUFFER, byte_data, glow::DYNAMIC_DRAW);

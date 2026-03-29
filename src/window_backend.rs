@@ -5,32 +5,32 @@
 //! to be used interchangeably.
 
 use crate::canvas::{Canvas, ColorPalette, Point};
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::rc::Rc;
 
 /// Trait defining the window backend interface
 pub trait WindowBackend {
     /// Initialize the window
     fn init(&mut self) -> Result<(), Box<dyn std::error::Error>>;
-    
+
     /// Run the main event loop
     fn run(&self);
-    
+
     /// Get the canvas reference
     fn canvas(&self) -> &Rc<RefCell<Canvas>>;
-    
+
     /// Get the palette reference
     fn palette(&self) -> &Rc<RefCell<ColorPalette>>;
-    
+
     /// Get current mouse position
     fn mouse_position(&self) -> Point;
-    
+
     /// Get current mouse state
     fn mouse_state(&self) -> MouseState;
-    
+
     /// Check if there's an active stroke
     fn has_active_stroke(&self) -> bool;
-    
+
     /// Get the number of points in active stroke
     fn active_stroke_point_count(&self) -> usize;
 }

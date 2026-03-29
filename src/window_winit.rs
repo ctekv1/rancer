@@ -4,18 +4,18 @@
 //! This module handles the window lifecycle, input events, and GPU-accelerated rendering
 //! using the canvas data model.
 
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::rc::Rc;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
 use crate::canvas::{ActiveStroke, Canvas, ColorPalette, Point};
-use crate::renderer::{Renderer, RendererConfig};
 use crate::logger;
 use crate::preferences::Preferences;
-use crate::window_backend::{WindowBackend, MouseState as BackendMouseState};
+use crate::renderer::{Renderer, RendererConfig};
+use crate::window_backend::{MouseState as BackendMouseState, WindowBackend};
 
 /// Represents the current state of mouse interaction
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -25,8 +25,6 @@ pub enum MouseState {
     /// Left mouse button is pressed and drawing
     Drawing,
 }
-
-
 
 /// Window application state using winit
 pub struct WindowApp {
@@ -54,7 +52,7 @@ impl WindowApp {
     /// Create a new window application
     pub fn new(preferences: Preferences) -> Self {
         logger::info("Creating winit window application...");
-        
+
         Self {
             window: None,
             renderer: None,
@@ -73,14 +71,17 @@ impl WindowApp {
         let canvas = self.canvas.borrow();
         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
         let filename = format!("rancer_export_{}.png", timestamp);
-        
+
         // Get user's Pictures directory or use current directory
         let export_path = dirs::picture_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join(filename);
-        
-        logger::info(&format!("Attempting to export canvas to: {:?}", export_path));
-        
+
+        logger::info(&format!(
+            "Attempting to export canvas to: {:?}",
+            export_path
+        ));
+
         match crate::export::export_to_png(&canvas, &export_path) {
             Ok(_) => {
                 logger::info(&format!("Export successful: {:?}", export_path));
@@ -96,30 +97,31 @@ impl ApplicationHandler for WindowApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none() {
             logger::info("=== WINDOW CREATION ===");
-            
+
             let attributes = Window::default_attributes()
                 .with_title(&self.preferences.window.title)
                 .with_inner_size(winit::dpi::LogicalSize::new(
                     self.preferences.window.width,
-                    self.preferences.window.height
+                    self.preferences.window.height,
                 ));
-            
+
             let window = event_loop.create_window(attributes).unwrap();
             let window = Rc::new(window);
-            
+
             logger::info("winit window created successfully");
-            logger::info(&format!("Window size: {}x{}", 
-                self.preferences.window.width, 
-                self.preferences.window.height));
+            logger::info(&format!(
+                "Window size: {}x{}",
+                self.preferences.window.width, self.preferences.window.height
+            ));
             logger::info(&format!("Window title: {}", self.preferences.window.title));
             logger::info("========================");
-            
+
             // Initialize WGPU renderer
             logger::info("=== RENDERER INITIALIZATION ===");
-            
+
             let size = window.inner_size();
             let config = RendererConfig::default();
-            
+
             // Use tokio runtime to initialize WGPU (async)
             let rt = tokio::runtime::Runtime::new().unwrap();
             match rt.block_on(Renderer::new(config, &*window, (size.width, size.height))) {
@@ -134,7 +136,7 @@ impl ApplicationHandler for WindowApp {
                 }
             }
             logger::info("===============================");
-            
+
             self.window = Some(window);
         }
     }
@@ -151,19 +153,22 @@ impl ApplicationHandler for WindowApp {
                 event_loop.exit();
             }
             WindowEvent::Resized(physical_size) => {
-                logger::info(&format!("Window resized to {}x{}", physical_size.width, physical_size.height));
-                
+                logger::info(&format!(
+                    "Window resized to {}x{}",
+                    physical_size.width, physical_size.height
+                ));
+
                 // Update preferences with new window size
                 self.preferences.window.width = physical_size.width;
                 self.preferences.window.height = physical_size.height;
                 self.preferences.canvas.width = physical_size.width;
                 self.preferences.canvas.height = physical_size.height;
-                
+
                 // Save preferences on change
                 if let Err(e) = crate::preferences::save(&self.preferences) {
                     logger::error(&format!("Failed to save preferences: {}", e));
                 }
-                
+
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize((physical_size.width, physical_size.height));
                 }
@@ -176,11 +181,11 @@ impl ApplicationHandler for WindowApp {
                 if let Some(renderer) = &mut self.renderer {
                     // Update canvas in renderer
                     renderer.set_canvas(self.canvas.borrow().clone());
-                    
+
                     // Update active stroke in renderer
                     let active_stroke = self.active_stroke.borrow().clone();
                     renderer.set_active_stroke(active_stroke);
-                    
+
                     match renderer.render() {
                         Ok(_) => {}
                         Err(wgpu::SurfaceError::Lost) => {
@@ -197,23 +202,30 @@ impl ApplicationHandler for WindowApp {
                     }
                 }
             }
-            WindowEvent::MouseInput { state: button_state, button, .. } => {
+            WindowEvent::MouseInput {
+                state: button_state,
+                button,
+                ..
+            } => {
                 if button == winit::event::MouseButton::Left {
                     match button_state {
                         winit::event::ElementState::Pressed => {
-                            println!("Mouse button pressed at ({}, {})", self.mouse_position.x, self.mouse_position.y);
-                            
+                            println!(
+                                "Mouse button pressed at ({}, {})",
+                                self.mouse_position.x, self.mouse_position.y
+                            );
+
                             // Check if click is on UI elements
                             let x = self.mouse_position.x;
                             let y = self.mouse_position.y;
-                            
+
                             // Check color palette click (top left, y=10 to y=30)
-                            if y >= 10.0 && y <= 30.0 {
+                            if (10.0..=30.0).contains(&y) {
                                 let palette_x = 10.0;
                                 let color_width = 20.0;
                                 let spacing = 5.0;
                                 let color_count = self.palette.borrow().color_count();
-                                
+
                                 for i in 0..color_count {
                                     let color_x = palette_x + (color_width + spacing) * i as f32;
                                     if x >= color_x && x <= color_x + color_width {
@@ -222,10 +234,15 @@ impl ApplicationHandler for WindowApp {
                                         } else {
                                             println!("Selected color at index {}", i);
                                             self.preferences.palette.selected_index = i;
-                                            
+
                                             // Save preferences on change
-                                            if let Err(e) = crate::preferences::save(&self.preferences) {
-                                                logger::error(&format!("Failed to save preferences: {}", e));
+                                            if let Err(e) =
+                                                crate::preferences::save(&self.preferences)
+                                            {
+                                                logger::error(&format!(
+                                                    "Failed to save preferences: {}",
+                                                    e
+                                                ));
                                             }
                                         }
                                         if let Some(window) = &self.window {
@@ -235,25 +252,29 @@ impl ApplicationHandler for WindowApp {
                                     }
                                 }
                             }
-                            
+
                             // Check brush size selector click (y=50 to y=80)
-                            if y >= 50.0 && y <= 80.0 {
+                            if (50.0..=80.0).contains(&y) {
                                 let selector_x = 10.0;
                                 let button_size = 30.0;
                                 let spacing = 10.0;
                                 let brush_sizes = [3.0, 5.0, 10.0, 25.0, 50.0];
-                                
+
                                 for (i, &size) in brush_sizes.iter().enumerate() {
                                     let button_x = selector_x + (button_size + spacing) * i as f32;
                                     if x >= button_x && x <= button_x + button_size {
                                         self.brush_size = size;
                                         self.preferences.brush.default_size = size;
-                                        
+
                                         // Save preferences on change
-                                        if let Err(e) = crate::preferences::save(&self.preferences) {
-                                            logger::error(&format!("Failed to save preferences: {}", e));
+                                        if let Err(e) = crate::preferences::save(&self.preferences)
+                                        {
+                                            logger::error(&format!(
+                                                "Failed to save preferences: {}",
+                                                e
+                                            ));
                                         }
-                                        
+
                                         // Update renderer with new brush size
                                         if let Some(renderer) = &mut self.renderer {
                                             renderer.set_brush_size(size);
@@ -266,10 +287,10 @@ impl ApplicationHandler for WindowApp {
                                     }
                                 }
                             }
-                            
+
                             // If not on UI, start drawing
                             self.mouse_state = MouseState::Drawing;
-                            
+
                             // Begin a new active stroke
                             let color = self.palette.borrow().current_color();
                             let mut canvas = self.canvas.borrow_mut();
@@ -278,23 +299,30 @@ impl ApplicationHandler for WindowApp {
                                 self.brush_size,
                                 1.0,
                             );
-                            println!("Created active stroke with color RGB({}, {}, {}) and width {}", 
-                                color.r, color.g, color.b, self.brush_size);
-                            
+                            println!(
+                                "Created active stroke with color RGB({}, {}, {}) and width {}",
+                                color.r, color.g, color.b, self.brush_size
+                            );
+
                             // Store the active stroke
                             *self.active_stroke.borrow_mut() = Some(active_stroke);
-                            
+
                             // Add the current mouse position as the first point
                             if let Some(active_stroke) = &mut *self.active_stroke.borrow_mut() {
                                 active_stroke.add_point(self.mouse_position);
-                                println!("Added first point to active stroke: ({}, {})", 
-                                    self.mouse_position.x, self.mouse_position.y);
-                                println!("Active stroke now has {} points", active_stroke.points().len());
+                                println!(
+                                    "Added first point to active stroke: ({}, {})",
+                                    self.mouse_position.x, self.mouse_position.y
+                                );
+                                println!(
+                                    "Active stroke now has {} points",
+                                    active_stroke.points().len()
+                                );
                             }
                         }
                         winit::event::ElementState::Released => {
                             self.mouse_state = MouseState::Idle;
-                            
+
                             if let Some(active_stroke) = self.active_stroke.borrow_mut().take() {
                                 let mut canvas = self.canvas.borrow_mut();
                                 if let Err(e) = canvas.commit_stroke(active_stroke) {
@@ -316,29 +344,34 @@ impl ApplicationHandler for WindowApp {
                     y: position.y as f32,
                 };
                 self.mouse_position = point;
-                
+
                 // If we're drawing, add the point to the active stroke
-                if self.mouse_state == MouseState::Drawing {
-                    if let Some(active_stroke) = &mut *self.active_stroke.borrow_mut() {
-                        active_stroke.add_point(point);
-                        println!("Added point to active stroke: ({}, {})", point.x, point.y);
-                        println!("Active stroke now has {} points", active_stroke.points().len());
-                        if let Some(window) = &self.window {
-                            window.request_redraw();
-                        }
+                if self.mouse_state == MouseState::Drawing
+                    && let Some(active_stroke) = &mut *self.active_stroke.borrow_mut()
+                {
+                    active_stroke.add_point(point);
+                    println!("Added point to active stroke: ({}, {})", point.x, point.y);
+                    println!(
+                        "Active stroke now has {} points",
+                        active_stroke.points().len()
+                    );
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
                     }
                 }
             }
-            WindowEvent::KeyboardInput { event: key_event, .. } => {
+            WindowEvent::KeyboardInput {
+                event: key_event, ..
+            } => {
                 if key_event.state == winit::event::ElementState::Pressed {
                     // Check for 's' key (save/export)
                     // Note: Ctrl modifier detection may need additional handling
-                    if let winit::keyboard::Key::Character(ref c) = key_event.logical_key {
-                        if c == "s" {
-                            self.export_canvas_to_file();
-                        }
+                    if let winit::keyboard::Key::Character(ref c) = key_event.logical_key
+                        && c == "s"
+                    {
+                        self.export_canvas_to_file();
                     }
-                    
+
                     match key_event.logical_key.as_ref() {
                         winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowUp) => {
                             let mut palette = self.palette.borrow_mut();
@@ -409,19 +442,22 @@ impl WindowBackend for WindowApp {
     }
 
     fn active_stroke_point_count(&self) -> usize {
-        self.active_stroke.borrow().as_ref().map_or(0, |stroke| stroke.points().len())
+        self.active_stroke
+            .borrow()
+            .as_ref()
+            .map_or(0, |stroke| stroke.points().len())
     }
 }
 
 /// Run the winit event loop with the window application
 pub fn run_window_app(preferences: Preferences) {
     logger::info("Starting winit event loop...");
-    
+
     let event_loop = EventLoop::new().unwrap();
     let mut app = WindowApp::new(preferences);
-    
+
     event_loop.run_app(&mut app).unwrap();
-    
+
     logger::info("Rancer application closed successfully");
 }
 
@@ -442,7 +478,7 @@ mod tests {
     fn test_mouse_state_transitions() {
         let mut mouse_state = MouseState::Idle;
         assert_eq!(mouse_state, MouseState::Idle);
-        
+
         mouse_state = MouseState::Drawing;
         assert_eq!(mouse_state, MouseState::Drawing);
     }

@@ -4,13 +4,13 @@
 //! Features GPU-accelerated rendering, stroke management, and user preferences.
 
 pub mod canvas;
-pub mod window_winit;
-pub mod window_backend;
-pub mod renderer;
-pub mod logger;
-pub mod preferences;
 pub mod export;
 pub mod geometry;
+pub mod logger;
+pub mod preferences;
+pub mod renderer;
+pub mod window_backend;
+pub mod window_winit;
 
 #[cfg(target_os = "linux")]
 pub mod window_gtk4;
@@ -63,7 +63,7 @@ impl RancerApp {
     }
 
     /// Initialize the application
-    /// 
+    ///
     /// Note: Window system, GPU context, and preferences are initialized
     /// in the platform-specific window backends (winit/GTK4).
     pub fn init(&mut self) {
@@ -71,7 +71,7 @@ impl RancerApp {
     }
 
     /// Main application loop
-    /// 
+    ///
     /// Note: The main event loop, window event handling, canvas rendering,
     /// and input processing are handled by the platform-specific window backends.
     pub fn run(&mut self) {
@@ -87,7 +87,7 @@ mod tests {
     fn test_app_creation() {
         let config = AppConfig::default();
         let app = RancerApp::new(config);
-        
+
         assert_eq!(app.config.window_width, 1280);
         assert_eq!(app.config.window_height, 720);
         assert_eq!(app.config.target_fps, 60);

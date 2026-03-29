@@ -31,6 +31,7 @@ pub enum MouseState {
 const BRUSH_SIZES: [f32; 5] = [3.0, 5.0, 10.0, 25.0, 50.0];
 
 /// Window application state using GTK4
+#[allow(dead_code)]
 pub struct WindowApp {
     /// The GTK4 application
     app: Application,
@@ -259,7 +260,7 @@ fn setup_mouse_events(
         *mouse_state_clone.borrow_mut() = MouseState::Drawing;
 
         // Check if click is on UI elements
-        if y >= 10.0 && y <= 30.0 {
+        if (10.0..=30.0).contains(&y) {
             // Color palette area
             let palette_x = 10.0;
             let color_width = 20.0;
@@ -275,15 +276,15 @@ fn setup_mouse_events(
                     } else {
                         println!("Selected color at index {i}");
                     }
-                    if let Some(widget) = gesture.widget() {
-                        if let Some(gl_area) = widget.downcast_ref::<GLArea>() {
-                            gl_area.queue_render();
-                        }
+                    if let Some(widget) = gesture.widget()
+                        && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                    {
+                        gl_area.queue_render();
                     }
                     return;
                 }
             }
-        } else if y >= 50.0 && y <= 80.0 {
+        } else if (50.0..=80.0).contains(&y) {
             // Brush size selector area
             let selector_x = 10.0;
             let button_size = 30.0;
@@ -295,10 +296,10 @@ fn setup_mouse_events(
                 if x >= button_x && x <= button_x + button_size_f64 {
                     *brush_size_clone.borrow_mut() = size;
                     println!("Selected brush size: {size}");
-                    if let Some(widget) = gesture.widget() {
-                        if let Some(gl_area) = widget.downcast_ref::<GLArea>() {
-                            gl_area.queue_render();
-                        }
+                    if let Some(widget) = gesture.widget()
+                        && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                    {
+                        gl_area.queue_render();
                     }
                     return;
                 }
@@ -370,18 +371,18 @@ fn setup_mouse_events(
         };
         *mouse_position_clone3.borrow_mut() = point;
 
-        if *mouse_state_clone4.borrow() == MouseState::Drawing {
-            if let Some(active_stroke) = &mut *active_stroke_clone3.borrow_mut() {
-                active_stroke.add_point(point);
-                println!(
-                    "Active stroke now has {} points",
-                    active_stroke.points().len()
-                );
-                if let Some(widget) = controller.widget() {
-                    if let Some(gl_area) = widget.downcast_ref::<GLArea>() {
-                        gl_area.queue_render();
-                    }
-                }
+        if *mouse_state_clone4.borrow() == MouseState::Drawing
+            && let Some(active_stroke) = &mut *active_stroke_clone3.borrow_mut()
+        {
+            active_stroke.add_point(point);
+            println!(
+                "Active stroke now has {} points",
+                active_stroke.points().len()
+            );
+            if let Some(widget) = controller.widget()
+                && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+            {
+                gl_area.queue_render();
             }
         }
     });
