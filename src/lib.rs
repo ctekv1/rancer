@@ -14,6 +14,12 @@ pub mod export;
 #[cfg(target_os = "linux")]
 pub mod window_gtk4;
 
+#[cfg(target_os = "linux")]
+pub mod opengl_renderer;
+
+#[cfg(target_os = "linux")]
+pub mod gl_loader;
+
 /// Core application state and configuration
 pub struct RancerApp {
     /// Application configuration
