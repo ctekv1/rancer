@@ -8,7 +8,9 @@
 
 use gtk4::glib;
 use gtk4::prelude::*;
-use gtk4::{Application, ApplicationWindow, EventControllerMotion, GLArea, GestureClick};
+use gtk4::{
+    Application, ApplicationWindow, EventControllerKey, EventControllerMotion, GLArea, GestureClick,
+};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -62,11 +64,14 @@ impl WindowApp {
             .application_id("com.example.rancer")
             .build();
 
+        let mut palette = ColorPalette::new();
+        let _ = palette.select_color(preferences.palette.selected_index);
+
         Self {
             app,
             window: None,
             canvas: Rc::new(RefCell::new(Canvas::new())),
-            palette: Rc::new(RefCell::new(ColorPalette::new())),
+            palette: Rc::new(RefCell::new(palette)),
             active_stroke: Rc::new(RefCell::new(None)),
             mouse_state: MouseState::Idle,
             mouse_position: Point { x: 0.0, y: 0.0 },
@@ -86,25 +91,34 @@ impl WindowBackend for WindowApp {
         let mouse_state = self.mouse_state;
         let mouse_position = self.mouse_position;
         let brush_size = self.brush_size;
+        let preferences = Rc::new(RefCell::new(self.preferences.clone()));
 
         self.app.connect_activate(move |app| {
-            // Create the window
+            let prefs = preferences.borrow();
+
+            // Create the window using preferences
             let window = ApplicationWindow::builder()
                 .application(app)
-                .title("Rancer")
-                .default_width(1280)
-                .default_height(720)
+                .title(&prefs.window.title)
+                .default_width(prefs.window.width as i32)
+                .default_height(prefs.window.height as i32)
                 .build();
+
+            logger::info(&format!(
+                "Window size: {}x{}",
+                prefs.window.width, prefs.window.height
+            ));
+            logger::info(&format!("Window title: {}", prefs.window.title));
+            logger::info("========================");
+
+            // Drop borrow before moving preferences into closures
+            drop(prefs);
 
             // Create GLArea for OpenGL rendering
             let gl_area = GLArea::builder().hexpand(true).vexpand(true).build();
+            gl_area.set_focusable(true);
 
             window.set_child(Some(&gl_area));
-
-            logger::info("GTK4 window created successfully");
-            logger::info("Window size: 1280x720");
-            logger::info("Window title: Rancer");
-            logger::info("========================");
 
             // Shared state
             let brush_size_shared = Rc::new(RefCell::new(brush_size));
@@ -119,14 +133,78 @@ impl WindowBackend for WindowApp {
                 mouse_state,
                 mouse_position,
                 brush_size_shared.clone(),
+                preferences.clone(),
             );
+
+            // Set up keyboard handler
+            let key_controller = EventControllerKey::new();
+            let canvas_kb = canvas.clone();
+            let palette_kb = palette.clone();
+            let prefs_kb = preferences.clone();
+            let gl_area_kb = gl_area.clone();
+
+            key_controller.connect_key_pressed(move |_controller, key, _keycode, _state| {
+                match key {
+                    gtk4::gdk::Key::s | gtk4::gdk::Key::S => {
+                        // Export canvas to PNG
+                        let canvas_ref = canvas_kb.borrow();
+                        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+                        let filename = format!("rancer_export_{timestamp}.png");
+                        let export_path = dirs::picture_dir()
+                            .unwrap_or_else(|| std::path::PathBuf::from("."))
+                            .join(filename);
+
+                        logger::info(&format!("Exporting canvas to: {export_path:?}"));
+
+                        match crate::export::export_to_png(&canvas_ref, &export_path) {
+                            Ok(_) => {
+                                logger::info(&format!("Export successful: {export_path:?}"));
+                                println!("Exported to: {export_path:?}");
+                            }
+                            Err(e) => {
+                                logger::error(&format!("Export failed: {e}"));
+                                eprintln!("Export failed: {e}");
+                            }
+                        }
+                        glib::Propagation::Stop
+                    }
+                    gtk4::gdk::Key::Up => {
+                        // Navigate color palette
+                        let mut palette = palette_kb.borrow_mut();
+                        let current = palette.selected_index();
+                        let new_index = (current + 1) % palette.color_count();
+                        let _ = palette.select_color(new_index);
+                        let mut prefs = prefs_kb.borrow_mut();
+                        prefs.palette.selected_index = new_index;
+                        let _ = crate::preferences::save(&prefs);
+                        gl_area_kb.queue_render();
+                        glib::Propagation::Stop
+                    }
+                    gtk4::gdk::Key::Down => {
+                        // Navigate color palette
+                        let mut palette = palette_kb.borrow_mut();
+                        let current = palette.selected_index();
+                        let count = palette.color_count();
+                        let new_index = if current == 0 { count - 1 } else { current - 1 };
+                        let _ = palette.select_color(new_index);
+                        let mut prefs = prefs_kb.borrow_mut();
+                        prefs.palette.selected_index = new_index;
+                        let _ = crate::preferences::save(&prefs);
+                        gl_area_kb.queue_render();
+                        glib::Propagation::Stop
+                    }
+                    _ => glib::Propagation::Proceed,
+                }
+            });
+
+            gl_area.add_controller(key_controller);
 
             // Set up OpenGL render callback
             let gl_renderer_clone = gl_renderer.clone();
             let canvas_clone = canvas.clone();
             let palette_clone = palette.clone();
             let active_stroke_clone = active_stroke.clone();
-            let brush_size_clone = brush_size_shared;
+            let brush_for_render = brush_size_shared.clone();
 
             gl_area.connect_render(move |gl_area, _context| {
                 // Ensure GL context is current before any GL operations
@@ -166,7 +244,7 @@ impl WindowBackend for WindowApp {
                     let canvas = canvas_clone.borrow();
                     let palette = palette_clone.borrow();
                     let active_stroke = active_stroke_clone.borrow();
-                    let current_brush_size = *brush_size_clone.borrow();
+                    let current_brush_size = *brush_for_render.borrow();
                     let width = gl_area.width();
                     let height = gl_area.height();
 
@@ -183,7 +261,24 @@ impl WindowBackend for WindowApp {
                 glib::Propagation::Proceed
             });
 
+            // Save preferences on window close
+            let prefs_close = preferences.clone();
+            let palette_close = palette.clone();
+            let brush_close = brush_size_shared.clone();
+            window.connect_close_request(move |_window| {
+                let mut prefs = prefs_close.borrow_mut();
+                prefs.palette.selected_index = palette_close.borrow().selected_index();
+                prefs.brush.default_size = *brush_close.borrow();
+
+                if let Err(e) = crate::preferences::save(&prefs) {
+                    logger::error(&format!("Failed to save preferences on close: {e}"));
+                }
+
+                glib::Propagation::Proceed
+            });
+
             window.present();
+            gl_area.grab_focus();
         });
 
         Ok(())
@@ -227,6 +322,7 @@ impl WindowBackend for WindowApp {
 }
 
 /// Set up mouse event handlers for the GLArea
+#[allow(clippy::too_many_arguments)]
 fn setup_mouse_events(
     gl_area: &GLArea,
     canvas: &Rc<RefCell<Canvas>>,
@@ -235,6 +331,7 @@ fn setup_mouse_events(
     mouse_state: MouseState,
     mouse_position: Point,
     brush_size: Rc<RefCell<f32>>,
+    preferences: Rc<RefCell<crate::preferences::Preferences>>,
 ) {
     // Mouse click handler
     let click_gesture = GestureClick::new();
@@ -246,6 +343,7 @@ fn setup_mouse_events(
     let mouse_state_clone = Rc::new(RefCell::new(mouse_state));
     let mouse_position_clone = Rc::new(RefCell::new(mouse_position));
     let brush_size_clone = brush_size.clone();
+    let prefs_clone = preferences.clone();
 
     // Clone Rc's for use in other closures
     let mouse_state_clone2 = mouse_state_clone.clone();
@@ -275,6 +373,12 @@ fn setup_mouse_events(
                         eprintln!("Failed to select color: {e}");
                     } else {
                         println!("Selected color at index {i}");
+                        // Save palette selection
+                        let mut prefs = prefs_clone.borrow_mut();
+                        prefs.palette.selected_index = i;
+                        if let Err(e) = crate::preferences::save(&prefs) {
+                            eprintln!("Failed to save preferences: {e}");
+                        }
                     }
                     if let Some(widget) = gesture.widget()
                         && let Some(gl_area) = widget.downcast_ref::<GLArea>()
@@ -296,6 +400,12 @@ fn setup_mouse_events(
                 if x >= button_x && x <= button_x + button_size_f64 {
                     *brush_size_clone.borrow_mut() = size;
                     println!("Selected brush size: {size}");
+                    // Save brush size
+                    let mut prefs = prefs_clone.borrow_mut();
+                    prefs.brush.default_size = size;
+                    if let Err(e) = crate::preferences::save(&prefs) {
+                        eprintln!("Failed to save preferences: {e}");
+                    }
                     if let Some(widget) = gesture.widget()
                         && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                     {

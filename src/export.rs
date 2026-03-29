@@ -3,7 +3,7 @@
 //! Provides canvas export functionality to PNG format.
 //! Uses software rendering to convert strokes to image pixels.
 
-use crate::canvas::{Canvas, Point, Stroke};
+use crate::canvas::{Canvas, Stroke};
 use crate::geometry;
 use crate::logger;
 use image::{ImageBuffer, Rgba};
@@ -46,10 +46,15 @@ fn render_stroke_to_image(
     image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
     stroke: &Stroke,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if stroke.points.len() < 2 {
+    let vertices = geometry::generate_stroke_vertices(stroke);
+
+    if vertices.len() < 18 {
+        // Need at least 3 vertices * 6 floats = 18 floats for one triangle
         return Ok(());
     }
 
+    // Each vertex is [x, y, r, g, b, a] = 6 floats
+    // Walk the triangle strip: triangles are (0,1,2), (1,2,3), (2,3,4), ...
     let color = Rgba([
         stroke.color.r,
         stroke.color.g,
@@ -57,51 +62,20 @@ fn render_stroke_to_image(
         (stroke.opacity * 255.0) as u8,
     ]);
 
-    let half_width = stroke.width / 2.0;
+    for i in (0..vertices.len() - 12).step_by(12) {
+        let v0 = [vertices[i], vertices[i + 1]];
+        let v1 = [vertices[i + 6], vertices[i + 7]];
+        let v2 = [vertices[i + 12], vertices[i + 13]];
 
-    // Render each segment of the stroke
-    for i in 0..stroke.points.len() - 1 {
-        let p1 = &stroke.points[i];
-        let p2 = &stroke.points[i + 1];
+        render_triangle(image, &v0, &v1, &v2, color);
 
-        // Draw line segment with thickness
-        render_line_segment(image, p1, p2, color, half_width);
+        if i + 18 <= vertices.len() {
+            let v3 = [vertices[i + 18], vertices[i + 19]];
+            render_triangle(image, &v1, &v2, &v3, color);
+        }
     }
 
     Ok(())
-}
-
-/// Render a line segment with thickness to image buffer
-fn render_line_segment(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    p1: &Point,
-    p2: &Point,
-    color: Rgba<u8>,
-    half_width: f32,
-) {
-    let dx = p2.x - p1.x;
-    let dy = p2.y - p1.y;
-    let length = (dx * dx + dy * dy).sqrt();
-
-    if length < 0.001 {
-        return;
-    }
-
-    // Calculate perpendicular vector
-    let nx = -dy / length * half_width;
-    let ny = dx / length * half_width;
-
-    // Generate quad vertices (two triangles)
-    let vertices = [
-        [p1.x + nx, p1.y + ny],
-        [p1.x - nx, p1.y - ny],
-        [p2.x + nx, p2.y + ny],
-        [p2.x - nx, p2.y - ny],
-    ];
-
-    // Render quad as filled triangles
-    render_triangle(image, &vertices[0], &vertices[1], &vertices[2], color);
-    render_triangle(image, &vertices[1], &vertices[2], &vertices[3], color);
 }
 
 /// Render a filled triangle to image buffer
