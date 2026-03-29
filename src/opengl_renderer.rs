@@ -6,7 +6,8 @@
 use glow::HasContext;
 use std::rc::Rc;
 
-use crate::canvas::{ActiveStroke, Canvas, ColorPalette, Stroke};
+use crate::canvas::{ActiveStroke, Canvas, ColorPalette};
+use crate::geometry;
 
 const VERTEX_SHADER_SOURCE: &str = r#"
     attribute vec2 position;
@@ -198,312 +199,23 @@ impl GlRenderer {
     }
 
     /// Generate vertex data for a committed stroke as a triangle strip
-    fn generate_stroke_vertices(stroke: &Stroke) -> Vec<f32> {
-        let mut vertices = Vec::new();
-        let r = stroke.color.r as f32 / 255.0;
-        let g = stroke.color.g as f32 / 255.0;
-        let b = stroke.color.b as f32 / 255.0;
-        let a = stroke.opacity;
-        let half_width = stroke.width / 2.0;
-
-        if stroke.points.len() < 2 {
-            return vertices;
-        }
-
-        for i in 0..stroke.points.len() {
-            let p = &stroke.points[i];
-
-            let (dx, dy) = if i == 0 {
-                let next = &stroke.points[i + 1];
-                (next.x - p.x, next.y - p.y)
-            } else if i == stroke.points.len() - 1 {
-                let prev = &stroke.points[i - 1];
-                (p.x - prev.x, p.y - prev.y)
-            } else {
-                let prev = &stroke.points[i - 1];
-                let next = &stroke.points[i + 1];
-                (next.x - prev.x, next.y - prev.y)
-            };
-
-            let len = (dx * dx + dy * dy).sqrt();
-            if len < 0.001 {
-                continue;
-            }
-
-            let nx = -dy / len * half_width;
-            let ny = dx / len * half_width;
-
-            // Two vertices per point (left and right of path)
-            // Each vertex: [x, y, r, g, b, a] (6 floats — line_width not needed for GL)
-            vertices.extend_from_slice(&[p.x + nx, p.y + ny, r, g, b, a]);
-            vertices.extend_from_slice(&[p.x - nx, p.y - ny, r, g, b, a]);
-        }
-
-        vertices
+    fn generate_stroke_vertices(stroke: &crate::canvas::Stroke) -> Vec<f32> {
+        geometry::generate_stroke_vertices(stroke)
     }
 
     /// Generate vertex data for an active stroke being drawn
     fn generate_active_stroke_vertices(active: &ActiveStroke) -> Vec<f32> {
-        let mut vertices = Vec::new();
-        let r = active.color().r as f32 / 255.0;
-        let g = active.color().g as f32 / 255.0;
-        let b = active.color().b as f32 / 255.0;
-        let a = active.opacity();
-        let half_width = active.width() / 2.0;
-        let points = active.points();
-
-        if points.len() < 2 {
-            return vertices;
-        }
-
-        for i in 0..points.len() {
-            let p = &points[i];
-
-            let (dx, dy) = if i == 0 {
-                let next = &points[i + 1];
-                (next.x - p.x, next.y - p.y)
-            } else if i == points.len() - 1 {
-                let prev = &points[i - 1];
-                (p.x - prev.x, p.y - prev.y)
-            } else {
-                let prev = &points[i - 1];
-                let next = &points[i + 1];
-                (next.x - prev.x, next.y - prev.y)
-            };
-
-            let len = (dx * dx + dy * dy).sqrt();
-            if len < 0.001 {
-                continue;
-            }
-
-            let nx = -dy / len * half_width;
-            let ny = dx / len * half_width;
-
-            vertices.extend_from_slice(&[p.x + nx, p.y + ny, r, g, b, a]);
-            vertices.extend_from_slice(&[p.x - nx, p.y - ny, r, g, b, a]);
-        }
-
-        vertices
-    }
-
-    /// Generate vertices for a filled rectangle
-    fn generate_rect(x: f32, y: f32, w: f32, h: f32, r: f32, g: f32, b: f32, a: f32) -> Vec<f32> {
-        vec![
-            // Triangle 1
-            x,
-            y,
-            r,
-            g,
-            b,
-            a,
-            x + w,
-            y,
-            r,
-            g,
-            b,
-            a,
-            x,
-            y + h,
-            r,
-            g,
-            b,
-            a,
-            // Triangle 2
-            x + w,
-            y,
-            r,
-            g,
-            b,
-            a,
-            x + w,
-            y + h,
-            r,
-            g,
-            b,
-            a,
-            x,
-            y + h,
-            r,
-            g,
-            b,
-            a,
-        ]
+        geometry::generate_active_stroke_vertices(active)
     }
 
     /// Generate vertices for the color palette UI
     fn generate_palette_vertices(palette: &ColorPalette) -> Vec<f32> {
-        let mut vertices = Vec::new();
-        let colors = palette.colors();
-
-        let palette_x = 10.0;
-        let palette_y = 10.0;
-        let color_width = 20.0;
-        let color_height = 20.0;
-        let spacing = 5.0;
-        let border_width = 2.0;
-
-        for (i, color) in colors.iter().enumerate() {
-            let x = palette_x + (color_width + spacing) * i as f32;
-            let cr = color.r as f32 / 255.0;
-            let cg = color.g as f32 / 255.0;
-            let cb = color.b as f32 / 255.0;
-
-            // Border for selected color
-            if i == palette.selected_index() {
-                // Top
-                vertices.extend(Self::generate_rect(
-                    x - border_width,
-                    palette_y - border_width,
-                    color_width + border_width * 2.0,
-                    border_width,
-                    0.0,
-                    0.0,
-                    0.0,
-                    1.0,
-                ));
-                // Bottom
-                vertices.extend(Self::generate_rect(
-                    x - border_width,
-                    palette_y + color_height,
-                    color_width + border_width * 2.0,
-                    border_width,
-                    0.0,
-                    0.0,
-                    0.0,
-                    1.0,
-                ));
-                // Left
-                vertices.extend(Self::generate_rect(
-                    x - border_width,
-                    palette_y - border_width,
-                    border_width,
-                    color_height + border_width * 2.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    1.0,
-                ));
-                // Right
-                vertices.extend(Self::generate_rect(
-                    x + color_width,
-                    palette_y - border_width,
-                    border_width,
-                    color_height + border_width * 2.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    1.0,
-                ));
-            }
-
-            // Color swatch
-            vertices.extend(Self::generate_rect(
-                x,
-                palette_y,
-                color_width,
-                color_height,
-                cr,
-                cg,
-                cb,
-                1.0,
-            ));
-        }
-
-        vertices
+        geometry::generate_palette_vertices(palette, palette.selected_index())
     }
 
     /// Generate vertices for brush size selector UI
     fn generate_brush_size_vertices(selected_size: f32) -> Vec<f32> {
-        let mut vertices = Vec::new();
-        let brush_sizes: [f32; 5] = [3.0, 5.0, 10.0, 25.0, 50.0];
-
-        let selector_x = 10.0;
-        let selector_y = 50.0;
-        let button_size = 30.0;
-        let spacing = 10.0;
-
-        for (i, &size) in brush_sizes.iter().enumerate() {
-            let x = selector_x + (button_size + spacing) * i as f32;
-
-            // Button background (gray)
-            vertices.extend(Self::generate_rect(
-                x,
-                selector_y,
-                button_size,
-                button_size,
-                0.8,
-                0.8,
-                0.8,
-                1.0,
-            ));
-
-            // Brush size indicator (black square centered)
-            let indicator_size = size.min(button_size - 4.0);
-            let ix = x + (button_size - indicator_size) / 2.0;
-            let iy = selector_y + (button_size - indicator_size) / 2.0;
-
-            vertices.extend(Self::generate_rect(
-                ix,
-                iy,
-                indicator_size,
-                indicator_size,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-            ));
-
-            // Border for selected size
-            if (size - selected_size).abs() < 0.1 {
-                let bw = 2.0;
-                // Top
-                vertices.extend(Self::generate_rect(
-                    x - bw,
-                    selector_y - bw,
-                    button_size + bw * 2.0,
-                    bw,
-                    0.0,
-                    0.0,
-                    1.0,
-                    1.0,
-                ));
-                // Bottom
-                vertices.extend(Self::generate_rect(
-                    x - bw,
-                    selector_y + button_size,
-                    button_size + bw * 2.0,
-                    bw,
-                    0.0,
-                    0.0,
-                    1.0,
-                    1.0,
-                ));
-                // Left
-                vertices.extend(Self::generate_rect(
-                    x - bw,
-                    selector_y - bw,
-                    bw,
-                    button_size + bw * 2.0,
-                    0.0,
-                    0.0,
-                    1.0,
-                    1.0,
-                ));
-                // Right
-                vertices.extend(Self::generate_rect(
-                    x + button_size,
-                    selector_y - bw,
-                    bw,
-                    button_size + bw * 2.0,
-                    0.0,
-                    0.0,
-                    1.0,
-                    1.0,
-                ));
-            }
-        }
-
-        vertices
+        geometry::generate_brush_size_vertices(selected_size)
     }
 }
 

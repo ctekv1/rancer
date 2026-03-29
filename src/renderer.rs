@@ -5,19 +5,12 @@
 //! Falls back to cairo rendering if WGPU is not available.
 
 use crate::canvas::{Canvas, Color};
+use crate::geometry;
 use crate::logger;
 
 /// Parse hex color string to Color
 pub fn hex_to_color(hex: &str) -> Color {
-    let hex = hex.trim_start_matches('#');
-    if hex.len() == 6 {
-        let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(255);
-        let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(255);
-        let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(255);
-        Color { r, g, b, a: 255 }
-    } else {
-        Color::WHITE
-    }
+    geometry::hex_to_color(hex)
 }
 
 /// Configuration for the renderer
@@ -550,113 +543,14 @@ impl Renderer {
 
     /// Generate vertices for a single stroke (as a smooth triangle strip)
     fn generate_stroke_vertices(&self, stroke: &crate::canvas::Stroke) -> Vec<[f32; 7]> {
-        let mut vertices = Vec::new();
-        let color = [
-            stroke.color.r as f32 / 255.0,
-            stroke.color.g as f32 / 255.0,
-            stroke.color.b as f32 / 255.0,
-            stroke.opacity,
-        ];
-        let half_width = stroke.width / 2.0;
-
-        if stroke.points.len() < 2 {
-            return vertices;
-        }
-
-        // Generate smooth stroke using triangle strip
-        // For each point, we generate two vertices (left and right of the path)
-        for i in 0..stroke.points.len() {
-            let p = &stroke.points[i];
-            
-            // Calculate direction vector (tangent)
-            let (dx, dy) = if i == 0 {
-                // First point: use direction to next point
-                let next = &stroke.points[i + 1];
-                (next.x - p.x, next.y - p.y)
-            } else if i == stroke.points.len() - 1 {
-                // Last point: use direction from previous point
-                let prev = &stroke.points[i - 1];
-                (p.x - prev.x, p.y - prev.y)
-            } else {
-                // Middle point: use average direction
-                let prev = &stroke.points[i - 1];
-                let next = &stroke.points[i + 1];
-                (next.x - prev.x, next.y - prev.y)
-            };
-            
-            let len = (dx * dx + dy * dy).sqrt();
-            
-            if len < 0.001 {
-                // If direction is zero, skip this point
-                continue;
-            }
-            
-            // Calculate perpendicular vector (normalized)
-            let nx = -dy / len * half_width;
-            let ny = dx / len * half_width;
-            
-            // Generate two vertices for this point (left and right)
-            vertices.push([p.x + nx, p.y + ny, color[0], color[1], color[2], color[3], stroke.width]);
-            vertices.push([p.x - nx, p.y - ny, color[0], color[1], color[2], color[3], stroke.width]);
-        }
-
-        vertices
+        let flat = geometry::generate_stroke_vertices(stroke);
+        to_vertices_7(&flat, stroke.width)
     }
 
     /// Generate vertices for an active stroke being drawn (as a smooth triangle strip)
     fn generate_active_stroke_vertices(&self, active_stroke: &crate::canvas::ActiveStroke) -> Vec<[f32; 7]> {
-        let mut vertices = Vec::new();
-        let color = [
-            active_stroke.color().r as f32 / 255.0,
-            active_stroke.color().g as f32 / 255.0,
-            active_stroke.color().b as f32 / 255.0,
-            active_stroke.opacity(),
-        ];
-        let half_width = active_stroke.width() / 2.0;
-        let points = active_stroke.points();
-
-        if points.len() < 2 {
-            return vertices;
-        }
-
-        // Generate smooth stroke using triangle strip
-        // For each point, we generate two vertices (left and right of the path)
-        for i in 0..points.len() {
-            let p = &points[i];
-            
-            // Calculate direction vector (tangent)
-            let (dx, dy) = if i == 0 {
-                // First point: use direction to next point
-                let next = &points[i + 1];
-                (next.x - p.x, next.y - p.y)
-            } else if i == points.len() - 1 {
-                // Last point: use direction from previous point
-                let prev = &points[i - 1];
-                (p.x - prev.x, p.y - prev.y)
-            } else {
-                // Middle point: use average direction
-                let prev = &points[i - 1];
-                let next = &points[i + 1];
-                (next.x - prev.x, next.y - prev.y)
-            };
-            
-            let len = (dx * dx + dy * dy).sqrt();
-            
-            if len < 0.001 {
-                // If direction is zero, skip this point
-                continue;
-            }
-            
-            // Calculate perpendicular vector (normalized)
-            let nx = -dy / len * half_width;
-            let ny = dx / len * half_width;
-            
-            // Generate two vertices for this point (left and right)
-            vertices.push([p.x + nx, p.y + ny, color[0], color[1], color[2], color[3], active_stroke.width()]);
-            vertices.push([p.x - nx, p.y - ny, color[0], color[1], color[2], color[3], active_stroke.width()]);
-        }
-
-        vertices
+        let flat = geometry::generate_active_stroke_vertices(active_stroke);
+        to_vertices_7(&flat, active_stroke.width())
     }
 
     /// Generate vertices from canvas strokes for WGPU rendering
@@ -684,188 +578,16 @@ impl Renderer {
         vertices
     }
 
-    /// Generate vertices for a rectangle (two triangles)
-    fn generate_rectangle_vertices(
-        &self,
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
-        color: [f32; 4],
-    ) -> Vec<[f32; 7]> {
-        let r = color[0];
-        let g = color[1];
-        let b = color[2];
-        let a = color[3];
-
-        vec![
-            // First triangle
-            [x, y, r, g, b, a, 0.0],
-            [x + width, y, r, g, b, a, 0.0],
-            [x, y + height, r, g, b, a, 0.0],
-            // Second triangle
-            [x + width, y, r, g, b, a, 0.0],
-            [x + width, y + height, r, g, b, a, 0.0],
-            [x, y + height, r, g, b, a, 0.0],
-        ]
-    }
-
     /// Generate vertices for the color palette UI
     fn generate_palette_vertices(&self, selected_index: usize) -> Vec<[f32; 7]> {
-        let mut vertices = Vec::new();
-        let colors = self.palette.colors();
-        
-        let palette_x = 10.0;
-        let palette_y = 10.0;
-        let color_width = 20.0;
-        let color_height = 20.0;
-        let spacing = 5.0;
-        let border_width = 2.0;
-
-        for (i, color) in colors.iter().enumerate() {
-            let x = palette_x + (color_width + spacing) * i as f32;
-            let color_f32 = [
-                color.r as f32 / 255.0,
-                color.g as f32 / 255.0,
-                color.b as f32 / 255.0,
-                1.0,
-            ];
-            
-            // Draw border first (if selected)
-            if i == selected_index {
-                let border_color = [0.0, 0.0, 0.0, 1.0]; // Black border
-                
-                // Top border
-                vertices.extend(self.generate_rectangle_vertices(
-                    x - border_width,
-                    palette_y - border_width,
-                    color_width + border_width * 2.0,
-                    border_width,
-                    border_color,
-                ));
-                
-                // Bottom border
-                vertices.extend(self.generate_rectangle_vertices(
-                    x - border_width,
-                    palette_y + color_height,
-                    color_width + border_width * 2.0,
-                    border_width,
-                    border_color,
-                ));
-                
-                // Left border
-                vertices.extend(self.generate_rectangle_vertices(
-                    x - border_width,
-                    palette_y - border_width,
-                    border_width,
-                    color_height + border_width * 2.0,
-                    border_color,
-                ));
-                
-                // Right border
-                vertices.extend(self.generate_rectangle_vertices(
-                    x + color_width,
-                    palette_y - border_width,
-                    border_width,
-                    color_height + border_width * 2.0,
-                    border_color,
-                ));
-            }
-            
-            // Draw color swatch on top of border
-            vertices.extend(self.generate_rectangle_vertices(
-                x,
-                palette_y,
-                color_width,
-                color_height,
-                color_f32,
-            ));
-        }
-
-        vertices
+        let flat = geometry::generate_palette_vertices(&self.palette, selected_index);
+        to_vertices_7(&flat, 0.0)
     }
 
     /// Generate vertices for brush size selector
     fn generate_brush_size_vertices(&self, selected_size: f32) -> Vec<[f32; 7]> {
-        let mut vertices = Vec::new();
-        let brush_sizes: [f32; 5] = [3.0, 5.0, 10.0, 25.0, 50.0];
-        
-        let selector_x = 10.0;
-        let selector_y = 50.0;
-        let button_size = 30.0;
-        let spacing = 10.0;
-
-        for (i, &size) in brush_sizes.iter().enumerate() {
-            let x = selector_x + (button_size + spacing) * i as f32;
-            
-            // Draw button background (gray)
-            let bg_color = [0.8, 0.8, 0.8, 1.0];
-            vertices.extend(self.generate_rectangle_vertices(
-                x,
-                selector_y,
-                button_size,
-                button_size,
-                bg_color,
-            ));
-
-            // Draw brush size indicator (circle approximation with rectangle)
-            let indicator_size = size.min(button_size - 4.0);
-            let indicator_x = x + (button_size - indicator_size) / 2.0;
-            let indicator_y = selector_y + (button_size - indicator_size) / 2.0;
-            let indicator_color = [0.0, 0.0, 0.0, 1.0]; // Black
-            
-            vertices.extend(self.generate_rectangle_vertices(
-                indicator_x,
-                indicator_y,
-                indicator_size,
-                indicator_size,
-                indicator_color,
-            ));
-
-            // Draw border for selected size
-            if (size - selected_size).abs() < 0.1 {
-                let border_color = [0.0, 0.0, 1.0, 1.0]; // Blue border
-                let border_width = 2.0;
-                
-                // Top border
-                vertices.extend(self.generate_rectangle_vertices(
-                    x - border_width,
-                    selector_y - border_width,
-                    button_size + border_width * 2.0,
-                    border_width,
-                    border_color,
-                ));
-                
-                // Bottom border
-                vertices.extend(self.generate_rectangle_vertices(
-                    x - border_width,
-                    selector_y + button_size,
-                    button_size + border_width * 2.0,
-                    border_width,
-                    border_color,
-                ));
-                
-                // Left border
-                vertices.extend(self.generate_rectangle_vertices(
-                    x - border_width,
-                    selector_y - border_width,
-                    border_width,
-                    button_size + border_width * 2.0,
-                    border_color,
-                ));
-                
-                // Right border
-                vertices.extend(self.generate_rectangle_vertices(
-                    x + button_size,
-                    selector_y - border_width,
-                    border_width,
-                    button_size + border_width * 2.0,
-                    border_color,
-                ));
-            }
-        }
-
-        vertices
+        let flat = geometry::generate_brush_size_vertices(selected_size);
+        to_vertices_7(&flat, 0.0)
     }
 
     /// Render using software fallback (stub - WGPU is now primary)
@@ -912,6 +634,13 @@ impl Renderer {
     }
 }
 
+
+/// Convert flat vertex data (6 floats/vertex) to WGPU format (7 floats/vertex with line_width)
+fn to_vertices_7(flat: &[f32], line_width: f32) -> Vec<[f32; 7]> {
+    flat.chunks(6)
+        .map(|chunk| [chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], line_width])
+        .collect()
+}
 
 #[cfg(test)]
 mod tests {
