@@ -44,12 +44,20 @@ pub enum RenderBackend {
 pub struct Renderer {
     /// Current canvas to render
     canvas: Canvas,
-    /// Color palette for UI
-    palette: crate::canvas::ColorPalette,
+    /// HSV color values (Hue, Saturation, Value)
+    hue: f32,
+    saturation: f32,
+    value: f32,
+    /// Custom saved colors
+    custom_colors: Vec<[u8; 3]>,
+    /// Selected custom color index (-1 if none)
+    selected_custom_index: i32,
     /// Active stroke being drawn (if any)
     active_stroke: Option<crate::canvas::ActiveStroke>,
     /// Current brush size for UI
     brush_size: f32,
+    /// Current brush opacity
+    opacity: f32,
     /// Eraser mode active
     is_eraser: bool,
     /// Configuration
@@ -92,9 +100,14 @@ impl Renderer {
                 logger::info(&format!("   - MSAA samples: {}", config.msaa_samples));
                 Ok(Self {
                     canvas: Canvas::new(),
-                    palette: crate::canvas::ColorPalette::new(),
+                    hue: 0.0,
+                    saturation: 100.0,
+                    value: 100.0,
+                    custom_colors: Vec::new(),
+                    selected_custom_index: -1,
                     active_stroke: None,
-                    brush_size: 3.0, // Default brush size
+                    brush_size: 3.0,
+                    opacity: 1.0,
                     is_eraser: false,
                     config,
                     backend: RenderBackend::Wgpu,
@@ -113,9 +126,14 @@ impl Renderer {
                 logger::info("   - Backend: Cairo (CPU)");
                 Ok(Self {
                     canvas: Canvas::new(),
-                    palette: crate::canvas::ColorPalette::new(),
+                    hue: 0.0,
+                    saturation: 100.0,
+                    value: 100.0,
+                    custom_colors: Vec::new(),
+                    selected_custom_index: -1,
                     active_stroke: None,
-                    brush_size: 3.0, // Default brush size
+                    brush_size: 3.0,
+                    opacity: 1.0,
                     is_eraser: false,
                     config,
                     backend: RenderBackend::Cairo,
@@ -401,6 +419,70 @@ impl Renderer {
         self.is_eraser = is_eraser;
     }
 
+    /// Set the brush opacity
+    pub fn set_opacity(&mut self, opacity: f32) {
+        self.opacity = opacity;
+    }
+
+    /// Set HSV values
+    pub fn set_hsv(&mut self, h: f32, s: f32, v: f32) {
+        self.hue = h.clamp(0.0, 360.0);
+        self.saturation = s.clamp(0.0, 100.0);
+        self.value = v.clamp(0.0, 100.0);
+        self.selected_custom_index = -1; // Deselect custom color
+    }
+
+    /// Get current HSV values
+    pub fn get_hsv(&self) -> (f32, f32, f32) {
+        (self.hue, self.saturation, self.value)
+    }
+
+    /// Get current color as Color struct
+    pub fn current_color(&self) -> crate::canvas::Color {
+        crate::canvas::hsv_to_rgb(self.hue, self.saturation, self.value)
+    }
+
+    /// Set custom colors
+    pub fn set_custom_colors(&mut self, colors: Vec<[u8; 3]>) {
+        self.custom_colors = colors;
+    }
+
+    /// Get custom colors
+    pub fn get_custom_colors(&self) -> &[[u8; 3]] {
+        &self.custom_colors
+    }
+
+    /// Set selected custom color index
+    pub fn set_selected_custom_index(&mut self, index: i32) {
+        self.selected_custom_index = index;
+        if index >= 0 && (index as usize) < self.custom_colors.len() {
+            let color = self.custom_colors[index as usize];
+            let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
+                r: color[0],
+                g: color[1],
+                b: color[2],
+                a: 255,
+            });
+            self.hue = hsv.h;
+            self.saturation = hsv.s;
+            self.value = hsv.v;
+        }
+    }
+
+    /// Get selected custom color index
+    pub fn get_selected_custom_index(&self) -> i32 {
+        self.selected_custom_index
+    }
+
+    /// Add a custom color
+    pub fn add_custom_color(&mut self, color: crate::canvas::Color) {
+        self.custom_colors.push([color.r, color.g, color.b]);
+        // Keep max 10 colors
+        if self.custom_colors.len() > 10 {
+            self.custom_colors.remove(0);
+        }
+    }
+
     /// Get a mutable reference to the canvas
     pub fn canvas_mut(&mut self) -> &mut Canvas {
         &mut self.canvas
@@ -529,20 +611,33 @@ impl Renderer {
                 }
             }
 
-            // Draw UI elements (color palette)
+            // Draw UI elements (HSV color picker)
             if let Some(ui_pipeline) = &self.ui_pipeline {
-                let palette_vertices =
-                    self.generate_palette_vertices(self.palette.selected_index());
-                if !palette_vertices.is_empty() {
+                // Draw HSV sliders
+                let hsv_vertices = self.generate_hsv_sliders(self.hue, self.saturation, self.value);
+                if !hsv_vertices.is_empty() {
                     let ui_vertex_buffer =
                         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("UI Vertex Buffer"),
-                            contents: bytemuck::cast_slice(&palette_vertices),
+                            label: Some("HSV Slider Vertex Buffer"),
+                            contents: bytemuck::cast_slice(&hsv_vertices),
                             usage: wgpu::BufferUsages::VERTEX,
                         });
                     render_pass.set_pipeline(ui_pipeline);
                     render_pass.set_vertex_buffer(0, ui_vertex_buffer.slice(..));
-                    render_pass.draw(0..palette_vertices.len() as u32, 0..1);
+                    render_pass.draw(0..hsv_vertices.len() as u32, 0..1);
+                }
+
+                // Draw custom palette
+                let custom_palette_vertices = self.generate_custom_palette_vertices();
+                if !custom_palette_vertices.is_empty() {
+                    let palette_vertex_buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("Custom Palette Vertex Buffer"),
+                            contents: bytemuck::cast_slice(&custom_palette_vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    render_pass.set_vertex_buffer(0, palette_vertex_buffer.slice(..));
+                    render_pass.draw(0..custom_palette_vertices.len() as u32, 0..1);
                 }
 
                 // Draw brush size selector
@@ -608,6 +703,19 @@ impl Renderer {
                         render_pass.set_vertex_buffer(0, redo_vertex_buffer.slice(..));
                         render_pass.draw(0..redo_vertices.len() as u32, 0..1);
                     }
+
+                    // Draw opacity preset buttons
+                    let opacity_vertices = self.generate_opacity_preset_vertices();
+                    if !opacity_vertices.is_empty() {
+                        let opacity_vertex_buffer =
+                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("Opacity Preset Vertex Buffer"),
+                                contents: bytemuck::cast_slice(&opacity_vertices),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
+                        render_pass.set_vertex_buffer(0, opacity_vertex_buffer.slice(..));
+                        render_pass.draw(0..opacity_vertices.len() as u32, 0..1);
+                    }
                 }
             }
         }
@@ -658,9 +766,18 @@ impl Renderer {
         vertices
     }
 
-    /// Generate vertices for the color palette UI
-    fn generate_palette_vertices(&self, selected_index: usize) -> Vec<[f32; 7]> {
-        let flat = geometry::generate_palette_vertices(&self.palette, selected_index);
+    /// Generate vertices for HSV sliders
+    fn generate_hsv_sliders(&self, h: f32, s: f32, v: f32) -> Vec<[f32; 7]> {
+        let flat = geometry::generate_hsv_sliders(h, s, v);
+        to_vertices_7(&flat, 0.0)
+    }
+
+    /// Generate vertices for custom palette
+    fn generate_custom_palette_vertices(&self) -> Vec<[f32; 7]> {
+        let flat = geometry::generate_custom_palette(
+            &self.custom_colors,
+            self.selected_custom_index as usize,
+        );
         to_vertices_7(&flat, 0.0)
     }
 
@@ -693,6 +810,12 @@ impl Renderer {
     fn generate_redo_button_vertices(&self) -> Vec<[f32; 7]> {
         let can_redo = self.canvas.can_redo();
         let flat = geometry::generate_redo_button_vertices(can_redo);
+        to_vertices_7(&flat, 0.0)
+    }
+
+    /// Generate vertices for opacity preset buttons
+    fn generate_opacity_preset_vertices(&self) -> Vec<[f32; 7]> {
+        let flat = geometry::generate_opacity_preset_vertices(self.opacity);
         to_vertices_7(&flat, 0.0)
     }
 

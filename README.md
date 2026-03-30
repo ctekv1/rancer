@@ -4,18 +4,18 @@
 
 A digital art application built in Rust with cross-platform support.
 
-**Version:** 0.0.5
+**Version:** 0.0.6
 **License:** [GNU GPL-3.0](LICENSE)
 
 ## Features
 
 - Real-time GPU-accelerated drawing with WGPU 28.0
 - Stroke management with undo/redo
-- 10-color palette with keyboard navigation
+- HSV color picker with custom saved colors palette (FIFO, max 10)
 - GTK4 window management (Wayland compatible)
 - Cross-platform: Linux, Windows, future WASM
 - User preferences system with TOML configuration files
-- Configurable window size, brush settings, and color palette
+- Configurable window size, brush settings, and HSV values
 - Auto-saving preferences on settings changes
 
 ## Build & Run
@@ -55,7 +55,7 @@ cargo run
 ✅ WGPU 28.0 integration
 ✅ Real-time rendering
 ✅ Mouse input handling
-✅ User preferences system (v0.0.5)
+✅ User preferences system (v0.0.6)
 ✅ Clippy warnings fixed
 ✅ Documentation updates
 

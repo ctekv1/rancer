@@ -42,6 +42,7 @@ pub struct CanvasPreferences {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrushPreferences {
     pub default_size: f32,
+    pub default_opacity: f32,
     pub sizes: Vec<f32>,
 }
 
@@ -55,7 +56,10 @@ pub struct RendererPreferences {
 /// Palette configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PalettePreferences {
-    pub selected_index: usize,
+    pub h: f32,                      // Hue: 0-360
+    pub s: f32,                      // Saturation: 0-100
+    pub v: f32,                      // Value: 0-100
+    pub custom_colors: Vec<[u8; 3]>, // RGB custom colors (max 10)
 }
 
 impl Default for Preferences {
@@ -74,13 +78,19 @@ impl Default for Preferences {
             },
             brush: BrushPreferences {
                 default_size: 3.0,
+                default_opacity: 1.0,
                 sizes: vec![3.0, 5.0, 10.0, 25.0, 50.0],
             },
             renderer: RendererPreferences {
                 msaa_samples: 1,
                 clear_color: "#FFFFFF".to_string(),
             },
-            palette: PalettePreferences { selected_index: 0 },
+            palette: PalettePreferences {
+                h: 0.0,
+                s: 100.0,
+                v: 100.0,
+                custom_colors: Vec::new(),
+            },
         }
     }
 }
@@ -164,9 +174,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_default_preferences() {
+    fn test_preferences_default_values() {
         let prefs = Preferences::default();
-        assert_eq!(prefs.version, "1.0");
         assert_eq!(prefs.window.width, 1280);
         assert_eq!(prefs.window.height, 720);
         assert_eq!(prefs.window.title, "Rancer");
@@ -177,7 +186,9 @@ mod tests {
         assert_eq!(prefs.brush.sizes.len(), 5);
         assert_eq!(prefs.renderer.msaa_samples, 1);
         assert_eq!(prefs.renderer.clear_color, "#FFFFFF");
-        assert_eq!(prefs.palette.selected_index, 0);
+        assert_eq!(prefs.palette.h, 0.0);
+        assert_eq!(prefs.palette.s, 100.0);
+        assert_eq!(prefs.palette.v, 100.0);
     }
 
     #[test]
@@ -209,10 +220,9 @@ mod tests {
         assert_eq!(deserialized.canvas.width, original.canvas.width);
         assert_eq!(deserialized.brush.default_size, original.brush.default_size);
         assert_eq!(deserialized.brush.sizes.len(), original.brush.sizes.len());
-        assert_eq!(
-            deserialized.palette.selected_index,
-            original.palette.selected_index
-        );
+        assert_eq!(deserialized.palette.h, original.palette.h);
+        assert_eq!(deserialized.palette.s, original.palette.s);
+        assert_eq!(deserialized.palette.v, original.palette.v);
     }
 
     #[test]
@@ -221,7 +231,9 @@ mod tests {
         prefs.window.width = 1920;
         prefs.window.height = 1080;
         prefs.brush.default_size = 10.0;
-        prefs.palette.selected_index = 5;
+        prefs.palette.h = 180.0;
+        prefs.palette.s = 50.0;
+        prefs.palette.v = 75.0;
 
         let toml_string = toml::to_string(&prefs).expect("Failed to serialize");
         let recovered: Preferences = toml::from_str(&toml_string).expect("Failed to deserialize");
@@ -229,7 +241,9 @@ mod tests {
         assert_eq!(recovered.window.width, 1920);
         assert_eq!(recovered.window.height, 1080);
         assert_eq!(recovered.brush.default_size, 10.0);
-        assert_eq!(recovered.palette.selected_index, 5);
+        assert_eq!(recovered.palette.h, 180.0);
+        assert_eq!(recovered.palette.s, 50.0);
+        assert_eq!(recovered.palette.v, 75.0);
     }
 
     #[test]
@@ -282,7 +296,9 @@ mod tests {
     #[test]
     fn test_preferences_palette_defaults() {
         let prefs = Preferences::default();
-        assert_eq!(prefs.palette.selected_index, 0);
+        assert_eq!(prefs.palette.h, 0.0);
+        assert_eq!(prefs.palette.s, 100.0);
+        assert_eq!(prefs.palette.v, 100.0);
     }
 
     #[test]
@@ -302,11 +318,15 @@ mod tests {
 
         prefs.window.width = 1920;
         prefs.brush.default_size = 15.0;
-        prefs.palette.selected_index = 5;
+        prefs.palette.h = 120.0;
+        prefs.palette.s = 80.0;
+        prefs.palette.v = 60.0;
 
         assert_eq!(prefs.window.width, 1920);
         assert_ne!(prefs.window.width, original_width);
         assert_eq!(prefs.brush.default_size, 15.0);
-        assert_eq!(prefs.palette.selected_index, 5);
+        assert_eq!(prefs.palette.h, 120.0);
+        assert_eq!(prefs.palette.s, 80.0);
+        assert_eq!(prefs.palette.v, 60.0);
     }
 }

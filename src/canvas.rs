@@ -41,6 +41,100 @@ impl Color {
     };
 }
 
+/// Maximum number of custom colors that can be saved
+pub const MAX_CUSTOM_COLORS: usize = 10;
+
+/// Represents HSV color values (Hue, Saturation, Value)
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HsvColor {
+    pub h: f32, // Hue: 0.0 to 360.0
+    pub s: f32, // Saturation: 0.0 to 100.0
+    pub v: f32, // Value: 0.0 to 100.0
+}
+
+impl Default for HsvColor {
+    fn default() -> Self {
+        Self {
+            h: 0.0,   // Red
+            s: 100.0, // Full saturation
+            v: 100.0, // Full value
+        }
+    }
+}
+
+impl HsvColor {
+    pub fn new(h: f32, s: f32, v: f32) -> Self {
+        Self { h, s, v }
+    }
+
+    pub fn to_rgb(&self) -> Color {
+        hsv_to_rgb(self.h, self.s, self.v)
+    }
+}
+
+/// Convert HSV to RGB color
+/// h: 0-360, s: 0-100, v: 0-100
+pub fn hsv_to_rgb(h: f32, s: f32, v: f32) -> Color {
+    let s = s / 100.0;
+    let v = v / 100.0;
+
+    let h_norm = h / 60.0;
+    let i = h_norm.floor() as i32 % 6;
+    let f = h_norm - h_norm.floor();
+    let p = v * (1.0 - s);
+    let q = v * (1.0 - s * f);
+    let t = v * (1.0 - s * (1.0 - f));
+
+    let (r, g, b) = match i {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    };
+
+    Color {
+        r: (r * 255.0).round() as u8,
+        g: (g * 255.0).round() as u8,
+        b: (b * 255.0).round() as u8,
+        a: 255,
+    }
+}
+
+/// Convert RGB to HSV
+pub fn rgb_to_hsv(color: Color) -> HsvColor {
+    let r = color.r as f32 / 255.0;
+    let g = color.g as f32 / 255.0;
+    let b = color.b as f32 / 255.0;
+
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+
+    let v = max * 100.0;
+
+    let s = if max.abs() < f32::EPSILON {
+        0.0
+    } else {
+        delta / max * 100.0
+    };
+
+    let h = if delta.abs() < f32::EPSILON {
+        0.0
+    } else if (max - r).abs() < f32::EPSILON {
+        60.0 * (((g - b) / delta) % 6.0)
+    } else if (max - g).abs() < f32::EPSILON {
+        60.0 * ((b - r) / delta + 2.0)
+    } else {
+        60.0 * ((r - g) / delta + 4.0)
+    };
+
+    let h = if h < 0.0 { h + 360.0 } else { h };
+
+    HsvColor { h, s, v }
+}
+
 /// Represents a brush stroke or drawing operation
 #[derive(Debug, Clone)]
 pub struct Stroke {
@@ -326,6 +420,9 @@ pub fn brush_size_down(current: f32) -> f32 {
         _ => current,
     }
 }
+
+/// Default opacity presets available in the application
+pub const OPACITY_PRESETS: [f32; 4] = [0.25, 0.5, 0.75, 1.0];
 
 /// Represents an active stroke that is currently being drawn
 #[derive(Debug, Clone)]
@@ -1129,5 +1226,91 @@ mod tests {
     fn test_brush_size_invalid_current() {
         assert_eq!(brush_size_up(7.0), 7.0);
         assert_eq!(brush_size_down(7.0), 7.0);
+    }
+
+    #[test]
+    fn test_opacity_presets_constant() {
+        assert_eq!(OPACITY_PRESETS.len(), 4);
+        assert!(OPACITY_PRESETS.contains(&0.25));
+        assert!(OPACITY_PRESETS.contains(&0.5));
+        assert!(OPACITY_PRESETS.contains(&0.75));
+        assert!(OPACITY_PRESETS.contains(&1.0));
+    }
+
+    // --- HSV conversion tests ---
+
+    #[test]
+    fn test_hsv_to_rgb_red() {
+        let color = hsv_to_rgb(0.0, 100.0, 100.0);
+        assert_eq!(color.r, 255);
+        assert_eq!(color.g, 0);
+        assert_eq!(color.b, 0);
+    }
+
+    #[test]
+    fn test_hsv_to_rgb_green() {
+        let color = hsv_to_rgb(120.0, 100.0, 100.0);
+        assert_eq!(color.r, 0);
+        assert_eq!(color.g, 255);
+        assert_eq!(color.b, 0);
+    }
+
+    #[test]
+    fn test_hsv_to_rgb_blue() {
+        let color = hsv_to_rgb(240.0, 100.0, 100.0);
+        assert_eq!(color.r, 0);
+        assert_eq!(color.g, 0);
+        assert_eq!(color.b, 255);
+    }
+
+    #[test]
+    fn test_hsv_to_rgb_white() {
+        let color = hsv_to_rgb(0.0, 0.0, 100.0);
+        assert_eq!(color.r, 255);
+        assert_eq!(color.g, 255);
+        assert_eq!(color.b, 255);
+    }
+
+    #[test]
+    fn test_hsv_to_rgb_black() {
+        let color = hsv_to_rgb(0.0, 0.0, 0.0);
+        assert_eq!(color.r, 0);
+        assert_eq!(color.g, 0);
+        assert_eq!(color.b, 0);
+    }
+
+    #[test]
+    fn test_rgb_to_hsv_red() {
+        let hsv = rgb_to_hsv(Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        });
+        assert!((hsv.h - 0.0).abs() < 1.0);
+        assert!((hsv.s - 100.0).abs() < 1.0);
+        assert!((hsv.v - 100.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_rgb_to_hsv_gray() {
+        let hsv = rgb_to_hsv(Color {
+            r: 128,
+            g: 128,
+            b: 128,
+            a: 255,
+        });
+        assert!((hsv.s - 0.0).abs() < 1.0);
+        assert!((hsv.v - 50.0).abs() < 2.0);
+    }
+
+    #[test]
+    fn test_hsv_roundtrip() {
+        let original = hsv_to_rgb(180.0, 75.0, 90.0);
+        let hsv = rgb_to_hsv(original);
+        let roundtrip = hsv_to_rgb(hsv.h, hsv.s, hsv.v);
+        assert_eq!(original.r, roundtrip.r);
+        assert_eq!(original.g, roundtrip.g);
+        assert_eq!(original.b, roundtrip.b);
     }
 }

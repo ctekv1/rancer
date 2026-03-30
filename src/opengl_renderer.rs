@@ -6,7 +6,7 @@
 use glow::HasContext;
 use std::rc::Rc;
 
-use crate::canvas::{ActiveStroke, Canvas, ColorPalette};
+use crate::canvas::{ActiveStroke, Canvas};
 use crate::geometry;
 
 const VERTEX_SHADER_SOURCE: &str = r#"
@@ -86,6 +86,7 @@ impl GlRenderer {
     }
 
     /// Compile vertex and fragment shaders into a program
+    #[allow(clippy::unnecessary_safety_comment)]
     unsafe fn compile_shaders(gl: &glow::Context) -> Result<glow::Program, String> {
         unsafe {
             let vs = gl
@@ -132,17 +133,22 @@ impl GlRenderer {
         }
     }
 
-    /// Render a frame: clear, draw strokes, draw UI
+    /// Render a frame: clear, draw strokes, draw UI (HSV version)
     #[allow(clippy::too_many_arguments)]
-    pub fn render(
+    pub fn render_hsv(
         &self,
         canvas: &Canvas,
-        palette: &ColorPalette,
         active_stroke: &Option<ActiveStroke>,
         brush_size: f32,
         is_eraser: bool,
+        opacity: f32,
         width: i32,
         height: i32,
+        hue: f32,
+        saturation: f32,
+        value: f32,
+        custom_colors: Vec<[u8; 3]>,
+        selected_custom_index: i32,
     ) {
         unsafe {
             self.gl.viewport(0, 0, width, height);
@@ -170,8 +176,15 @@ impl GlRenderer {
                 }
             }
 
-            // Draw color palette UI
-            let palette_vertices = Self::generate_palette_vertices(palette);
+            // Draw HSV sliders UI
+            let hsv_vertices = Self::generate_hsv_slider_vertices(hue, saturation, value);
+            if !hsv_vertices.is_empty() {
+                self.upload_and_draw(&hsv_vertices, glow::TRIANGLES);
+            }
+
+            // Draw custom palette UI
+            let palette_vertices =
+                Self::generate_custom_palette_vertices(&custom_colors, selected_custom_index);
             if !palette_vertices.is_empty() {
                 self.upload_and_draw(&palette_vertices, glow::TRIANGLES);
             }
@@ -206,11 +219,18 @@ impl GlRenderer {
                 self.upload_and_draw(&redo_vertices, glow::TRIANGLES);
             }
 
+            // Draw opacity preset buttons UI
+            let opacity_vertices = Self::generate_opacity_preset_vertices(opacity);
+            if !opacity_vertices.is_empty() {
+                self.upload_and_draw(&opacity_vertices, glow::TRIANGLES);
+            }
+
             self.gl.bind_vertex_array(None);
         }
     }
 
     /// Upload vertex data and draw
+    #[allow(clippy::unnecessary_safety_comment)]
     unsafe fn upload_and_draw(&self, vertices: &[f32], mode: u32) {
         unsafe {
             let byte_data = std::slice::from_raw_parts(
@@ -234,9 +254,14 @@ impl GlRenderer {
         geometry::generate_active_stroke_vertices(active)
     }
 
-    /// Generate vertices for the color palette UI
-    fn generate_palette_vertices(palette: &ColorPalette) -> Vec<f32> {
-        geometry::generate_palette_vertices(palette, palette.selected_index())
+    /// Generate vertices for HSV slider UI
+    fn generate_hsv_slider_vertices(hue: f32, saturation: f32, value: f32) -> Vec<f32> {
+        geometry::generate_hsv_sliders(hue, saturation, value)
+    }
+
+    /// Generate vertices for custom palette UI
+    fn generate_custom_palette_vertices(colors: &[[u8; 3]], selected_index: i32) -> Vec<f32> {
+        geometry::generate_custom_palette(colors, selected_index as usize)
     }
 
     /// Generate vertices for brush size selector UI
@@ -262,6 +287,11 @@ impl GlRenderer {
     /// Generate vertices for redo button UI
     fn generate_redo_button_vertices(can_redo: bool) -> Vec<f32> {
         geometry::generate_redo_button_vertices(can_redo)
+    }
+
+    /// Generate vertices for opacity preset buttons UI
+    fn generate_opacity_preset_vertices(opacity: f32) -> Vec<f32> {
+        geometry::generate_opacity_preset_vertices(opacity)
     }
 }
 

@@ -4,7 +4,7 @@
 //! allowing different backends (GTK4 for Linux, winit for Windows)
 //! to be used interchangeably.
 
-use crate::canvas::{Canvas, ColorPalette, Point};
+use crate::canvas::{Canvas, Point};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -18,9 +18,6 @@ pub trait WindowBackend {
 
     /// Get the canvas reference
     fn canvas(&self) -> &Rc<RefCell<Canvas>>;
-
-    /// Get the palette reference
-    fn palette(&self) -> &Rc<RefCell<ColorPalette>>;
 
     /// Get current mouse position
     fn mouse_position(&self) -> Point;

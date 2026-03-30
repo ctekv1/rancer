@@ -1,4 +1,4 @@
-# Windows Build Guide for Rancer v0.0.5
+# Windows Build Guide for Rancer v0.0.6
 
 This guide helps Windows users build Rancer from source.
 

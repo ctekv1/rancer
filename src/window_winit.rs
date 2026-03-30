@@ -12,7 +12,7 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
 
-use crate::canvas::{ActiveStroke, Canvas, ColorPalette, Point};
+use crate::canvas::{ActiveStroke, Canvas, Point};
 use crate::logger;
 use crate::preferences::Preferences;
 use crate::renderer::{Renderer, RendererConfig};
@@ -35,22 +35,40 @@ pub struct WindowApp {
     renderer: Option<Renderer>,
     /// Canvas for drawing operations
     canvas: Rc<RefCell<Canvas>>,
-    /// Color palette for color selection
-    palette: Rc<RefCell<ColorPalette>>,
+    /// HSV color values
+    hue: f32,
+    saturation: f32,
+    value: f32,
+    /// Custom saved colors
+    custom_colors: Vec<[u8; 3]>,
+    /// Selected custom color index (-1 if none)
+    selected_custom_index: i32,
     /// Current active stroke being drawn
     active_stroke: Rc<RefCell<Option<ActiveStroke>>>,
     /// Current mouse state
     mouse_state: MouseState,
     /// Current mouse position
     mouse_position: Point,
-    /// Current brush size in pixels
+    /// Brush size in pixels
     brush_size: f32,
-    /// Eraser mode active (also visual indicator)
+    /// Brush opacity
+    opacity: f32,
+    /// Eraser mode active
     is_eraser: bool,
+    /// Slider drag state (which slider is being dragged)
+    slider_drag: Option<SliderDrag>,
     /// User preferences
     preferences: Preferences,
     /// Current keyboard modifiers state
     modifiers: ModifiersState,
+}
+
+/// Slider drag state
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SliderDrag {
+    Hue,
+    Saturation,
+    Value,
 }
 
 impl WindowApp {
@@ -62,12 +80,18 @@ impl WindowApp {
             window: None,
             renderer: None,
             canvas: Rc::new(RefCell::new(Canvas::new())),
-            palette: Rc::new(RefCell::new(ColorPalette::new())),
+            hue: preferences.palette.h,
+            saturation: preferences.palette.s,
+            value: preferences.palette.v,
+            custom_colors: preferences.palette.custom_colors.clone(),
+            selected_custom_index: -1,
             active_stroke: Rc::new(RefCell::new(None)),
             mouse_state: MouseState::Idle,
             mouse_position: Point { x: 0.0, y: 0.0 },
             brush_size: preferences.brush.default_size,
+            opacity: preferences.brush.default_opacity,
             is_eraser: false,
+            slider_drag: None,
             preferences,
             modifiers: ModifiersState::empty(),
         }
@@ -97,6 +121,20 @@ impl WindowApp {
                 logger::error(&format!("Export failed: {}", e));
             }
         }
+    }
+
+    /// Update HSV values in preferences and save
+    fn update_hsv_preferences(&mut self) {
+        self.preferences.palette.h = self.hue;
+        self.preferences.palette.s = self.saturation;
+        self.preferences.palette.v = self.value;
+        self.preferences.palette.custom_colors = self.custom_colors.clone();
+        let _ = crate::preferences::save(&self.preferences);
+    }
+
+    /// Get current color from HSV values
+    fn current_color(&self) -> crate::canvas::Color {
+        crate::canvas::hsv_to_rgb(self.hue, self.saturation, self.value)
     }
 }
 
@@ -132,9 +170,12 @@ impl ApplicationHandler for WindowApp {
             // Use tokio runtime to initialize WGPU (async)
             let rt = tokio::runtime::Runtime::new().unwrap();
             match rt.block_on(Renderer::new(config, &*window, (size.width, size.height))) {
-                Ok(renderer) => {
+                Ok(mut renderer) => {
                     logger::info("✅ WGPU renderer initialized successfully!");
                     renderer.print_backend_status();
+                    renderer.set_opacity(self.opacity);
+                    renderer.set_hsv(self.hue, self.saturation, self.value);
+                    renderer.set_custom_colors(self.custom_colors.clone());
                     self.renderer = Some(renderer);
                 }
                 Err(e) => {
@@ -229,31 +270,67 @@ impl ApplicationHandler for WindowApp {
                             let x = self.mouse_position.x;
                             let y = self.mouse_position.y;
 
-                            // Check color palette click (top left, y=10 to y=30)
-                            if (10.0..=30.0).contains(&y) {
+                            // Check HSV slider clicks (y=5-80)
+                            if (5.0..=80.0).contains(&y) {
+                                let slider_x = 10.0;
+                                let slider_width = 200.0;
+
+                                if x >= slider_x && x <= slider_x + slider_width {
+                                    if (5.0..=25.0).contains(&y) {
+                                        // Hue slider
+                                        self.hue = ((x - slider_x) / slider_width * 360.0)
+                                            .clamp(0.0, 360.0);
+                                        self.selected_custom_index = -1;
+                                        self.update_hsv_preferences();
+                                    } else if (30.0..=50.0).contains(&y) {
+                                        // Saturation slider
+                                        self.saturation = ((x - slider_x) / slider_width * 100.0)
+                                            .clamp(0.0, 100.0);
+                                        self.selected_custom_index = -1;
+                                        self.update_hsv_preferences();
+                                    } else if (55.0..=75.0).contains(&y) {
+                                        // Value slider
+                                        self.value = ((x - slider_x) / slider_width * 100.0)
+                                            .clamp(0.0, 100.0);
+                                        self.selected_custom_index = -1;
+                                        self.update_hsv_preferences();
+                                    }
+
+                                    if let Some(renderer) = &mut self.renderer {
+                                        renderer.set_hsv(self.hue, self.saturation, self.value);
+                                    }
+                                    if let Some(window) = &self.window {
+                                        window.request_redraw();
+                                    }
+                                    return;
+                                }
+                            }
+
+                            // Check custom palette click (y=90-110)
+                            if (90.0..=110.0).contains(&y) {
                                 let palette_x = 10.0;
                                 let color_width = 20.0;
                                 let spacing = 5.0;
-                                let color_count = self.palette.borrow().color_count();
 
-                                for i in 0..color_count {
+                                // Check custom color clicks
+                                for (i, _) in self.custom_colors.iter().enumerate() {
                                     let color_x = palette_x + (color_width + spacing) * i as f32;
                                     if x >= color_x && x <= color_x + color_width {
-                                        if let Err(e) = self.palette.borrow_mut().select_color(i) {
-                                            eprintln!("Failed to select color: {}", e);
-                                        } else {
-                                            println!("Selected color at index {}", i);
-                                            self.preferences.palette.selected_index = i;
+                                        self.selected_custom_index = i as i32;
+                                        let color = self.custom_colors[i];
+                                        let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
+                                            r: color[0],
+                                            g: color[1],
+                                            b: color[2],
+                                            a: 255,
+                                        });
+                                        self.hue = hsv.h;
+                                        self.saturation = hsv.s;
+                                        self.value = hsv.v;
+                                        self.update_hsv_preferences();
 
-                                            // Save preferences on change
-                                            if let Err(e) =
-                                                crate::preferences::save(&self.preferences)
-                                            {
-                                                logger::error(&format!(
-                                                    "Failed to save preferences: {}",
-                                                    e
-                                                ));
-                                            }
+                                        if let Some(renderer) = &mut self.renderer {
+                                            renderer.set_hsv(self.hue, self.saturation, self.value);
                                         }
                                         if let Some(window) = &self.window {
                                             window.request_redraw();
@@ -261,10 +338,35 @@ impl ApplicationHandler for WindowApp {
                                         return;
                                     }
                                 }
+
+                                // Check save button (after custom colors)
+                                let save_x = palette_x
+                                    + (color_width + spacing) * self.custom_colors.len() as f32;
+                                if x >= save_x && x <= save_x + color_width {
+                                    // Save current color (FIFO: remove oldest if full)
+                                    let current = crate::canvas::hsv_to_rgb(
+                                        self.hue,
+                                        self.saturation,
+                                        self.value,
+                                    );
+                                    if self.custom_colors.len() >= 10 {
+                                        self.custom_colors.remove(0);
+                                    }
+                                    self.custom_colors.push([current.r, current.g, current.b]);
+                                    self.update_hsv_preferences();
+
+                                    if let Some(renderer) = &mut self.renderer {
+                                        renderer.set_custom_colors(self.custom_colors.clone());
+                                    }
+                                    if let Some(window) = &self.window {
+                                        window.request_redraw();
+                                    }
+                                    return;
+                                }
                             }
 
-                            // Check brush size selector click (y=50 to y=80)
-                            if (50.0..=80.0).contains(&y) {
+                            // Check brush size selector click (y=120-150)
+                            if (120.0..=150.0).contains(&y) {
                                 let selector_x = 10.0;
                                 let button_size = 30.0;
                                 let spacing = 10.0;
@@ -298,8 +400,8 @@ impl ApplicationHandler for WindowApp {
                                 }
                             }
 
-                            // Check eraser button click (x=10 to x=40, y=85 to y=115)
-                            if (85.0..=115.0).contains(&y) && (10.0..=40.0).contains(&x) {
+                            // Check eraser button click (x=10 to x=40, y=155 to y=185)
+                            if (155.0..=185.0).contains(&y) && (10.0..=40.0).contains(&x) {
                                 self.is_eraser = !self.is_eraser;
                                 logger::info(&format!(
                                     "Eraser mode: {}",
@@ -314,8 +416,8 @@ impl ApplicationHandler for WindowApp {
                                 return;
                             }
 
-                            // Check clear button click (x=50 to x=80, y=85 to y=115)
-                            if (85.0..=115.0).contains(&y) && (50.0..=80.0).contains(&x) {
+                            // Check clear button click (x=50 to x=80, y=155 to y=185)
+                            if (155.0..=185.0).contains(&y) && (50.0..=80.0).contains(&x) {
                                 let mut canvas = self.canvas.borrow_mut();
                                 canvas.clear();
                                 logger::info("Canvas cleared");
@@ -325,8 +427,8 @@ impl ApplicationHandler for WindowApp {
                                 return;
                             }
 
-                            // Check undo button click (x=90 to x=120, y=85 to y=115)
-                            if (85.0..=115.0).contains(&y) && (90.0..=120.0).contains(&x) {
+                            // Check undo button click (x=90 to x=120, y=155 to y=185)
+                            if (155.0..=185.0).contains(&y) && (90.0..=120.0).contains(&x) {
                                 let mut canvas = self.canvas.borrow_mut();
                                 if canvas.can_undo() {
                                     canvas.undo();
@@ -338,8 +440,8 @@ impl ApplicationHandler for WindowApp {
                                 return;
                             }
 
-                            // Check redo button click (x=130 to x=160, y=85 to y=115)
-                            if (85.0..=115.0).contains(&y) && (130.0..=160.0).contains(&x) {
+                            // Check redo button click (x=130 to x=160, y=155 to y=185)
+                            if (155.0..=185.0).contains(&y) && (130.0..=160.0).contains(&x) {
                                 let mut canvas = self.canvas.borrow_mut();
                                 if canvas.can_redo() {
                                     canvas.redo();
@@ -351,6 +453,32 @@ impl ApplicationHandler for WindowApp {
                                 return;
                             }
 
+                            // Check opacity preset clicks (y=190-215)
+                            if (190.0..=215.0).contains(&y) {
+                                let opacity_presets = crate::canvas::OPACITY_PRESETS;
+                                let selector_x = 10.0;
+                                let button_width = 35.0;
+                                let spacing = 10.0;
+
+                                for (i, &opacity) in opacity_presets.iter().enumerate() {
+                                    let bx = selector_x + (button_width + spacing) * i as f32;
+                                    if x >= bx && x <= bx + button_width {
+                                        self.opacity = opacity;
+                                        self.preferences.brush.default_size = self.brush_size;
+                                        self.preferences.brush.default_opacity = opacity;
+                                        let _ = crate::preferences::save(&self.preferences);
+                                        if let Some(renderer) = &mut self.renderer {
+                                            renderer.set_opacity(opacity);
+                                        }
+                                        logger::info(&format!("Opacity: {}", opacity));
+                                        if let Some(window) = &self.window {
+                                            window.request_redraw();
+                                        }
+                                        return;
+                                    }
+                                }
+                            }
+
                             // If not on UI, start drawing
                             self.mouse_state = MouseState::Drawing;
 
@@ -358,10 +486,11 @@ impl ApplicationHandler for WindowApp {
                             let color = if self.is_eraser {
                                 crate::canvas::Color::WHITE
                             } else {
-                                self.palette.borrow().current_color()
+                                self.current_color()
                             };
                             let mut canvas = self.canvas.borrow_mut();
-                            let active_stroke = canvas.begin_stroke(color, self.brush_size, 1.0);
+                            let active_stroke =
+                                canvas.begin_stroke(color, self.brush_size, self.opacity);
                             println!(
                                 "Created {}stroke with color RGB({}, {}, {}) and width {}",
                                 if self.is_eraser { "eraser " } else { "" },
@@ -389,6 +518,7 @@ impl ApplicationHandler for WindowApp {
                         }
                         winit::event::ElementState::Released => {
                             self.mouse_state = MouseState::Idle;
+                            self.slider_drag = None;
 
                             if let Some(active_stroke) = self.active_stroke.borrow_mut().take() {
                                 let mut canvas = self.canvas.borrow_mut();
@@ -452,6 +582,48 @@ impl ApplicationHandler for WindowApp {
                         window.request_redraw();
                     }
                 }
+
+                // Handle slider dragging
+                if let Some(slider) = self.slider_drag {
+                    let slider_x = 10.0;
+                    let slider_width = 200.0;
+                    let x = point.x;
+
+                    if x >= slider_x && x <= slider_x + slider_width {
+                        match slider {
+                            SliderDrag::Hue => {
+                                self.hue =
+                                    ((x - slider_x) / slider_width * 360.0).clamp(0.0, 360.0);
+                                self.selected_custom_index = -1;
+                                self.update_hsv_preferences();
+                                if let Some(renderer) = &mut self.renderer {
+                                    renderer.set_hsv(self.hue, self.saturation, self.value);
+                                }
+                            }
+                            SliderDrag::Saturation => {
+                                self.saturation =
+                                    ((x - slider_x) / slider_width * 100.0).clamp(0.0, 100.0);
+                                self.selected_custom_index = -1;
+                                self.update_hsv_preferences();
+                                if let Some(renderer) = &mut self.renderer {
+                                    renderer.set_hsv(self.hue, self.saturation, self.value);
+                                }
+                            }
+                            SliderDrag::Value => {
+                                self.value =
+                                    ((x - slider_x) / slider_width * 100.0).clamp(0.0, 100.0);
+                                self.selected_custom_index = -1;
+                                self.update_hsv_preferences();
+                                if let Some(renderer) = &mut self.renderer {
+                                    renderer.set_hsv(self.hue, self.saturation, self.value);
+                                }
+                            }
+                        }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                    }
+                }
             }
             WindowEvent::KeyboardInput {
                 event: key_event, ..
@@ -467,29 +639,59 @@ impl ApplicationHandler for WindowApp {
 
                     match key_event.logical_key.as_ref() {
                         winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowUp) => {
-                            let mut palette = self.palette.borrow_mut();
-                            let current_index = palette.selected_index();
-                            let new_index = (current_index + 1) % palette.color_count();
-                            if let Err(e) = palette.select_color(new_index) {
-                                eprintln!("Failed to change color: {}", e);
-                            }
-                            if let Some(window) = &self.window {
-                                window.request_redraw();
+                            if !self.custom_colors.is_empty() {
+                                let new_index = if self.selected_custom_index < 0 {
+                                    0
+                                } else {
+                                    ((self.selected_custom_index as usize + 1)
+                                        % self.custom_colors.len())
+                                        as i32
+                                };
+                                self.selected_custom_index = new_index;
+                                let color = self.custom_colors[new_index as usize];
+                                let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
+                                    r: color[0],
+                                    g: color[1],
+                                    b: color[2],
+                                    a: 255,
+                                });
+                                self.hue = hsv.h;
+                                self.saturation = hsv.s;
+                                self.value = hsv.v;
+                                self.update_hsv_preferences();
+                                if let Some(renderer) = &mut self.renderer {
+                                    renderer.set_hsv(self.hue, self.saturation, self.value);
+                                }
+                                if let Some(window) = &self.window {
+                                    window.request_redraw();
+                                }
                             }
                         }
                         winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowDown) => {
-                            let mut palette = self.palette.borrow_mut();
-                            let current_index = palette.selected_index();
-                            let new_index = if current_index == 0 {
-                                palette.color_count() - 1
-                            } else {
-                                current_index - 1
-                            };
-                            if let Err(e) = palette.select_color(new_index) {
-                                eprintln!("Failed to change color: {}", e);
-                            }
-                            if let Some(window) = &self.window {
-                                window.request_redraw();
+                            if !self.custom_colors.is_empty() {
+                                let new_index = if self.selected_custom_index <= 0 {
+                                    self.custom_colors.len() as i32 - 1
+                                } else {
+                                    self.selected_custom_index - 1
+                                };
+                                self.selected_custom_index = new_index;
+                                let color = self.custom_colors[new_index as usize];
+                                let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
+                                    r: color[0],
+                                    g: color[1],
+                                    b: color[2],
+                                    a: 255,
+                                });
+                                self.hue = hsv.h;
+                                self.saturation = hsv.s;
+                                self.value = hsv.v;
+                                self.update_hsv_preferences();
+                                if let Some(renderer) = &mut self.renderer {
+                                    renderer.set_hsv(self.hue, self.saturation, self.value);
+                                }
+                                if let Some(window) = &self.window {
+                                    window.request_redraw();
+                                }
                             }
                         }
                         winit::keyboard::Key::Character(c) => {
@@ -610,10 +812,6 @@ impl WindowBackend for WindowApp {
 
     fn canvas(&self) -> &Rc<RefCell<Canvas>> {
         &self.canvas
-    }
-
-    fn palette(&self) -> &Rc<RefCell<ColorPalette>> {
-        &self.palette
     }
 
     fn mouse_position(&self) -> Point {

@@ -1,3 +1,14 @@
+## [0.0.6] - 2026-03-30
+
+### Added
+- **HSV color picker**: Three sliders (H: 0-360°, S: 0-100%, V: 0-100%) with click-and-drag support
+- **Custom colors palette**: Save up to 10 colors (FIFO), click to select, arrow keys to navigate
+- **Test suite expansion**: 125 tests across canvas, geometry, preferences, and window modules
+
+### Documentation
+- **Updated CI workflow**: Test count updated to 125
+- **Updated README.md**: Added HSV color picker features, version 0.0.6
+
 ## [0.0.5] - 2026-03-29
 
 ### Added

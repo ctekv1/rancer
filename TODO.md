@@ -2,8 +2,8 @@
 
 ## Tier 1 - Core Usability (v0.0.6 Target)
 
-- [ ] Custom Color Picker - HSV/RGB picker dialog for any color
-- [ ] Brush Opacity Control - Slider or presets (25%, 50%, 75%, 100%)
+- [x] Custom Color Picker - HSV picker with sliders and custom saved colors (FIFO palette)
+- [x] Brush Opacity Control - Slider or presets (25%, 50%, 75%, 100%)
 - [x] Keyboard Shortcuts - Eraser toggle (E), brush size (+/-)
 - [x] Undo/Redo UI - Visual buttons or status indicator
 - [x] Canvas Clear - Button or shortcut to clear canvas
