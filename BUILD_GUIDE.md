@@ -1,6 +1,6 @@
 # Rancer Build Guide
 
-## Version 0.0.4
+## Version 0.0.5
 
 ### Building for Windows (Native)
 

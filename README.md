@@ -4,7 +4,7 @@
 
 A digital art application built in Rust with cross-platform support.
 
-**Version:** 0.0.4
+**Version:** 0.0.5
 **License:** [GNU GPL-3.0](LICENSE)
 
 ## Features
@@ -55,7 +55,7 @@ cargo run
 ✅ WGPU 28.0 integration
 ✅ Real-time rendering
 ✅ Mouse input handling
-✅ User preferences system (v0.0.4)
+✅ User preferences system (v0.0.5)
 ✅ Clippy warnings fixed
 ✅ Documentation updates
 

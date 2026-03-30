@@ -1,3 +1,19 @@
+## [0.0.5] - 2026-03-29
+
+### Added
+- **Undo/Redo system**: Ctrl+Z (undo), Ctrl+Shift+Z/Ctrl+Y (redo)
+- **Eraser tool**: Button toggle (click to on/off), paints white when active
+- **Test suite expansion**: 75 → 101 tests across canvas, geometry, preferences, and window modules
+
+### Documentation
+- **Updated CI workflow**: Added format check, clippy components, improved caching
+- **Updated README.md**: Added undo/redo, eraser features, version 0.0.5
+
+### Next Tasks
+- Custom color picker
+- Brush opacity control
+- Layer support
+
 ## [0.0.4] - 2026-03-27
 
 ### Added

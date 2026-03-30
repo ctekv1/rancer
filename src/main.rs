@@ -25,13 +25,13 @@ fn main() {
 
     #[cfg(target_os = "windows")]
     {
-        logger::info("Starting Rancer v0.0.4 with winit window and WGPU rendering...");
+        logger::info("Starting Rancer v0.0.5 with winit window and WGPU rendering...");
         window_winit::run_window_app(prefs);
     }
 
     #[cfg(target_os = "linux")]
     {
-        logger::info("Starting Rancer v0.0.4 with GTK4 window and OpenGL rendering...");
+        logger::info("Starting Rancer v0.0.5 with GTK4 window and OpenGL rendering...");
         window_gtk4::run_window_app(prefs);
     }
 
