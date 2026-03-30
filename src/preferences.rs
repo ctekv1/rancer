@@ -263,4 +263,50 @@ mod tests {
         let result = toml::from_str::<Preferences>(corrupted);
         assert!(result.is_err(), "Corrupted TOML should fail to parse");
     }
+
+    #[test]
+    fn test_preferences_window_defaults() {
+        let prefs = Preferences::default();
+        assert!(prefs.window.width > 0);
+        assert!(prefs.window.height > 0);
+        assert!(!prefs.window.title.is_empty());
+    }
+
+    #[test]
+    fn test_preferences_brush_defaults() {
+        let prefs = Preferences::default();
+        assert!(prefs.brush.default_size > 0.0);
+        assert!(prefs.brush.default_size <= 100.0);
+    }
+
+    #[test]
+    fn test_preferences_palette_defaults() {
+        let prefs = Preferences::default();
+        assert_eq!(prefs.palette.selected_index, 0);
+    }
+
+    #[test]
+    fn test_preferences_serialization_roundtrip() {
+        let prefs = Preferences::default();
+        let serialized = toml::to_string(&prefs).unwrap();
+        let deserialized: Preferences = toml::from_str(&serialized).unwrap();
+        assert_eq!(prefs.window.width, deserialized.window.width);
+        assert_eq!(prefs.window.height, deserialized.window.height);
+        assert_eq!(prefs.brush.default_size, deserialized.brush.default_size);
+    }
+
+    #[test]
+    fn test_preferences_partial_update() {
+        let mut prefs = Preferences::default();
+        let original_width = prefs.window.width;
+
+        prefs.window.width = 1920;
+        prefs.brush.default_size = 15.0;
+        prefs.palette.selected_index = 5;
+
+        assert_eq!(prefs.window.width, 1920);
+        assert_ne!(prefs.window.width, original_width);
+        assert_eq!(prefs.brush.default_size, 15.0);
+        assert_eq!(prefs.palette.selected_index, 5);
+    }
 }

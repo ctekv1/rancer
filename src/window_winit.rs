@@ -9,6 +9,7 @@ use std::rc::Rc;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
 
 use crate::canvas::{ActiveStroke, Canvas, ColorPalette, Point};
@@ -44,8 +45,12 @@ pub struct WindowApp {
     mouse_position: Point,
     /// Current brush size in pixels
     brush_size: f32,
+    /// Eraser mode active (also visual indicator)
+    is_eraser: bool,
     /// User preferences
     preferences: Preferences,
+    /// Current keyboard modifiers state
+    modifiers: ModifiersState,
 }
 
 impl WindowApp {
@@ -62,7 +67,9 @@ impl WindowApp {
             mouse_state: MouseState::Idle,
             mouse_position: Point { x: 0.0, y: 0.0 },
             brush_size: preferences.brush.default_size,
+            is_eraser: false,
             preferences,
+            modifiers: ModifiersState::empty(),
         }
     }
 
@@ -151,6 +158,9 @@ impl ApplicationHandler for WindowApp {
             WindowEvent::CloseRequested => {
                 logger::info("Window close requested");
                 event_loop.exit();
+            }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.modifiers = modifiers.state();
             }
             WindowEvent::Resized(physical_size) => {
                 logger::info(&format!(
@@ -292,16 +302,20 @@ impl ApplicationHandler for WindowApp {
                             self.mouse_state = MouseState::Drawing;
 
                             // Begin a new active stroke
-                            let color = self.palette.borrow().current_color();
+                            let color = if self.is_eraser {
+                                crate::canvas::Color::WHITE
+                            } else {
+                                self.palette.borrow().current_color()
+                            };
                             let mut canvas = self.canvas.borrow_mut();
-                            let active_stroke = canvas.begin_stroke_with_palette(
-                                &self.palette.borrow(),
-                                self.brush_size,
-                                1.0,
-                            );
+                            let active_stroke = canvas.begin_stroke(color, self.brush_size, 1.0);
                             println!(
-                                "Created active stroke with color RGB({}, {}, {}) and width {}",
-                                color.r, color.g, color.b, self.brush_size
+                                "Created {}stroke with color RGB({}, {}, {}) and width {}",
+                                if self.is_eraser { "eraser " } else { "" },
+                                color.r,
+                                color.g,
+                                color.b,
+                                self.brush_size
                             );
 
                             // Store the active stroke
@@ -335,6 +349,32 @@ impl ApplicationHandler for WindowApp {
                     }
                     if let Some(window) = &self.window {
                         window.request_redraw();
+                    }
+                } else if button == winit::event::MouseButton::Right {
+                    // Right-click for eraser mode
+                    match button_state {
+                        winit::event::ElementState::Pressed => {
+                            self.is_eraser = true;
+                            logger::info("Eraser mode: ON (right-click held)");
+                            println!("Eraser mode: ON");
+                            if let Some(renderer) = &mut self.renderer {
+                                renderer.set_eraser(true);
+                            }
+                            if let Some(window) = &self.window {
+                                window.request_redraw();
+                            }
+                        }
+                        winit::event::ElementState::Released => {
+                            self.is_eraser = false;
+                            logger::info("Eraser mode: OFF (right-click released)");
+                            println!("Eraser mode: OFF");
+                            if let Some(renderer) = &mut self.renderer {
+                                renderer.set_eraser(false);
+                            }
+                            if let Some(window) = &self.window {
+                                window.request_redraw();
+                            }
+                        }
                     }
                 }
             }
@@ -397,6 +437,41 @@ impl ApplicationHandler for WindowApp {
                             }
                             if let Some(window) = &self.window {
                                 window.request_redraw();
+                            }
+                        }
+                        winit::keyboard::Key::Character(c) => {
+                            if self
+                                .modifiers
+                                .contains(winit::keyboard::ModifiersState::CONTROL)
+                            {
+                                let c_str: &str = c;
+                                match c_str {
+                                    "z" | "Z" => {
+                                        // Ctrl+Z: Undo
+                                        let mut canvas = self.canvas.borrow_mut();
+                                        if canvas.can_undo() {
+                                            canvas.undo();
+                                            logger::info("Undo: removed last stroke");
+                                            println!("Undo: removed last stroke");
+                                            if let Some(window) = &self.window {
+                                                window.request_redraw();
+                                            }
+                                        }
+                                    }
+                                    "y" | "Y" => {
+                                        // Ctrl+Y: Redo (Windows convention)
+                                        let mut canvas = self.canvas.borrow_mut();
+                                        if canvas.can_redo() {
+                                            canvas.redo();
+                                            logger::info("Redo: restored last undone stroke");
+                                            println!("Redo: restored last undone stroke");
+                                            if let Some(window) = &self.window {
+                                                window.request_redraw();
+                                            }
+                                        }
+                                    }
+                                    _ => {}
+                                }
                             }
                         }
                         _ => {}
@@ -481,5 +556,33 @@ mod tests {
 
         mouse_state = MouseState::Drawing;
         assert_eq!(mouse_state, MouseState::Drawing);
+    }
+
+    #[test]
+    fn test_window_app_initial_state() {
+        let preferences = Preferences::default();
+        let app = WindowApp::new(preferences);
+
+        assert!(!app.is_eraser);
+        assert!(app.window.is_none());
+        assert!(app.renderer.is_none());
+    }
+
+    #[test]
+    fn test_mouse_position_initial() {
+        let preferences = Preferences::default();
+        let app = WindowApp::new(preferences);
+
+        assert_eq!(app.mouse_position.x, 0.0);
+        assert_eq!(app.mouse_position.y, 0.0);
+    }
+
+    #[test]
+    fn test_canvas_access() {
+        let preferences = Preferences::default();
+        let app = WindowApp::new(preferences);
+
+        let canvas = app.canvas();
+        assert_eq!(canvas.borrow().strokes().len(), 0);
     }
 }

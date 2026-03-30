@@ -309,6 +309,110 @@ pub fn generate_brush_size_vertices(selected_size: f32) -> Vec<f32> {
     vertices
 }
 
+/// Generate vertices for the eraser toggle button UI
+pub fn generate_eraser_button_vertices(is_active: bool) -> Vec<f32> {
+    let mut vertices = Vec::new();
+    let eraser_x = 10.0;
+    let eraser_y = 85.0;
+    let button_size = 30.0;
+    let border_width = 2.0;
+
+    // Background
+    vertices.extend(generate_rect(
+        eraser_x,
+        eraser_y,
+        button_size,
+        button_size,
+        0.85,
+        0.85,
+        0.85,
+        1.0,
+    ));
+
+    // Eraser body (pink/coral)
+    let body_padding = 4.0;
+    let body_width = button_size - body_padding * 2.0;
+    let body_height = button_size - body_padding * 2.0;
+    vertices.extend(generate_rect(
+        eraser_x + body_padding,
+        eraser_y + body_padding,
+        body_width,
+        body_height,
+        0.9,
+        0.6,
+        0.6,
+        1.0,
+    ));
+
+    // Eraser top (cream) - top portion
+    let top_height = body_height * 0.35;
+    let top_width = body_width - 4.0;
+    let top_x = eraser_x + body_padding + 2.0;
+    let top_y = eraser_y + body_padding;
+    vertices.extend(generate_rect(
+        top_x, top_y, top_width, top_height, 0.95, 0.92, 0.85, 1.0,
+    ));
+
+    // Eraser stripe (darker rose) - bottom portion
+    let stripe_height = body_height * 0.2;
+    let stripe_y = eraser_y + body_padding + body_height - stripe_height;
+    vertices.extend(generate_rect(
+        eraser_x + body_padding,
+        stripe_y,
+        body_width,
+        stripe_height,
+        0.75,
+        0.4,
+        0.45,
+        1.0,
+    ));
+
+    if is_active {
+        vertices.extend(generate_rect(
+            eraser_x - border_width,
+            eraser_y - border_width,
+            button_size + border_width * 2.0,
+            border_width,
+            0.0,
+            0.5,
+            1.0,
+            1.0,
+        ));
+        vertices.extend(generate_rect(
+            eraser_x - border_width,
+            eraser_y + button_size,
+            button_size + border_width * 2.0,
+            border_width,
+            0.0,
+            0.5,
+            1.0,
+            1.0,
+        ));
+        vertices.extend(generate_rect(
+            eraser_x - border_width,
+            eraser_y - border_width,
+            border_width,
+            button_size + border_width * 2.0,
+            0.0,
+            0.5,
+            1.0,
+            1.0,
+        ));
+        vertices.extend(generate_rect(
+            eraser_x + button_size,
+            eraser_y - border_width,
+            border_width,
+            button_size + border_width * 2.0,
+            0.0,
+            0.5,
+            1.0,
+            1.0,
+        ));
+    }
+
+    vertices
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -655,5 +759,139 @@ mod tests {
         let vertices = generate_brush_size_vertices(100.0);
         // 5 buttons * (bg + indicator) = 5 * 12 = 60 vertices * 6 floats = 360
         assert_eq!(vertices.len(), 360);
+    }
+
+    // --- generate_eraser_button_vertices tests ---
+
+    #[test]
+    fn test_eraser_button_inactive() {
+        let vertices = generate_eraser_button_vertices(false);
+        // Button bg (6 verts) + body (6 verts) + top (6 verts) + stripe (6 verts) = 24 verts * 6 floats = 144
+        assert_eq!(vertices.len(), 144);
+    }
+
+    #[test]
+    fn test_eraser_button_active() {
+        let vertices = generate_eraser_button_vertices(true);
+        // Button bg (6) + body (6) + top (6) + stripe (6) + 4 border rects (24) = 48 verts * 6 floats = 288
+        assert_eq!(vertices.len(), 288);
+    }
+
+    #[test]
+    fn test_eraser_button_active_larger_than_inactive() {
+        let inactive = generate_eraser_button_vertices(false);
+        let active = generate_eraser_button_vertices(true);
+        assert!(active.len() > inactive.len());
+    }
+
+    #[test]
+    fn test_generate_rect_zero_dimensions() {
+        let vertices = generate_rect(0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0);
+        let vertices2 = generate_rect(10.0, 10.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0);
+        let vertices3 = generate_rect(10.0, 10.0, 10.0, 0.0, 1.0, 1.0, 1.0, 1.0);
+        let vertices4 = generate_rect(10.0, 10.0, 0.0, 10.0, 1.0, 1.0, 1.0, 1.0);
+        assert!(!vertices.is_empty());
+        assert!(!vertices2.is_empty());
+        assert!(!vertices3.is_empty());
+        assert!(!vertices4.is_empty());
+    }
+
+    #[test]
+    fn test_generate_rect_negative_dimensions() {
+        let vertices = generate_rect(-10.0, -10.0, -5.0, -5.0, 1.0, 0.0, 0.0, 1.0);
+        let vertices2 = generate_rect(-10.0, -10.0, 5.0, 5.0, 1.0, 0.0, 0.0, 1.0);
+        assert!(!vertices.is_empty());
+        assert!(!vertices2.is_empty());
+    }
+
+    #[test]
+    fn test_generate_rect_all_channels() {
+        let vertices = generate_rect(0.0, 0.0, 10.0, 10.0, 0.1, 0.2, 0.3, 0.4);
+        assert_eq!(vertices.len(), 36);
+        assert!((vertices[2] - 0.1).abs() < 0.01);
+        assert!((vertices[3] - 0.2).abs() < 0.01);
+        assert!((vertices[4] - 0.3).abs() < 0.01);
+        assert!((vertices[5] - 0.4).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_generate_stroke_vertices_three_points() {
+        use crate::canvas::{Color, Point, Stroke};
+
+        let stroke = Stroke {
+            points: vec![
+                Point { x: 0.0, y: 0.0 },
+                Point { x: 50.0, y: 50.0 },
+                Point { x: 100.0, y: 100.0 },
+            ],
+            color: Color::WHITE,
+            width: 10.0,
+            opacity: 1.0,
+        };
+
+        let vertices = generate_stroke_vertices(&stroke);
+        assert!(!vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_stroke_vertices_different_widths() {
+        use crate::canvas::{Color, Point, Stroke};
+
+        let stroke1 = Stroke {
+            points: vec![Point { x: 0.0, y: 0.0 }, Point { x: 100.0, y: 0.0 }],
+            color: Color::WHITE,
+            width: 2.0,
+            opacity: 1.0,
+        };
+
+        let stroke2 = Stroke {
+            points: vec![Point { x: 0.0, y: 0.0 }, Point { x: 100.0, y: 0.0 }],
+            color: Color::BLACK,
+            width: 20.0,
+            opacity: 1.0,
+        };
+
+        let v1 = generate_stroke_vertices(&stroke1);
+        let v2 = generate_stroke_vertices(&stroke2);
+        assert_ne!(v1, v2);
+    }
+
+    #[test]
+    fn test_point_in_triangle_center() {
+        let v0 = [0.0, 0.0];
+        let v1 = [10.0, 0.0];
+        let v2 = [5.0, 10.0];
+
+        assert!(point_in_triangle(5.0, 5.0, &v0, &v1, &v2));
+    }
+
+    #[test]
+    fn test_point_in_triangle_outside() {
+        let v0 = [0.0, 0.0];
+        let v1 = [10.0, 0.0];
+        let v2 = [5.0, 10.0];
+
+        assert!(!point_in_triangle(100.0, 100.0, &v0, &v1, &v2));
+    }
+
+    #[test]
+    fn test_hex_variations() {
+        let c1 = hex_to_color("#FF0000");
+        let c2 = hex_to_color("FF0000");
+        assert_eq!(c1, c2);
+
+        let c3 = hex_to_color("ff0000");
+        let c4 = hex_to_color("Ff0000");
+        assert_eq!(c3, c4);
+    }
+
+    #[test]
+    fn test_generate_active_stroke_vertices() {
+        use crate::canvas::ActiveStroke;
+        use crate::canvas::Color;
+
+        let active = ActiveStroke::new(Color::WHITE, 5.0, 0.8);
+        let vertices = generate_active_stroke_vertices(&active);
+        assert_eq!(vertices.len(), 0);
     }
 }

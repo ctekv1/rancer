@@ -65,10 +65,8 @@ pub struct Canvas {
     background_color: Color,
     /// Current drawing strokes
     strokes: Vec<Stroke>,
-    /// Undo history for strokes
+    /// Undo history for strokes (also used for redo)
     undo_stack: Vec<Stroke>,
-    /// Redo history for strokes
-    redo_stack: Vec<Stroke>,
 }
 
 impl Default for Canvas {
@@ -79,7 +77,6 @@ impl Default for Canvas {
             background_color: Color::WHITE,
             strokes: Vec::new(),
             undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
         }
     }
 }
@@ -112,13 +109,13 @@ impl Canvas {
     /// Add a new stroke to the canvas
     pub fn add_stroke(&mut self, stroke: Stroke) {
         self.strokes.push(stroke);
+        self.undo_stack.clear();
     }
 
     /// Clear all strokes from the canvas
     pub fn clear(&mut self) {
         self.strokes.clear();
         self.undo_stack.clear();
-        self.redo_stack.clear();
     }
 
     /// Get canvas dimensions
@@ -148,6 +145,16 @@ impl Canvas {
         if let Some(stroke) = self.undo_stack.pop() {
             self.strokes.push(stroke);
         }
+    }
+
+    /// Check if there are strokes available to undo
+    pub fn can_undo(&self) -> bool {
+        !self.strokes.is_empty()
+    }
+
+    /// Check if there are strokes available to redo
+    pub fn can_redo(&self) -> bool {
+        !self.undo_stack.is_empty()
     }
 
     /// Export canvas to a simple representation
@@ -707,6 +714,54 @@ mod tests {
     }
 
     #[test]
+    fn test_new_stroke_clears_undo_stack() {
+        let mut canvas = Canvas::new();
+        let palette = ColorPalette::new();
+
+        let mut s1 = canvas.begin_stroke_with_palette(&palette, 2.0, 1.0);
+        s1.add_point(Point { x: 0.0, y: 0.0 });
+        s1.add_point(Point { x: 10.0, y: 10.0 });
+        canvas.commit_stroke(s1).unwrap();
+
+        canvas.undo();
+        assert!(canvas.can_redo());
+        assert_eq!(canvas.strokes().len(), 0);
+
+        let mut s2 = canvas.begin_stroke_with_palette(&palette, 2.0, 1.0);
+        s2.add_point(Point { x: 20.0, y: 20.0 });
+        s2.add_point(Point { x: 30.0, y: 30.0 });
+        canvas.commit_stroke(s2).unwrap();
+
+        assert!(!canvas.can_redo());
+        assert_eq!(canvas.strokes().len(), 1);
+        canvas.redo();
+        assert_eq!(canvas.strokes().len(), 1);
+    }
+
+    #[test]
+    fn test_can_undo_can_redo() {
+        let mut canvas = Canvas::new();
+        assert!(!canvas.can_undo());
+        assert!(!canvas.can_redo());
+
+        let palette = ColorPalette::new();
+        let mut s1 = canvas.begin_stroke_with_palette(&palette, 2.0, 1.0);
+        s1.add_point(Point { x: 0.0, y: 0.0 });
+        canvas.commit_stroke(s1).unwrap();
+
+        assert!(canvas.can_undo());
+        assert!(!canvas.can_redo());
+
+        canvas.undo();
+        assert!(!canvas.can_undo());
+        assert!(canvas.can_redo());
+
+        canvas.redo();
+        assert!(canvas.can_undo());
+        assert!(!canvas.can_redo());
+    }
+
+    #[test]
     fn test_undo_redo_cycle() {
         let mut canvas = Canvas::new();
         let palette = ColorPalette::new();
@@ -849,5 +904,175 @@ mod tests {
         };
         canvas.add_stroke(stroke);
         assert_eq!(canvas.strokes().len(), 1);
+    }
+
+    #[test]
+    fn test_color_equality() {
+        let c1 = Color {
+            r: 100,
+            g: 150,
+            b: 200,
+            a: 255,
+        };
+        let c2 = Color {
+            r: 100,
+            g: 150,
+            b: 200,
+            a: 255,
+        };
+        let c3 = Color {
+            r: 100,
+            g: 150,
+            b: 201,
+            a: 255,
+        };
+        assert_eq!(c1, c2);
+        assert_ne!(c1, c3);
+    }
+
+    #[test]
+    fn test_color_constants_comprehensive() {
+        assert_eq!(Color::WHITE.r, 255);
+        assert_eq!(Color::WHITE.g, 255);
+        assert_eq!(Color::WHITE.b, 255);
+        assert_eq!(Color::WHITE.a, 255);
+
+        assert_eq!(Color::BLACK.r, 0);
+        assert_eq!(Color::BLACK.g, 0);
+        assert_eq!(Color::BLACK.b, 0);
+        assert_eq!(Color::BLACK.a, 255);
+
+        assert_eq!(Color::TRANSPARENT.a, 0);
+    }
+
+    #[test]
+    fn test_multiple_undo_redo_cycles() {
+        let mut canvas = Canvas::new();
+        let palette = ColorPalette::new();
+
+        for i in 0..5 {
+            let mut s = canvas.begin_stroke_with_palette(&palette, 2.0, 1.0);
+            s.add_point(Point {
+                x: i as f32 * 10.0,
+                y: i as f32 * 10.0,
+            });
+            canvas.commit_stroke(s).unwrap();
+        }
+        assert_eq!(canvas.strokes().len(), 5);
+        assert!(canvas.can_undo());
+        assert!(!canvas.can_redo());
+
+        for _ in 0..3 {
+            canvas.undo();
+        }
+        assert_eq!(canvas.strokes().len(), 2);
+        assert!(canvas.can_undo());
+        assert!(canvas.can_redo());
+
+        canvas.redo();
+        assert_eq!(canvas.strokes().len(), 3);
+
+        canvas.redo();
+        assert_eq!(canvas.strokes().len(), 4);
+    }
+
+    #[test]
+    fn test_stroke_iteration() {
+        let mut canvas = Canvas::new();
+        let palette = ColorPalette::new();
+
+        for i in 0..3 {
+            let mut s = canvas.begin_stroke_with_palette(&palette, 2.0, 1.0);
+            s.add_point(Point {
+                x: i as f32,
+                y: i as f32,
+            });
+            canvas.commit_stroke(s).unwrap();
+        }
+
+        let mut count = 0;
+        for stroke in canvas.strokes() {
+            assert!(!stroke.points.is_empty());
+            count += 1;
+        }
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn test_palette_get_all_colors() {
+        let palette = ColorPalette::new();
+        assert!(palette.color_count() > 0);
+
+        for color in palette.colors() {
+            assert!(color.a > 0);
+        }
+    }
+
+    #[test]
+    fn test_active_stroke_with_opacity() {
+        let mut canvas = Canvas::new();
+        let palette = ColorPalette::new();
+
+        let mut s = canvas.begin_stroke_with_palette(&palette, 5.0, 0.5);
+        s.add_point(Point { x: 0.0, y: 0.0 });
+        s.add_point(Point { x: 10.0, y: 10.0 });
+
+        assert_eq!(s.width(), 5.0);
+        assert_eq!(s.opacity(), 0.5);
+        assert_eq!(s.points().len(), 2);
+
+        canvas.commit_stroke(s).unwrap();
+        assert_eq!(canvas.strokes().len(), 1);
+        assert_eq!(canvas.strokes()[0].opacity, 0.5);
+    }
+
+    #[test]
+    fn test_canvas_clear_with_active_stroke() {
+        let mut canvas = Canvas::new();
+        let palette = ColorPalette::new();
+
+        let mut s = canvas.begin_stroke_with_palette(&palette, 2.0, 1.0);
+        s.add_point(Point { x: 0.0, y: 0.0 });
+        canvas.commit_stroke(s).unwrap();
+
+        canvas.clear();
+        assert_eq!(canvas.strokes().len(), 0);
+        assert!(!canvas.can_undo());
+        assert!(!canvas.can_redo());
+    }
+
+    #[test]
+    fn test_stroke_with_many_points() {
+        let mut canvas = Canvas::new();
+        let palette = ColorPalette::new();
+
+        let mut s = canvas.begin_stroke_with_palette(&palette, 3.0, 1.0);
+        for i in 0..100 {
+            s.add_point(Point {
+                x: i as f32,
+                y: i as f32,
+            });
+        }
+        assert_eq!(s.points().len(), 100);
+
+        canvas.commit_stroke(s).unwrap();
+        assert_eq!(canvas.strokes().len(), 1);
+        assert_eq!(canvas.strokes()[0].points.len(), 100);
+    }
+
+    #[test]
+    fn test_export_info() {
+        let mut canvas = Canvas::with_size(800, 600);
+        let palette = ColorPalette::new();
+
+        let mut s = canvas.begin_stroke_with_palette(&palette, 2.0, 1.0);
+        s.add_point(Point { x: 0.0, y: 0.0 });
+        s.add_point(Point { x: 100.0, y: 100.0 });
+        canvas.commit_stroke(s).unwrap();
+
+        let export = canvas.export();
+        assert_eq!(export.width, 800);
+        assert_eq!(export.height, 600);
+        assert_eq!(export.stroke_count, 1);
     }
 }

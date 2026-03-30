@@ -6,6 +6,7 @@
 //!
 //! GTK4 is used for Linux/Wayland compatibility with OpenGL rendering via GLArea.
 
+use gtk4::gdk::ModifierType;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
@@ -51,6 +52,8 @@ pub struct WindowApp {
     mouse_position: Point,
     /// Current brush size in pixels
     brush_size: f32,
+    /// Eraser mode active
+    is_eraser: bool,
     /// User preferences
     preferences: Preferences,
 }
@@ -76,6 +79,7 @@ impl WindowApp {
             mouse_state: MouseState::Idle,
             mouse_position: Point { x: 0.0, y: 0.0 },
             brush_size: preferences.brush.default_size,
+            is_eraser: false,
             preferences,
         }
     }
@@ -91,6 +95,7 @@ impl WindowBackend for WindowApp {
         let mouse_state = self.mouse_state;
         let mouse_position = self.mouse_position;
         let brush_size = self.brush_size;
+        let is_eraser = self.is_eraser;
         let preferences = Rc::new(RefCell::new(self.preferences.clone()));
 
         self.app.connect_activate(move |app| {
@@ -122,6 +127,7 @@ impl WindowBackend for WindowApp {
 
             // Shared state
             let brush_size_shared = Rc::new(RefCell::new(brush_size));
+            let is_eraser_shared = Rc::new(RefCell::new(is_eraser));
             let gl_renderer: Rc<RefCell<Option<GlRenderer>>> = Rc::new(RefCell::new(None));
 
             // Set up mouse event handlers
@@ -133,6 +139,7 @@ impl WindowBackend for WindowApp {
                 mouse_state,
                 mouse_position,
                 brush_size_shared.clone(),
+                is_eraser_shared.clone(),
                 preferences.clone(),
             );
 
@@ -143,7 +150,7 @@ impl WindowBackend for WindowApp {
             let prefs_kb = preferences.clone();
             let gl_area_kb = gl_area.clone();
 
-            key_controller.connect_key_pressed(move |_controller, key, _keycode, _state| {
+            key_controller.connect_key_pressed(move |_controller, key, _keycode, state| {
                 match key {
                     gtk4::gdk::Key::s | gtk4::gdk::Key::S => {
                         // Export canvas to PNG
@@ -193,6 +200,46 @@ impl WindowBackend for WindowApp {
                         gl_area_kb.queue_render();
                         glib::Propagation::Stop
                     }
+                    gtk4::gdk::Key::z | gtk4::gdk::Key::Z => {
+                        if state.contains(ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK) {
+                            // Ctrl+Shift+Z: Redo
+                            let mut canvas = canvas_kb.borrow_mut();
+                            if canvas.can_redo() {
+                                canvas.redo();
+                                logger::info("Redo: restored last undone stroke");
+                                println!("Redo: restored last undone stroke");
+                                gl_area_kb.queue_render();
+                            }
+                            glib::Propagation::Stop
+                        } else if state.contains(ModifierType::CONTROL_MASK) {
+                            // Ctrl+Z: Undo
+                            let mut canvas = canvas_kb.borrow_mut();
+                            if canvas.can_undo() {
+                                canvas.undo();
+                                logger::info("Undo: removed last stroke");
+                                println!("Undo: removed last stroke");
+                                gl_area_kb.queue_render();
+                            }
+                            glib::Propagation::Stop
+                        } else {
+                            glib::Propagation::Proceed
+                        }
+                    }
+                    gtk4::gdk::Key::y | gtk4::gdk::Key::Y => {
+                        if state.contains(ModifierType::CONTROL_MASK) {
+                            // Ctrl+Y: Redo (alternative)
+                            let mut canvas = canvas_kb.borrow_mut();
+                            if canvas.can_redo() {
+                                canvas.redo();
+                                logger::info("Redo: restored last undone stroke");
+                                println!("Redo: restored last undone stroke");
+                                gl_area_kb.queue_render();
+                            }
+                            glib::Propagation::Stop
+                        } else {
+                            glib::Propagation::Proceed
+                        }
+                    }
                     _ => glib::Propagation::Proceed,
                 }
             });
@@ -205,6 +252,7 @@ impl WindowBackend for WindowApp {
             let palette_clone = palette.clone();
             let active_stroke_clone = active_stroke.clone();
             let brush_for_render = brush_size_shared.clone();
+            let is_eraser_for_render = is_eraser_shared.clone();
 
             gl_area.connect_render(move |gl_area, _context| {
                 // Ensure GL context is current before any GL operations
@@ -245,6 +293,7 @@ impl WindowBackend for WindowApp {
                     let palette = palette_clone.borrow();
                     let active_stroke = active_stroke_clone.borrow();
                     let current_brush_size = *brush_for_render.borrow();
+                    let is_eraser = *is_eraser_for_render.borrow();
                     let width = gl_area.width();
                     let height = gl_area.height();
 
@@ -253,6 +302,7 @@ impl WindowBackend for WindowApp {
                         &palette,
                         &active_stroke,
                         current_brush_size,
+                        is_eraser,
                         width,
                         height,
                     );
@@ -331,9 +381,10 @@ fn setup_mouse_events(
     mouse_state: MouseState,
     mouse_position: Point,
     brush_size: Rc<RefCell<f32>>,
+    is_eraser: Rc<RefCell<bool>>,
     preferences: Rc<RefCell<crate::preferences::Preferences>>,
 ) {
-    // Mouse click handler
+    // Mouse click handler for left button
     let click_gesture = GestureClick::new();
     click_gesture.set_button(gtk4::gdk::ffi::GDK_BUTTON_PRIMARY as u32);
 
@@ -343,6 +394,7 @@ fn setup_mouse_events(
     let mouse_state_clone = Rc::new(RefCell::new(mouse_state));
     let mouse_position_clone = Rc::new(RefCell::new(mouse_position));
     let brush_size_clone = brush_size.clone();
+    let is_eraser_clone = is_eraser.clone();
     let prefs_clone = preferences.clone();
 
     // Clone Rc's for use in other closures
@@ -373,7 +425,6 @@ fn setup_mouse_events(
                         eprintln!("Failed to select color: {e}");
                     } else {
                         println!("Selected color at index {i}");
-                        // Save palette selection
                         let mut prefs = prefs_clone.borrow_mut();
                         prefs.palette.selected_index = i;
                         if let Err(e) = crate::preferences::save(&prefs) {
@@ -400,7 +451,6 @@ fn setup_mouse_events(
                 if x >= button_x && x <= button_x + button_size_f64 {
                     *brush_size_clone.borrow_mut() = size;
                     println!("Selected brush size: {size}");
-                    // Save brush size
                     let mut prefs = prefs_clone.borrow_mut();
                     prefs.brush.default_size = size;
                     if let Err(e) = crate::preferences::save(&prefs) {
@@ -414,17 +464,36 @@ fn setup_mouse_events(
                     return;
                 }
             }
+        } else if (85.0..=115.0).contains(&y) && (10.0..=40.0).contains(&x) {
+            // Eraser button area - toggle eraser
+            let mut is_eraser = is_eraser_clone.borrow_mut();
+            *is_eraser = !*is_eraser;
+            println!("Eraser mode: {}", if *is_eraser { "ON" } else { "OFF" });
+            if let Some(widget) = gesture.widget()
+                && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+            {
+                gl_area.queue_render();
+            }
+            return;
         }
 
         // If not on UI, start drawing
-        let color = palette_clone.borrow().current_color();
+        let is_eraser = *is_eraser_clone.borrow();
+        let color = if is_eraser {
+            crate::canvas::Color::WHITE
+        } else {
+            palette_clone.borrow().current_color()
+        };
         let current_brush_size = *brush_size_clone.borrow();
         let mut canvas = canvas_clone.borrow_mut();
-        let active_stroke =
-            canvas.begin_stroke_with_palette(&palette_clone.borrow(), current_brush_size, 1.0);
+        let active_stroke = canvas.begin_stroke(color, current_brush_size, 1.0);
         println!(
-            "Created active stroke with color RGB({}, {}, {}) and width {}",
-            color.r, color.g, color.b, current_brush_size
+            "Created {}stroke with color RGB({}, {}, {}) and width {}",
+            if is_eraser { "eraser " } else { "" },
+            color.r,
+            color.g,
+            color.b,
+            current_brush_size
         );
 
         *active_stroke_clone.borrow_mut() = Some(active_stroke);

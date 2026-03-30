@@ -50,6 +50,8 @@ pub struct Renderer {
     active_stroke: Option<crate::canvas::ActiveStroke>,
     /// Current brush size for UI
     brush_size: f32,
+    /// Eraser mode active
+    is_eraser: bool,
     /// Configuration
     pub config: RendererConfig,
     /// Active rendering backend
@@ -93,6 +95,7 @@ impl Renderer {
                     palette: crate::canvas::ColorPalette::new(),
                     active_stroke: None,
                     brush_size: 3.0, // Default brush size
+                    is_eraser: false,
                     config,
                     backend: RenderBackend::Wgpu,
                     device: Some(device),
@@ -113,6 +116,7 @@ impl Renderer {
                     palette: crate::canvas::ColorPalette::new(),
                     active_stroke: None,
                     brush_size: 3.0, // Default brush size
+                    is_eraser: false,
                     config,
                     backend: RenderBackend::Cairo,
                     device: None,
@@ -392,6 +396,11 @@ impl Renderer {
         self.brush_size = brush_size;
     }
 
+    /// Set the eraser mode
+    pub fn set_eraser(&mut self, is_eraser: bool) {
+        self.is_eraser = is_eraser;
+    }
+
     /// Get a mutable reference to the canvas
     pub fn canvas_mut(&mut self) -> &mut Canvas {
         &mut self.canvas
@@ -547,6 +556,19 @@ impl Renderer {
                         });
                     render_pass.set_vertex_buffer(0, brush_vertex_buffer.slice(..));
                     render_pass.draw(0..brush_size_vertices.len() as u32, 0..1);
+
+                    // Draw eraser button
+                    let eraser_vertices = self.generate_eraser_button_vertices(self.is_eraser);
+                    if !eraser_vertices.is_empty() {
+                        let eraser_vertex_buffer =
+                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("Eraser Button Vertex Buffer"),
+                                contents: bytemuck::cast_slice(&eraser_vertices),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
+                        render_pass.set_vertex_buffer(0, eraser_vertex_buffer.slice(..));
+                        render_pass.draw(0..eraser_vertices.len() as u32, 0..1);
+                    }
                 }
             }
         }
@@ -606,6 +628,12 @@ impl Renderer {
     /// Generate vertices for brush size selector
     fn generate_brush_size_vertices(&self, selected_size: f32) -> Vec<[f32; 7]> {
         let flat = geometry::generate_brush_size_vertices(selected_size);
+        to_vertices_7(&flat, 0.0)
+    }
+
+    /// Generate vertices for eraser button
+    fn generate_eraser_button_vertices(&self, is_active: bool) -> Vec<[f32; 7]> {
+        let flat = geometry::generate_eraser_button_vertices(is_active);
         to_vertices_7(&flat, 0.0)
     }
 

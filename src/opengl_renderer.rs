@@ -133,12 +133,14 @@ impl GlRenderer {
     }
 
     /// Render a frame: clear, draw strokes, draw UI
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &self,
         canvas: &Canvas,
         palette: &ColorPalette,
         active_stroke: &Option<ActiveStroke>,
         brush_size: f32,
+        is_eraser: bool,
         width: i32,
         height: i32,
     ) {
@@ -180,6 +182,12 @@ impl GlRenderer {
                 self.upload_and_draw(&brush_vertices, glow::TRIANGLES);
             }
 
+            // Draw eraser button UI
+            let eraser_vertices = Self::generate_eraser_button_vertices(is_eraser);
+            if !eraser_vertices.is_empty() {
+                self.upload_and_draw(&eraser_vertices, glow::TRIANGLES);
+            }
+
             self.gl.bind_vertex_array(None);
         }
     }
@@ -216,6 +224,11 @@ impl GlRenderer {
     /// Generate vertices for brush size selector UI
     fn generate_brush_size_vertices(selected_size: f32) -> Vec<f32> {
         geometry::generate_brush_size_vertices(selected_size)
+    }
+
+    /// Generate vertices for eraser button UI
+    fn generate_eraser_button_vertices(is_active: bool) -> Vec<f32> {
+        geometry::generate_eraser_button_vertices(is_active)
     }
 }
 
