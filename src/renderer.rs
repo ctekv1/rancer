@@ -78,26 +78,31 @@ pub struct Renderer {
     ui_pipeline: Option<wgpu::RenderPipeline>,
     /// Window size
     window_size: (u32, u32),
+    /// Pipeline layout for recreation
+    pipeline_layout: Option<wgpu::PipelineLayout>,
+    /// Shader module for recreation
+    shader: Option<wgpu::ShaderModule>,
+    /// Window reference for pre_present_notify
+    window: Option<std::sync::Arc<winit::window::Window>>,
 }
 
 impl Renderer {
     /// Create a new renderer with WGPU initialization and cairo fallback
     pub async fn new(
         config: RendererConfig,
-        window: &(impl raw_window_handle::HasWindowHandle + raw_window_handle::HasDisplayHandle + Sync),
+        window: std::sync::Arc<winit::window::Window>,
         window_size: (u32, u32),
     ) -> Result<Self, Box<dyn std::error::Error>> {
         logger::info("=== RENDERER INITIALIZATION START ===");
         logger::info("Attempting WGPU initialization...");
 
         // Try to initialize WGPU
-        match Self::init_wgpu(window, window_size, &config).await {
-            Ok((device, queue, surface, surface_config, render_pipeline, ui_pipeline)) => {
+        match Self::init_wgpu(&window, window_size, &config).await {
+            Ok((device, queue, surface, surface_config, render_pipeline, ui_pipeline, pipeline_layout, shader)) => {
                 logger::info("✅ WGPU initialized successfully!");
                 logger::info("   - Backend: GPU (WGPU)");
                 logger::info(&format!("   - Device: {:?}", device));
                 logger::info(&format!("   - Surface format: {:?}", surface_config.format));
-                logger::info(&format!("   - MSAA samples: {}", config.msaa_samples));
                 Ok(Self {
                     canvas: Canvas::new(),
                     hue: 0.0,
@@ -118,6 +123,9 @@ impl Renderer {
                     render_pipeline: Some(render_pipeline),
                     ui_pipeline: Some(ui_pipeline),
                     window_size,
+                    pipeline_layout: Some(pipeline_layout),
+                    shader: Some(shader),
+                    window: Some(window),
                 })
             }
             Err(e) => {
@@ -144,16 +152,148 @@ impl Renderer {
                     render_pipeline: None,
                     ui_pipeline: None,
                     window_size,
+                    pipeline_layout: None,
+                    shader: None,
+                    window: Some(window),
                 })
             }
         }
+    }
+
+    /// Create render pipelines with the given sample count
+    fn create_pipelines(
+        device: &wgpu::Device,
+        shader: &wgpu::ShaderModule,
+        pipeline_layout: &wgpu::PipelineLayout,
+        surface_format: wgpu::TextureFormat,
+        sample_count: u32,
+    ) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
+        // Create render pipeline
+        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Render Pipeline"),
+            layout: Some(pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: Some("vs_main"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<[f32; 7]>() as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            offset: 0,
+                            shader_location: 0,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
+                        wgpu::VertexAttribute {
+                            offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
+                            shader_location: 1,
+                            format: wgpu::VertexFormat::Float32x4,
+                        },
+                        wgpu::VertexAttribute {
+                            offset: std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
+                            shader_location: 2,
+                            format: wgpu::VertexFormat::Float32,
+                        },
+                    ],
+                }],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: sample_count,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview_mask: None,
+            cache: None,
+        });
+
+        // Create UI pipeline for rendering rectangles
+        let ui_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("UI Pipeline"),
+            layout: Some(pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: Some("vs_main"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<[f32; 7]>() as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            offset: 0,
+                            shader_location: 0,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
+                        wgpu::VertexAttribute {
+                            offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
+                            shader_location: 1,
+                            format: wgpu::VertexFormat::Float32x4,
+                        },
+                        wgpu::VertexAttribute {
+                            offset: std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
+                            shader_location: 2,
+                            format: wgpu::VertexFormat::Float32,
+                        },
+                    ],
+                }],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: sample_count,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview_mask: None,
+            cache: None,
+        });
+
+        (render_pipeline, ui_pipeline)
     }
 
     /// Initialize WGPU device, queue, surface, and pipeline
     async fn init_wgpu(
         window: &(impl raw_window_handle::HasWindowHandle + raw_window_handle::HasDisplayHandle + Sync),
         window_size: (u32, u32),
-        config: &RendererConfig,
+        _config: &RendererConfig,
     ) -> Result<
         (
             wgpu::Device,
@@ -161,7 +301,9 @@ impl Renderer {
             wgpu::Surface<'static>,
             wgpu::SurfaceConfiguration,
             wgpu::RenderPipeline,
-            wgpu::RenderPipeline, // UI pipeline
+            wgpu::RenderPipeline,
+            wgpu::PipelineLayout,
+            wgpu::ShaderModule,
         ),
         Box<dyn std::error::Error>,
     > {
@@ -199,6 +341,21 @@ impl Renderer {
             })
             .await?;
 
+        // Get device limits to clamp surface size
+        let device_limits = device.limits();
+        let max_texture_size = device_limits.max_texture_dimension_2d;
+        logger::info(&format!("Max texture dimension: {}", max_texture_size));
+
+        // Clamp window size to GPU limits
+        let surface_width = window_size.0.min(max_texture_size);
+        let surface_height = window_size.1.min(max_texture_size);
+        if surface_width != window_size.0 || surface_height != window_size.1 {
+            logger::warn(&format!(
+                "Window size {}x{} exceeds GPU limit {}x{}, clamping",
+                window_size.0, window_size.1, surface_width, surface_height
+            ));
+        }
+
         // Configure surface
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps
@@ -211,9 +368,9 @@ impl Renderer {
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
-            width: window_size.0,
-            height: window_size.1,
-            present_mode: wgpu::PresentMode::Fifo,
+            width: surface_width,
+            height: surface_height,
+            present_mode: wgpu::PresentMode::Immediate,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
@@ -248,129 +405,15 @@ impl Renderer {
             immediate_size: 0,
         });
 
-        // Create render pipeline
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<[f32; 7]>() as wgpu::BufferAddress,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[
-                        // Position (x, y)
-                        wgpu::VertexAttribute {
-                            offset: 0,
-                            shader_location: 0,
-                            format: wgpu::VertexFormat::Float32x2,
-                        },
-                        // Color (r, g, b, a)
-                        wgpu::VertexAttribute {
-                            offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
-                            shader_location: 1,
-                            format: wgpu::VertexFormat::Float32x4,
-                        },
-                        // Line width
-                        wgpu::VertexAttribute {
-                            offset: std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
-                            shader_location: 2,
-                            format: wgpu::VertexFormat::Float32,
-                        },
-                    ],
-                }],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: config.msaa_samples,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview_mask: None,
-            cache: None,
-        });
+        // For swapchain rendering, use sample_count=1 (MSAA with swapchains requires
+        // creating intermediate render targets, which is more complex)
+        // The config.msaa_samples value is stored but not used for pipeline creation
+        let sample_count = 1;
+        logger::info(&format!("Using MSAA sample count: {} (swapchain rendering)", sample_count));
 
-        // Create UI pipeline for rendering rectangles
-        let ui_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("UI Pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<[f32; 7]>() as wgpu::BufferAddress,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[
-                        // Position (x, y)
-                        wgpu::VertexAttribute {
-                            offset: 0,
-                            shader_location: 0,
-                            format: wgpu::VertexFormat::Float32x2,
-                        },
-                        // Color (r, g, b, a)
-                        wgpu::VertexAttribute {
-                            offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
-                            shader_location: 1,
-                            format: wgpu::VertexFormat::Float32x4,
-                        },
-                        // Line width (set to 0 for UI elements)
-                        wgpu::VertexAttribute {
-                            offset: std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
-                            shader_location: 2,
-                            format: wgpu::VertexFormat::Float32,
-                        },
-                    ],
-                }],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: config.msaa_samples,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview_mask: None,
-            cache: None,
-        });
+        // Create pipelines with the determined sample count
+        let (render_pipeline, ui_pipeline) =
+            Self::create_pipelines(&device, &shader, &pipeline_layout, surface_format, sample_count);
 
         Ok((
             device,
@@ -379,6 +422,8 @@ impl Renderer {
             surface_config,
             render_pipeline,
             ui_pipeline,
+            pipeline_layout,
+            shader,
         ))
     }
 
@@ -391,11 +436,33 @@ impl Renderer {
             && new_size.0 > 0
             && new_size.1 > 0
         {
+            let max_texture_size = device.limits().max_texture_dimension_2d;
+            let surface_width = new_size.0.min(max_texture_size);
+            let surface_height = new_size.1.min(max_texture_size);
+
             let mut new_config = config.clone();
-            new_config.width = new_size.0;
-            new_config.height = new_size.1;
+            new_config.width = surface_width;
+            new_config.height = surface_height;
             surface.configure(device, &new_config);
+            let surface_format = new_config.format;
             self.surface_config = Some(new_config);
+
+            // Recreate pipelines on resize (sample_count=1 for swapchain rendering)
+            if let (Some(device), Some(pipeline_layout), Some(shader)) = (
+                &self.device,
+                &self.pipeline_layout,
+                &self.shader,
+            ) {
+                let (render_pipeline, ui_pipeline) = Self::create_pipelines(
+                    device,
+                    shader,
+                    pipeline_layout,
+                    surface_format,
+                    1,
+                );
+                self.render_pipeline = Some(render_pipeline);
+                self.ui_pipeline = Some(ui_pipeline);
+            }
         }
     }
 
@@ -517,7 +584,33 @@ impl Renderer {
             _ => return Err(wgpu::SurfaceError::Lost),
         };
 
+        // Ensure surface is configured with current window size before rendering
+        // Clamp to GPU limits to prevent invalid configurations
+        if let Some(config) = &self.surface_config {
+            let max_texture_size = device.limits().max_texture_dimension_2d;
+            let clamped_width = self.window_size.0.min(max_texture_size);
+            let clamped_height = self.window_size.1.min(max_texture_size);
+            
+            if config.width != clamped_width || config.height != clamped_height {
+                let mut new_config = config.clone();
+                new_config.width = clamped_width;
+                new_config.height = clamped_height;
+                surface.configure(device, &new_config);
+                self.surface_config = Some(new_config);
+            }
+        }
+
+        // Get the next texture to render to
         let output = surface.get_current_texture()?;
+
+        // Check if surface is suboptimal and needs reconfiguration
+        if output.suboptimal {
+            logger::debug("Surface suboptimal, reconfiguring");
+            if let Some(config) = &self.surface_config {
+                surface.configure(device, config);
+            }
+        }
+
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -525,8 +618,10 @@ impl Renderer {
         // Generate vertices from canvas strokes (one continuous buffer)
         let _vertices = self.generate_vertices();
 
-        // Create uniform buffer for canvas size
-        let uniform_data = [self.window_size.0 as f32, self.window_size.1 as f32];
+        // Use actual texture dimensions to ensure consistency with viewport
+        let texture_width = output.texture.width() as f32;
+        let texture_height = output.texture.height() as f32;
+        let uniform_data = [texture_width, texture_height];
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Uniform Buffer"),
             contents: bytemuck::cast_slice(&uniform_data),
@@ -570,6 +665,23 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+
+            render_pass.set_viewport(
+                0.0,
+                0.0,
+                output.texture.width() as f32,
+                output.texture.height() as f32,
+                0.0,
+                1.0,
+            );
+
+            logger::debug(&format!(
+                "[RENDER] Texture: {}x{}, Uniform: {}x{}",
+                output.texture.width(),
+                output.texture.height(),
+                uniform_data[0] as u32,
+                uniform_data[1] as u32
+            ));
 
             render_pass.set_pipeline(pipeline);
             render_pass.set_bind_group(0, &bind_group, &[]);
@@ -721,6 +833,12 @@ impl Renderer {
         }
 
         queue.submit(std::iter::once(encoder.finish()));
+        
+        // Notify window before presenting to help compositor update window regions
+        if let Some(ref window) = self.window {
+            window.pre_present_notify();
+        }
+        
         output.present();
 
         Ok(())

@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
-use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
 
@@ -17,6 +17,43 @@ use crate::logger;
 use crate::preferences::Preferences;
 use crate::renderer::{Renderer, RendererConfig};
 use crate::window_backend::{MouseState as BackendMouseState, WindowBackend};
+
+#[cfg(windows)]
+fn force_window_repaint(window: &Window) {
+    use raw_window_handle::HasWindowHandle;
+    use raw_window_handle::RawWindowHandle;
+    
+    if let Ok(handle) = window.window_handle() {
+        match handle.as_raw() {
+            RawWindowHandle::Win32(h) => {
+                let hwnd_val = h.hwnd.get();
+                if hwnd_val != 0 {
+                    let hwnd = hwnd_val as *mut std::ffi::c_void;
+                    // SAFETY: We're calling Win32 APIs on a valid HWND obtained from winit.
+                    // These functions are standard Windows APIs for window management.
+                    unsafe {
+                        unsafe extern "system" {
+                            fn InvalidateRect(
+                                hWnd: *mut std::ffi::c_void,
+                                lpRect: *const std::ffi::c_void,
+                                bErase: i32,
+                            ) -> i32;
+                            fn UpdateWindow(hWnd: *mut std::ffi::c_void) -> i32;
+                        }
+                        InvalidateRect(hwnd, std::ptr::null(), 0);
+                        UpdateWindow(hwnd);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn force_window_repaint(_window: &Window) {
+    // No-op on non-Windows platforms
+}
 
 /// Represents the current state of mouse interaction
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -30,7 +67,7 @@ pub enum MouseState {
 /// Window application state using winit
 pub struct WindowApp {
     /// The winit window
-    window: Option<Rc<Window>>,
+    window: Option<std::sync::Arc<Window>>,
     /// WGPU renderer
     renderer: Option<Renderer>,
     /// Canvas for drawing operations
@@ -61,6 +98,8 @@ pub struct WindowApp {
     preferences: Preferences,
     /// Current keyboard modifiers state
     modifiers: ModifiersState,
+    /// Scale factor for DPI scaling
+    scale_factor: f64,
 }
 
 /// Slider drag state
@@ -94,6 +133,7 @@ impl WindowApp {
             slider_drag: None,
             preferences,
             modifiers: ModifiersState::empty(),
+            scale_factor: 1.0,
         }
     }
 
@@ -151,13 +191,19 @@ impl ApplicationHandler for WindowApp {
                 ));
 
             let window = event_loop.create_window(attributes).unwrap();
-            let window = Rc::new(window);
+            let window = std::sync::Arc::new(window);
 
+            self.scale_factor = window.scale_factor();
             logger::info("winit window created successfully");
             logger::info(&format!(
-                "Window size: {}x{}",
+                "Window size: {}x{} (logical)",
                 self.preferences.window.width, self.preferences.window.height
             ));
+            logger::info(&format!(
+                "Window physical size: {}x{} (with DPI scaling)",
+                window.inner_size().width, window.inner_size().height
+            ));
+            logger::info(&format!("Window scale factor: {}", self.scale_factor));
             logger::info(&format!("Window title: {}", self.preferences.window.title));
             logger::info("========================");
 
@@ -169,7 +215,7 @@ impl ApplicationHandler for WindowApp {
 
             // Use tokio runtime to initialize WGPU (async)
             let rt = tokio::runtime::Runtime::new().unwrap();
-            match rt.block_on(Renderer::new(config, &*window, (size.width, size.height))) {
+            match rt.block_on(Renderer::new(config, window.clone(), (size.width, size.height))) {
                 Ok(mut renderer) => {
                     logger::info("✅ WGPU renderer initialized successfully!");
                     renderer.print_backend_status();
@@ -204,16 +250,30 @@ impl ApplicationHandler for WindowApp {
                 self.modifiers = modifiers.state();
             }
             WindowEvent::Resized(physical_size) => {
+                // Update scale factor (may change if window moves between monitors)
+                if let Some(ref window) = self.window {
+                    self.scale_factor = window.scale_factor();
+                }
+
                 logger::info(&format!(
-                    "Window resized to {}x{}",
+                    "Window resized to {}x{} (physical)",
                     physical_size.width, physical_size.height
                 ));
 
-                // Update preferences with new window size
-                self.preferences.window.width = physical_size.width;
-                self.preferences.window.height = physical_size.height;
-                self.preferences.canvas.width = physical_size.width;
-                self.preferences.canvas.height = physical_size.height;
+                // Convert physical size to logical size before saving
+                let logical_width = (physical_size.width as f64 / self.scale_factor) as u32;
+                let logical_height = (physical_size.height as f64 / self.scale_factor) as u32;
+
+                logger::info(&format!(
+                    "Window resized to {}x{} (logical)",
+                    logical_width, logical_height
+                ));
+
+                // Update preferences with logical window size
+                self.preferences.window.width = logical_width;
+                self.preferences.window.height = logical_height;
+                self.preferences.canvas.width = logical_width;
+                self.preferences.canvas.height = logical_height;
 
                 // Save preferences on change
                 if let Err(e) = crate::preferences::save(&self.preferences) {
@@ -225,6 +285,10 @@ impl ApplicationHandler for WindowApp {
                 }
                 if let Some(window) = &self.window {
                     window.request_redraw();
+                    window.request_redraw();
+                    window.request_redraw();
+                    // Force Windows to repaint the window, fixing black space issue
+                    force_window_repaint(window);
                 }
             }
             WindowEvent::RedrawRequested => {
@@ -843,6 +907,8 @@ pub fn run_window_app(preferences: Preferences) {
 
     let event_loop = EventLoop::new().unwrap();
     let mut app = WindowApp::new(preferences);
+
+    event_loop.set_control_flow(ControlFlow::Poll);
 
     event_loop.run_app(&mut app).unwrap();
 
