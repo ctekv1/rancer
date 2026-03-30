@@ -298,6 +298,33 @@ impl ApplicationHandler for WindowApp {
                                 }
                             }
 
+                            // Check eraser button click (x=10 to x=40, y=85 to y=115)
+                            if (85.0..=115.0).contains(&y) && (10.0..=40.0).contains(&x) {
+                                self.is_eraser = !self.is_eraser;
+                                logger::info(&format!(
+                                    "Eraser mode: {}",
+                                    if self.is_eraser { "ON" } else { "OFF" }
+                                ));
+                                if let Some(renderer) = &mut self.renderer {
+                                    renderer.set_eraser(self.is_eraser);
+                                }
+                                if let Some(window) = &self.window {
+                                    window.request_redraw();
+                                }
+                                return;
+                            }
+
+                            // Check clear button click (x=50 to x=80, y=85 to y=115)
+                            if (85.0..=115.0).contains(&y) && (50.0..=80.0).contains(&x) {
+                                let mut canvas = self.canvas.borrow_mut();
+                                canvas.clear();
+                                logger::info("Canvas cleared");
+                                if let Some(window) = &self.window {
+                                    window.request_redraw();
+                                }
+                                return;
+                            }
+
                             // If not on UI, start drawing
                             self.mouse_state = MouseState::Drawing;
 
@@ -471,6 +498,19 @@ impl ApplicationHandler for WindowApp {
                                         }
                                     }
                                     _ => {}
+                                }
+                            }
+                        }
+                        winit::keyboard::Key::Named(winit::keyboard::NamedKey::Delete) => {
+                            if self
+                                .modifiers
+                                .contains(winit::keyboard::ModifiersState::CONTROL)
+                            {
+                                let mut canvas = self.canvas.borrow_mut();
+                                canvas.clear();
+                                logger::info("Canvas cleared");
+                                if let Some(window) = &self.window {
+                                    window.request_redraw();
                                 }
                             }
                         }

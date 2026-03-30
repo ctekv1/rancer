@@ -240,6 +240,16 @@ impl WindowBackend for WindowApp {
                             glib::Propagation::Proceed
                         }
                     }
+                    gtk4::gdk::Key::Delete => {
+                        if state.contains(ModifierType::CONTROL_MASK) {
+                            // Ctrl+Delete: Clear canvas
+                            let mut canvas = canvas_kb.borrow_mut();
+                            canvas.clear();
+                            logger::info("Canvas cleared");
+                            gl_area_kb.queue_render();
+                        }
+                        glib::Propagation::Stop
+                    }
                     _ => glib::Propagation::Proceed,
                 }
             });
@@ -469,6 +479,17 @@ fn setup_mouse_events(
             let mut is_eraser = is_eraser_clone.borrow_mut();
             *is_eraser = !*is_eraser;
             println!("Eraser mode: {}", if *is_eraser { "ON" } else { "OFF" });
+            if let Some(widget) = gesture.widget()
+                && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+            {
+                gl_area.queue_render();
+            }
+            return;
+        } else if (85.0..=115.0).contains(&y) && (50.0..=80.0).contains(&x) {
+            // Clear button area - clear canvas
+            canvas_clone.borrow_mut().clear();
+            logger::info("Canvas cleared");
+            println!("Canvas cleared");
             if let Some(widget) = gesture.widget()
                 && let Some(gl_area) = widget.downcast_ref::<GLArea>()
             {

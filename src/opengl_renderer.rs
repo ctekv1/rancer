@@ -188,6 +188,12 @@ impl GlRenderer {
                 self.upload_and_draw(&eraser_vertices, glow::TRIANGLES);
             }
 
+            // Draw clear button UI
+            let clear_vertices = Self::generate_clear_button_vertices();
+            if !clear_vertices.is_empty() {
+                self.upload_and_draw(&clear_vertices, glow::TRIANGLES);
+            }
+
             self.gl.bind_vertex_array(None);
         }
     }
@@ -229,6 +235,11 @@ impl GlRenderer {
     /// Generate vertices for eraser button UI
     fn generate_eraser_button_vertices(is_active: bool) -> Vec<f32> {
         geometry::generate_eraser_button_vertices(is_active)
+    }
+
+    /// Generate vertices for clear button UI
+    fn generate_clear_button_vertices() -> Vec<f32> {
+        geometry::generate_clear_button_vertices()
     }
 }
 

@@ -413,6 +413,128 @@ pub fn generate_eraser_button_vertices(is_active: bool) -> Vec<f32> {
     vertices
 }
 
+/// Generate vertices for a rotated rectangle (quadrilateral) for diagonal lines
+#[allow(clippy::too_many_arguments)]
+fn generate_rotated_rect(
+    x1: f32,
+    y1: f32, // Point 1
+    x2: f32,
+    y2: f32,    // Point 2
+    width: f32, // Line width
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
+) -> Vec<f32> {
+    // Calculate perpendicular offset for line width
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 0.001 {
+        return Vec::new();
+    }
+
+    let half_width = width / 2.0;
+    let nx = -dy / len * half_width; // Perpendicular x
+    let ny = dx / len * half_width; // Perpendicular y
+
+    // Create quad as two triangles
+    let vertices = vec![
+        // Triangle 1
+        x1 + nx,
+        y1 + ny,
+        r,
+        g,
+        b,
+        a,
+        x1 - nx,
+        y1 - ny,
+        r,
+        g,
+        b,
+        a,
+        x2 + nx,
+        y2 + ny,
+        r,
+        g,
+        b,
+        a,
+        // Triangle 2
+        x1 - nx,
+        y1 - ny,
+        r,
+        g,
+        b,
+        a,
+        x2 - nx,
+        y2 - ny,
+        r,
+        g,
+        b,
+        a,
+        x2 + nx,
+        y2 + ny,
+        r,
+        g,
+        b,
+        a,
+    ];
+    vertices
+}
+
+/// Generate vertices for the clear canvas button
+/// The button shows "X" symbol and is positioned next to the eraser button
+pub fn generate_clear_button_vertices() -> Vec<f32> {
+    let mut vertices = Vec::new();
+    let clear_x = 50.0;
+    let clear_y = 85.0;
+    let button_size = 30.0;
+
+    // Background (red)
+    vertices.extend(generate_rect(
+        clear_x,
+        clear_y,
+        button_size,
+        button_size,
+        0.9,
+        0.3,
+        0.3,
+        1.0,
+    ));
+
+    // X symbol using rotated rectangles
+    let line_width = 4.0;
+    let padding = 6.0;
+
+    // Diagonal 1: top-left to bottom-right
+    vertices.extend(generate_rotated_rect(
+        clear_x + padding,
+        clear_y + padding,
+        clear_x + button_size - padding,
+        clear_y + button_size - padding,
+        line_width,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ));
+
+    // Diagonal 2: top-right to bottom-left
+    vertices.extend(generate_rotated_rect(
+        clear_x + button_size - padding,
+        clear_y + padding,
+        clear_x + padding,
+        clear_y + button_size - padding,
+        line_width,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ));
+
+    vertices
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -782,6 +904,22 @@ mod tests {
         let inactive = generate_eraser_button_vertices(false);
         let active = generate_eraser_button_vertices(true);
         assert!(active.len() > inactive.len());
+    }
+
+    // --- generate_clear_button_vertices tests ---
+
+    #[test]
+    fn test_generate_clear_button_vertices_returns_data() {
+        let vertices = generate_clear_button_vertices();
+        assert!(!vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_clear_button_vertices_has_multiple_rects() {
+        let vertices = generate_clear_button_vertices();
+        // Clear button has background + X symbol = multiple rectangles
+        // Each rect has 36 floats (6 vertices * 6 floats)
+        assert!(vertices.len() >= 36 * 2);
     }
 
     #[test]

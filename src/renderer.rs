@@ -26,7 +26,7 @@ impl Default for RendererConfig {
     fn default() -> Self {
         Self {
             clear_color: Color::WHITE,
-            msaa_samples: 1,
+            msaa_samples: 4, // Enable 4x MSAA for smoother rendering
         }
     }
 }
@@ -268,7 +268,7 @@ impl Renderer {
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: surface_format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -330,7 +330,7 @@ impl Renderer {
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: surface_format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -569,6 +569,19 @@ impl Renderer {
                         render_pass.set_vertex_buffer(0, eraser_vertex_buffer.slice(..));
                         render_pass.draw(0..eraser_vertices.len() as u32, 0..1);
                     }
+
+                    // Draw clear button
+                    let clear_vertices = self.generate_clear_button_vertices();
+                    if !clear_vertices.is_empty() {
+                        let clear_vertex_buffer =
+                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("Clear Button Vertex Buffer"),
+                                contents: bytemuck::cast_slice(&clear_vertices),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
+                        render_pass.set_vertex_buffer(0, clear_vertex_buffer.slice(..));
+                        render_pass.draw(0..clear_vertices.len() as u32, 0..1);
+                    }
                 }
             }
         }
@@ -637,6 +650,12 @@ impl Renderer {
         to_vertices_7(&flat, 0.0)
     }
 
+    /// Generate vertices for clear canvas button
+    fn generate_clear_button_vertices(&self) -> Vec<[f32; 7]> {
+        let flat = geometry::generate_clear_button_vertices();
+        to_vertices_7(&flat, 0.0)
+    }
+
     /// Render using software fallback (stub - WGPU is now primary)
     /// This method is kept for compatibility but WGPU is the primary renderer
     pub fn render_software(&self, _width: u32, _height: u32) {
@@ -700,7 +719,7 @@ mod tests {
     fn test_renderer_config_default() {
         let config = RendererConfig::default();
         assert_eq!(config.clear_color, Color::WHITE);
-        assert_eq!(config.msaa_samples, 1);
+        assert_eq!(config.msaa_samples, 4);
     }
 
     #[test]
