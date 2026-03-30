@@ -51,7 +51,7 @@ jobs:
       - name: Build release
         run: cargo build --release
 
-      - name: Test (101 tests)
+      - name: Test (114 tests)
         run: cargo test
 
       - name: Clippy
@@ -83,7 +83,7 @@ jobs:
       - name: Build debug
         run: cargo build
 
-      - name: Test (101 tests)
+      - name: Test (114 tests)
         run: cargo test
 
       - name: Clippy

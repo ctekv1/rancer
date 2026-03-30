@@ -194,6 +194,18 @@ impl GlRenderer {
                 self.upload_and_draw(&clear_vertices, glow::TRIANGLES);
             }
 
+            // Draw undo button UI
+            let undo_vertices = Self::generate_undo_button_vertices(canvas.can_undo());
+            if !undo_vertices.is_empty() {
+                self.upload_and_draw(&undo_vertices, glow::TRIANGLES);
+            }
+
+            // Draw redo button UI
+            let redo_vertices = Self::generate_redo_button_vertices(canvas.can_redo());
+            if !redo_vertices.is_empty() {
+                self.upload_and_draw(&redo_vertices, glow::TRIANGLES);
+            }
+
             self.gl.bind_vertex_array(None);
         }
     }
@@ -240,6 +252,16 @@ impl GlRenderer {
     /// Generate vertices for clear button UI
     fn generate_clear_button_vertices() -> Vec<f32> {
         geometry::generate_clear_button_vertices()
+    }
+
+    /// Generate vertices for undo button UI
+    fn generate_undo_button_vertices(can_undo: bool) -> Vec<f32> {
+        geometry::generate_undo_button_vertices(can_undo)
+    }
+
+    /// Generate vertices for redo button UI
+    fn generate_redo_button_vertices(can_redo: bool) -> Vec<f32> {
+        geometry::generate_redo_button_vertices(can_redo)
     }
 }
 

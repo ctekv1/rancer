@@ -582,6 +582,32 @@ impl Renderer {
                         render_pass.set_vertex_buffer(0, clear_vertex_buffer.slice(..));
                         render_pass.draw(0..clear_vertices.len() as u32, 0..1);
                     }
+
+                    // Draw undo button
+                    let undo_vertices = self.generate_undo_button_vertices();
+                    if !undo_vertices.is_empty() {
+                        let undo_vertex_buffer =
+                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("Undo Button Vertex Buffer"),
+                                contents: bytemuck::cast_slice(&undo_vertices),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
+                        render_pass.set_vertex_buffer(0, undo_vertex_buffer.slice(..));
+                        render_pass.draw(0..undo_vertices.len() as u32, 0..1);
+                    }
+
+                    // Draw redo button
+                    let redo_vertices = self.generate_redo_button_vertices();
+                    if !redo_vertices.is_empty() {
+                        let redo_vertex_buffer =
+                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("Redo Button Vertex Buffer"),
+                                contents: bytemuck::cast_slice(&redo_vertices),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
+                        render_pass.set_vertex_buffer(0, redo_vertex_buffer.slice(..));
+                        render_pass.draw(0..redo_vertices.len() as u32, 0..1);
+                    }
                 }
             }
         }
@@ -653,6 +679,20 @@ impl Renderer {
     /// Generate vertices for clear canvas button
     fn generate_clear_button_vertices(&self) -> Vec<[f32; 7]> {
         let flat = geometry::generate_clear_button_vertices();
+        to_vertices_7(&flat, 0.0)
+    }
+
+    /// Generate vertices for undo button
+    fn generate_undo_button_vertices(&self) -> Vec<[f32; 7]> {
+        let can_undo = self.canvas.can_undo();
+        let flat = geometry::generate_undo_button_vertices(can_undo);
+        to_vertices_7(&flat, 0.0)
+    }
+
+    /// Generate vertices for redo button
+    fn generate_redo_button_vertices(&self) -> Vec<[f32; 7]> {
+        let can_redo = self.canvas.can_redo();
+        let flat = geometry::generate_redo_button_vertices(can_redo);
         to_vertices_7(&flat, 0.0)
     }
 

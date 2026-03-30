@@ -268,7 +268,7 @@ impl ApplicationHandler for WindowApp {
                                 let selector_x = 10.0;
                                 let button_size = 30.0;
                                 let spacing = 10.0;
-                                let brush_sizes = [3.0, 5.0, 10.0, 25.0, 50.0];
+                                let brush_sizes = crate::canvas::BRUSH_SIZES;
 
                                 for (i, &size) in brush_sizes.iter().enumerate() {
                                     let button_x = selector_x + (button_size + spacing) * i as f32;
@@ -321,6 +321,32 @@ impl ApplicationHandler for WindowApp {
                                 logger::info("Canvas cleared");
                                 if let Some(window) = &self.window {
                                     window.request_redraw();
+                                }
+                                return;
+                            }
+
+                            // Check undo button click (x=90 to x=120, y=85 to y=115)
+                            if (85.0..=115.0).contains(&y) && (90.0..=120.0).contains(&x) {
+                                let mut canvas = self.canvas.borrow_mut();
+                                if canvas.can_undo() {
+                                    canvas.undo();
+                                    logger::info("Undo: removed last stroke");
+                                    if let Some(window) = &self.window {
+                                        window.request_redraw();
+                                    }
+                                }
+                                return;
+                            }
+
+                            // Check redo button click (x=130 to x=160, y=85 to y=115)
+                            if (85.0..=115.0).contains(&y) && (130.0..=160.0).contains(&x) {
+                                let mut canvas = self.canvas.borrow_mut();
+                                if canvas.can_redo() {
+                                    canvas.redo();
+                                    logger::info("Redo: restored last stroke");
+                                    if let Some(window) = &self.window {
+                                        window.request_redraw();
+                                    }
                                 }
                                 return;
                             }
@@ -467,11 +493,11 @@ impl ApplicationHandler for WindowApp {
                             }
                         }
                         winit::keyboard::Key::Character(c) => {
+                            let c_str: &str = c;
                             if self
                                 .modifiers
                                 .contains(winit::keyboard::ModifiersState::CONTROL)
                             {
-                                let c_str: &str = c;
                                 match c_str {
                                     "z" | "Z" => {
                                         // Ctrl+Z: Undo
@@ -495,6 +521,55 @@ impl ApplicationHandler for WindowApp {
                                             if let Some(window) = &self.window {
                                                 window.request_redraw();
                                             }
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            } else {
+                                // Non-Ctrl shortcuts
+                                match c_str {
+                                    "e" | "E" => {
+                                        // Toggle eraser (only when not drawing)
+                                        if self.mouse_state != MouseState::Drawing {
+                                            self.is_eraser = !self.is_eraser;
+                                            logger::info(&format!(
+                                                "Eraser mode: {}",
+                                                if self.is_eraser { "ON" } else { "OFF" }
+                                            ));
+                                            if let Some(renderer) = &mut self.renderer {
+                                                renderer.set_eraser(self.is_eraser);
+                                            }
+                                            if let Some(window) = &self.window {
+                                                window.request_redraw();
+                                            }
+                                        }
+                                    }
+                                    "+" | "=" => {
+                                        // Increase brush size
+                                        self.brush_size =
+                                            crate::canvas::brush_size_up(self.brush_size);
+                                        self.preferences.brush.default_size = self.brush_size;
+                                        let _ = crate::preferences::save(&self.preferences);
+                                        if let Some(renderer) = &mut self.renderer {
+                                            renderer.set_brush_size(self.brush_size);
+                                        }
+                                        logger::info(&format!("Brush size: {}", self.brush_size));
+                                        if let Some(window) = &self.window {
+                                            window.request_redraw();
+                                        }
+                                    }
+                                    "-" | "_" => {
+                                        // Decrease brush size
+                                        self.brush_size =
+                                            crate::canvas::brush_size_down(self.brush_size);
+                                        self.preferences.brush.default_size = self.brush_size;
+                                        let _ = crate::preferences::save(&self.preferences);
+                                        if let Some(renderer) = &mut self.renderer {
+                                            renderer.set_brush_size(self.brush_size);
+                                        }
+                                        logger::info(&format!("Brush size: {}", self.brush_size));
+                                        if let Some(window) = &self.window {
+                                            window.request_redraw();
                                         }
                                     }
                                     _ => {}

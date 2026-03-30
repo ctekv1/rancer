@@ -535,6 +535,164 @@ pub fn generate_clear_button_vertices() -> Vec<f32> {
     vertices
 }
 
+/// Generate vertices for the undo button
+/// The button shows a left arrow symbol
+pub fn generate_undo_button_vertices(can_undo: bool) -> Vec<f32> {
+    let mut vertices = Vec::new();
+    let undo_x = 90.0;
+    let undo_y = 85.0;
+    let button_size = 30.0;
+
+    // Background color based on enabled state
+    let (bg_r, bg_g, bg_b) = if can_undo {
+        (0.3, 0.5, 0.8) // Blue when enabled
+    } else {
+        (0.7, 0.7, 0.7) // Gray when disabled
+    };
+
+    // Background
+    vertices.extend(generate_rect(
+        undo_x,
+        undo_y,
+        button_size,
+        button_size,
+        bg_r,
+        bg_g,
+        bg_b,
+        1.0,
+    ));
+
+    // Arrow color (white when enabled, dark gray when disabled)
+    let (arrow_r, arrow_g, arrow_b) = if can_undo {
+        (1.0, 1.0, 1.0)
+    } else {
+        (0.5, 0.5, 0.5)
+    };
+
+    let line_width = 4.0;
+    let padding = 6.0;
+
+    // Left arrow: horizontal line from center-right to left
+    vertices.extend(generate_rotated_rect(
+        undo_x + padding,
+        undo_y + button_size / 2.0,
+        undo_x + button_size - padding,
+        undo_y + button_size / 2.0,
+        line_width,
+        arrow_r,
+        arrow_g,
+        arrow_b,
+        1.0,
+    ));
+
+    // Left arrow: diagonal from center to top-left
+    vertices.extend(generate_rotated_rect(
+        undo_x + button_size / 2.0,
+        undo_y + padding,
+        undo_x + padding,
+        undo_y + button_size / 2.0,
+        line_width,
+        arrow_r,
+        arrow_g,
+        arrow_b,
+        1.0,
+    ));
+
+    // Left arrow: diagonal from center to bottom-left
+    vertices.extend(generate_rotated_rect(
+        undo_x + button_size / 2.0,
+        undo_y + button_size - padding,
+        undo_x + padding,
+        undo_y + button_size / 2.0,
+        line_width,
+        arrow_r,
+        arrow_g,
+        arrow_b,
+        1.0,
+    ));
+
+    vertices
+}
+
+/// Generate vertices for the redo button
+/// The button shows a right arrow symbol
+pub fn generate_redo_button_vertices(can_redo: bool) -> Vec<f32> {
+    let mut vertices = Vec::new();
+    let redo_x = 130.0;
+    let redo_y = 85.0;
+    let button_size = 30.0;
+
+    // Background color based on enabled state
+    let (bg_r, bg_g, bg_b) = if can_redo {
+        (0.3, 0.5, 0.8) // Blue when enabled
+    } else {
+        (0.7, 0.7, 0.7) // Gray when disabled
+    };
+
+    // Background
+    vertices.extend(generate_rect(
+        redo_x,
+        redo_y,
+        button_size,
+        button_size,
+        bg_r,
+        bg_g,
+        bg_b,
+        1.0,
+    ));
+
+    // Arrow color (white when enabled, dark gray when disabled)
+    let (arrow_r, arrow_g, arrow_b) = if can_redo {
+        (1.0, 1.0, 1.0)
+    } else {
+        (0.5, 0.5, 0.5)
+    };
+
+    let line_width = 4.0;
+    let padding = 6.0;
+
+    // Right arrow: horizontal line from left to center-right
+    vertices.extend(generate_rotated_rect(
+        redo_x + padding,
+        redo_y + button_size / 2.0,
+        redo_x + button_size - padding,
+        redo_y + button_size / 2.0,
+        line_width,
+        arrow_r,
+        arrow_g,
+        arrow_b,
+        1.0,
+    ));
+
+    // Right arrow: diagonal from center to top-right
+    vertices.extend(generate_rotated_rect(
+        redo_x + button_size / 2.0,
+        redo_y + padding,
+        redo_x + button_size - padding,
+        redo_y + button_size / 2.0,
+        line_width,
+        arrow_r,
+        arrow_g,
+        arrow_b,
+        1.0,
+    ));
+
+    // Right arrow: diagonal from center to bottom-right
+    vertices.extend(generate_rotated_rect(
+        redo_x + button_size / 2.0,
+        redo_y + button_size - padding,
+        redo_x + button_size - padding,
+        redo_y + button_size / 2.0,
+        line_width,
+        arrow_r,
+        arrow_g,
+        arrow_b,
+        1.0,
+    ));
+
+    vertices
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -920,6 +1078,50 @@ mod tests {
         // Clear button has background + X symbol = multiple rectangles
         // Each rect has 36 floats (6 vertices * 6 floats)
         assert!(vertices.len() >= 36 * 2);
+    }
+
+    // --- generate_undo_button_vertices tests ---
+
+    #[test]
+    fn test_generate_undo_button_enabled() {
+        let vertices = generate_undo_button_vertices(true);
+        assert!(!vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_undo_button_disabled() {
+        let vertices = generate_undo_button_vertices(false);
+        assert!(!vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_undo_button_enabled_has_more_vertices() {
+        let enabled = generate_undo_button_vertices(true);
+        let disabled = generate_undo_button_vertices(false);
+        // Both should have same number of vertices (just different colors)
+        assert_eq!(enabled.len(), disabled.len());
+    }
+
+    // --- generate_redo_button_vertices tests ---
+
+    #[test]
+    fn test_generate_redo_button_enabled() {
+        let vertices = generate_redo_button_vertices(true);
+        assert!(!vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_redo_button_disabled() {
+        let vertices = generate_redo_button_vertices(false);
+        assert!(!vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_redo_button_enabled_has_more_vertices() {
+        let enabled = generate_redo_button_vertices(true);
+        let disabled = generate_redo_button_vertices(false);
+        // Both should have same number of vertices (just different colors)
+        assert_eq!(enabled.len(), disabled.len());
     }
 
     #[test]

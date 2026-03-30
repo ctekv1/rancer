@@ -4,9 +4,9 @@
 
 - [ ] Custom Color Picker - HSV/RGB picker dialog for any color
 - [ ] Brush Opacity Control - Slider or presets (25%, 50%, 75%, 100%)
-- [ ] Keyboard Shortcuts - Eraser toggle (E), brush size (+/-)
-- [ ] Undo/Redo UI - Visual buttons or status indicator
-- [ ] Canvas Clear - Button or shortcut to clear canvas
+- [x] Keyboard Shortcuts - Eraser toggle (E), brush size (+/-)
+- [x] Undo/Redo UI - Visual buttons or status indicator
+- [x] Canvas Clear - Button or shortcut to clear canvas
 
 ## Tier 2 - Professional Features (v0.0.7+)
 

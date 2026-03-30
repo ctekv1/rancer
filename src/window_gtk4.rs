@@ -31,7 +31,7 @@ pub enum MouseState {
 }
 
 /// Brush size options
-const BRUSH_SIZES: [f32; 5] = [3.0, 5.0, 10.0, 25.0, 50.0];
+const BRUSH_SIZES: [f32; 5] = crate::canvas::BRUSH_SIZES;
 
 /// Window application state using GTK4
 #[allow(dead_code)]
@@ -149,6 +149,9 @@ impl WindowBackend for WindowApp {
             let palette_kb = palette.clone();
             let prefs_kb = preferences.clone();
             let gl_area_kb = gl_area.clone();
+            let is_eraser_kb = is_eraser_shared.clone();
+            let brush_size_kb = brush_size_shared.clone();
+            let active_stroke_kb = active_stroke.clone();
 
             key_controller.connect_key_pressed(move |_controller, key, _keycode, state| {
                 match key {
@@ -248,6 +251,42 @@ impl WindowBackend for WindowApp {
                             logger::info("Canvas cleared");
                             gl_area_kb.queue_render();
                         }
+                        glib::Propagation::Stop
+                    }
+                    gtk4::gdk::Key::e | gtk4::gdk::Key::E => {
+                        // Toggle eraser (only when not drawing)
+                        let is_drawing = active_stroke_kb.borrow().is_some();
+                        if !is_drawing {
+                            let mut is_eraser = is_eraser_kb.borrow_mut();
+                            *is_eraser = !*is_eraser;
+                            logger::info(&format!(
+                                "Eraser mode: {}",
+                                if *is_eraser { "ON" } else { "OFF" }
+                            ));
+                            gl_area_kb.queue_render();
+                        }
+                        glib::Propagation::Stop
+                    }
+                    gtk4::gdk::Key::plus | gtk4::gdk::Key::equal => {
+                        // Increase brush size
+                        let mut brush = brush_size_kb.borrow_mut();
+                        *brush = crate::canvas::brush_size_up(*brush);
+                        logger::info(&format!("Brush size: {}", *brush));
+                        let mut prefs = prefs_kb.borrow_mut();
+                        prefs.brush.default_size = *brush;
+                        let _ = crate::preferences::save(&prefs);
+                        gl_area_kb.queue_render();
+                        glib::Propagation::Stop
+                    }
+                    gtk4::gdk::Key::minus => {
+                        // Decrease brush size
+                        let mut brush = brush_size_kb.borrow_mut();
+                        *brush = crate::canvas::brush_size_down(*brush);
+                        logger::info(&format!("Brush size: {}", *brush));
+                        let mut prefs = prefs_kb.borrow_mut();
+                        prefs.brush.default_size = *brush;
+                        let _ = crate::preferences::save(&prefs);
+                        gl_area_kb.queue_render();
                         glib::Propagation::Stop
                     }
                     _ => glib::Propagation::Proceed,
@@ -494,6 +533,34 @@ fn setup_mouse_events(
                 && let Some(gl_area) = widget.downcast_ref::<GLArea>()
             {
                 gl_area.queue_render();
+            }
+            return;
+        } else if (85.0..=115.0).contains(&y) && (90.0..=120.0).contains(&x) {
+            // Undo button area
+            let mut canvas = canvas_clone.borrow_mut();
+            if canvas.can_undo() {
+                canvas.undo();
+                logger::info("Undo: removed last stroke");
+                println!("Undo: removed last stroke");
+                if let Some(widget) = gesture.widget()
+                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                {
+                    gl_area.queue_render();
+                }
+            }
+            return;
+        } else if (85.0..=115.0).contains(&y) && (130.0..=160.0).contains(&x) {
+            // Redo button area
+            let mut canvas = canvas_clone.borrow_mut();
+            if canvas.can_redo() {
+                canvas.redo();
+                logger::info("Redo: restored last stroke");
+                println!("Redo: restored last stroke");
+                if let Some(widget) = gesture.widget()
+                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                {
+                    gl_area.queue_render();
+                }
             }
             return;
         }

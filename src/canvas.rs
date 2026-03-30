@@ -300,6 +300,33 @@ impl ColorPalette {
     }
 }
 
+/// Default brush sizes available in the application
+pub const BRUSH_SIZES: [f32; 5] = [3.0, 5.0, 10.0, 25.0, 50.0];
+
+/// Cycle brush size up (larger) - returns new size
+/// If already at max, stays at max
+pub fn brush_size_up(current: f32) -> f32 {
+    match BRUSH_SIZES
+        .iter()
+        .position(|&s| (s - current).abs() < f32::EPSILON)
+    {
+        Some(pos) if pos < BRUSH_SIZES.len() - 1 => BRUSH_SIZES[pos + 1],
+        _ => current,
+    }
+}
+
+/// Cycle brush size down (smaller) - returns new size
+/// If already at min, stays at min
+pub fn brush_size_down(current: f32) -> f32 {
+    match BRUSH_SIZES
+        .iter()
+        .position(|&s| (s - current).abs() < f32::EPSILON)
+    {
+        Some(pos) if pos > 0 => BRUSH_SIZES[pos - 1],
+        _ => current,
+    }
+}
+
 /// Represents an active stroke that is currently being drawn
 #[derive(Debug, Clone)]
 pub struct ActiveStroke {
@@ -1074,5 +1101,33 @@ mod tests {
         assert_eq!(export.width, 800);
         assert_eq!(export.height, 600);
         assert_eq!(export.stroke_count, 1);
+    }
+
+    // --- brush_size_up/down tests ---
+
+    #[test]
+    fn test_brush_size_up_middle() {
+        assert_eq!(brush_size_up(5.0), 10.0);
+    }
+
+    #[test]
+    fn test_brush_size_up_at_max() {
+        assert_eq!(brush_size_up(50.0), 50.0);
+    }
+
+    #[test]
+    fn test_brush_size_down_middle() {
+        assert_eq!(brush_size_down(10.0), 5.0);
+    }
+
+    #[test]
+    fn test_brush_size_down_at_min() {
+        assert_eq!(brush_size_down(3.0), 3.0);
+    }
+
+    #[test]
+    fn test_brush_size_invalid_current() {
+        assert_eq!(brush_size_up(7.0), 7.0);
+        assert_eq!(brush_size_down(7.0), 7.0);
     }
 }
