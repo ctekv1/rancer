@@ -129,33 +129,46 @@ impl Renderer {
                 })
             }
             Err(e) => {
-                logger::error(&format!("❌ WGPU initialization failed: {}", e));
-                logger::warn("   Falling back to Cairo software rendering");
-                logger::info("   - Backend: Cairo (CPU)");
-                Ok(Self {
-                    canvas: Canvas::new(),
-                    hue: 0.0,
-                    saturation: 100.0,
-                    value: 100.0,
-                    custom_colors: Vec::new(),
-                    selected_custom_index: -1,
-                    active_stroke: None,
-                    brush_size: 3.0,
-                    opacity: 1.0,
-                    is_eraser: false,
-                    config,
-                    backend: RenderBackend::Cairo,
-                    device: None,
-                    queue: None,
-                    surface: None,
-                    surface_config: None,
-                    render_pipeline: None,
-                    ui_pipeline: None,
-                    window_size,
-                    pipeline_layout: None,
-                    shader: None,
-                    window: Some(window),
-                })
+                logger::error(&format!("WGPU initialization failed: {}", e));
+                #[cfg(target_os = "linux")]
+                {
+                    logger::warn("Falling back to Cairo software rendering (Linux)");
+                    logger::info("   - Backend: Cairo (CPU)");
+                    return Ok(Self {
+                        canvas: Canvas::new(),
+                        hue: 0.0,
+                        saturation: 100.0,
+                        value: 100.0,
+                        custom_colors: Vec::new(),
+                        selected_custom_index: -1,
+                        active_stroke: None,
+                        brush_size: 3.0,
+                        opacity: 1.0,
+                        is_eraser: false,
+                        config,
+                        backend: RenderBackend::Cairo,
+                        device: None,
+                        queue: None,
+                        surface: None,
+                        surface_config: None,
+                        render_pipeline: None,
+                        ui_pipeline: None,
+                        window_size,
+                        pipeline_layout: None,
+                        shader: None,
+                        window: Some(window),
+                    });
+                }
+                #[cfg(target_os = "windows")]
+                {
+                    logger::error("No software fallback available on Windows");
+                    return Err(format!("WGPU initialization failed: {}. No fallback renderer is available on Windows.", e).into());
+                }
+                #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+                {
+                    logger::error("No software fallback available on this platform");
+                    return Err(format!("WGPU initialization failed: {}. No fallback renderer is available on this platform.", e).into());
+                }
             }
         }
     }
@@ -346,12 +359,13 @@ impl Renderer {
         let max_texture_size = device_limits.max_texture_dimension_2d;
         logger::info(&format!("Max texture dimension: {}", max_texture_size));
 
-        // Clamp window size to GPU limits
-        let surface_width = window_size.0.min(max_texture_size);
-        let surface_height = window_size.1.min(max_texture_size);
+        // Clamp window size to GPU limits, ensuring non-zero dimensions
+        // wgpu requires both width and height to be non-zero for surface configuration
+        let surface_width = window_size.0.max(1).min(max_texture_size);
+        let surface_height = window_size.1.max(1).min(max_texture_size);
         if surface_width != window_size.0 || surface_height != window_size.1 {
             logger::warn(&format!(
-                "Window size {}x{} exceeds GPU limit {}x{}, clamping",
+                "Window size {}x{} adjusted to {}x{} (GPU limits / non-zero requirement)",
                 window_size.0, window_size.1, surface_width, surface_height
             ));
         }
@@ -686,148 +700,62 @@ impl Renderer {
             render_pass.set_pipeline(pipeline);
             render_pass.set_bind_group(0, &bind_group, &[]);
 
-            // Draw each stroke separately to avoid degenerate vertices
+            // Combine all stroke vertices into a single buffer,
+            // but draw each stroke separately to avoid connecting them
+            let mut all_stroke_vertices = Vec::new();
+            let mut stroke_ranges = Vec::new();
             for stroke in self.canvas.strokes() {
                 if stroke.points.len() >= 2 {
-                    let vertices = self.generate_stroke_vertices(stroke);
-                    let vertex_count = vertices.len() as u32;
-                    if vertex_count > 0 {
-                        let vertex_buffer =
-                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("Stroke Vertex Buffer"),
-                                contents: bytemuck::cast_slice(&vertices),
-                                usage: wgpu::BufferUsages::VERTEX,
-                            });
-                        render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                        render_pass.draw(0..vertex_count, 0..1);
-                    }
+                    let start = all_stroke_vertices.len() as u32;
+                    all_stroke_vertices.extend(self.generate_stroke_vertices(stroke));
+                    let end = all_stroke_vertices.len() as u32;
+                    stroke_ranges.push(start..end);
                 }
             }
-
-            // Draw active stroke if present
             if let Some(active_stroke) = &self.active_stroke {
-                let points = active_stroke.points();
-                if points.len() >= 2 {
-                    let vertices = self.generate_active_stroke_vertices(active_stroke);
-                    let vertex_count = vertices.len() as u32;
-                    if vertex_count > 0 {
-                        let vertex_buffer =
-                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("Active Stroke Vertex Buffer"),
-                                contents: bytemuck::cast_slice(&vertices),
-                                usage: wgpu::BufferUsages::VERTEX,
-                            });
-                        render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                        render_pass.draw(0..vertex_count, 0..1);
-                    }
+                if active_stroke.points().len() >= 2 {
+                    let start = all_stroke_vertices.len() as u32;
+                    all_stroke_vertices.extend(self.generate_active_stroke_vertices(active_stroke));
+                    let end = all_stroke_vertices.len() as u32;
+                    stroke_ranges.push(start..end);
+                }
+            }
+            if !all_stroke_vertices.is_empty() {
+                let vertex_buffer =
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Combined Stroke Vertex Buffer"),
+                        contents: bytemuck::cast_slice(&all_stroke_vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                for range in stroke_ranges {
+                    render_pass.draw(range, 0..1);
                 }
             }
 
-            // Draw UI elements (HSV color picker)
+            // Draw all UI elements in a single combined buffer
             if let Some(ui_pipeline) = &self.ui_pipeline {
-                // Draw HSV sliders
-                let hsv_vertices = self.generate_hsv_sliders(self.hue, self.saturation, self.value);
-                if !hsv_vertices.is_empty() {
+                let mut all_ui_vertices: Vec<[f32; 7]> = Vec::new();
+
+                all_ui_vertices.extend(self.generate_hsv_sliders(self.hue, self.saturation, self.value));
+                all_ui_vertices.extend(self.generate_custom_palette_vertices());
+                all_ui_vertices.extend(self.generate_brush_size_vertices(self.brush_size));
+                all_ui_vertices.extend(self.generate_eraser_button_vertices(self.is_eraser));
+                all_ui_vertices.extend(self.generate_clear_button_vertices());
+                all_ui_vertices.extend(self.generate_undo_button_vertices());
+                all_ui_vertices.extend(self.generate_redo_button_vertices());
+                all_ui_vertices.extend(self.generate_opacity_preset_vertices());
+
+                if !all_ui_vertices.is_empty() {
                     let ui_vertex_buffer =
                         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("HSV Slider Vertex Buffer"),
-                            contents: bytemuck::cast_slice(&hsv_vertices),
+                            label: Some("Combined UI Vertex Buffer"),
+                            contents: bytemuck::cast_slice(&all_ui_vertices),
                             usage: wgpu::BufferUsages::VERTEX,
                         });
                     render_pass.set_pipeline(ui_pipeline);
                     render_pass.set_vertex_buffer(0, ui_vertex_buffer.slice(..));
-                    render_pass.draw(0..hsv_vertices.len() as u32, 0..1);
-                }
-
-                // Draw custom palette
-                let custom_palette_vertices = self.generate_custom_palette_vertices();
-                if !custom_palette_vertices.is_empty() {
-                    let palette_vertex_buffer =
-                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("Custom Palette Vertex Buffer"),
-                            contents: bytemuck::cast_slice(&custom_palette_vertices),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
-                    render_pass.set_vertex_buffer(0, palette_vertex_buffer.slice(..));
-                    render_pass.draw(0..custom_palette_vertices.len() as u32, 0..1);
-                }
-
-                // Draw brush size selector
-                let brush_size_vertices = self.generate_brush_size_vertices(self.brush_size);
-                if !brush_size_vertices.is_empty() {
-                    let brush_vertex_buffer =
-                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("Brush Size Vertex Buffer"),
-                            contents: bytemuck::cast_slice(&brush_size_vertices),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
-                    render_pass.set_vertex_buffer(0, brush_vertex_buffer.slice(..));
-                    render_pass.draw(0..brush_size_vertices.len() as u32, 0..1);
-
-                    // Draw eraser button
-                    let eraser_vertices = self.generate_eraser_button_vertices(self.is_eraser);
-                    if !eraser_vertices.is_empty() {
-                        let eraser_vertex_buffer =
-                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("Eraser Button Vertex Buffer"),
-                                contents: bytemuck::cast_slice(&eraser_vertices),
-                                usage: wgpu::BufferUsages::VERTEX,
-                            });
-                        render_pass.set_vertex_buffer(0, eraser_vertex_buffer.slice(..));
-                        render_pass.draw(0..eraser_vertices.len() as u32, 0..1);
-                    }
-
-                    // Draw clear button
-                    let clear_vertices = self.generate_clear_button_vertices();
-                    if !clear_vertices.is_empty() {
-                        let clear_vertex_buffer =
-                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("Clear Button Vertex Buffer"),
-                                contents: bytemuck::cast_slice(&clear_vertices),
-                                usage: wgpu::BufferUsages::VERTEX,
-                            });
-                        render_pass.set_vertex_buffer(0, clear_vertex_buffer.slice(..));
-                        render_pass.draw(0..clear_vertices.len() as u32, 0..1);
-                    }
-
-                    // Draw undo button
-                    let undo_vertices = self.generate_undo_button_vertices();
-                    if !undo_vertices.is_empty() {
-                        let undo_vertex_buffer =
-                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("Undo Button Vertex Buffer"),
-                                contents: bytemuck::cast_slice(&undo_vertices),
-                                usage: wgpu::BufferUsages::VERTEX,
-                            });
-                        render_pass.set_vertex_buffer(0, undo_vertex_buffer.slice(..));
-                        render_pass.draw(0..undo_vertices.len() as u32, 0..1);
-                    }
-
-                    // Draw redo button
-                    let redo_vertices = self.generate_redo_button_vertices();
-                    if !redo_vertices.is_empty() {
-                        let redo_vertex_buffer =
-                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("Redo Button Vertex Buffer"),
-                                contents: bytemuck::cast_slice(&redo_vertices),
-                                usage: wgpu::BufferUsages::VERTEX,
-                            });
-                        render_pass.set_vertex_buffer(0, redo_vertex_buffer.slice(..));
-                        render_pass.draw(0..redo_vertices.len() as u32, 0..1);
-                    }
-
-                    // Draw opacity preset buttons
-                    let opacity_vertices = self.generate_opacity_preset_vertices();
-                    if !opacity_vertices.is_empty() {
-                        let opacity_vertex_buffer =
-                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("Opacity Preset Vertex Buffer"),
-                                contents: bytemuck::cast_slice(&opacity_vertices),
-                                usage: wgpu::BufferUsages::VERTEX,
-                            });
-                        render_pass.set_vertex_buffer(0, opacity_vertex_buffer.slice(..));
-                        render_pass.draw(0..opacity_vertices.len() as u32, 0..1);
-                    }
+                    render_pass.draw(0..all_ui_vertices.len() as u32, 0..1);
                 }
             }
         }
@@ -1011,5 +939,94 @@ mod tests {
         };
         assert_eq!(config.clear_color, Color::BLACK);
         assert_eq!(config.msaa_samples, 4);
+    }
+
+    #[test]
+    fn test_combined_stroke_buffer_tracks_ranges() {
+        // Verify that the combined vertex buffer approach correctly
+        // tracks separate ranges per stroke to avoid connecting them
+        use crate::canvas::{Canvas, Point, Stroke};
+
+        let mut canvas = Canvas::new();
+        let stroke1 = Stroke {
+            points: vec![Point { x: 0.0, y: 0.0 }, Point { x: 10.0, y: 10.0 }],
+            color: Color::BLACK,
+            width: 2.0,
+            opacity: 1.0,
+        };
+        let stroke2 = Stroke {
+            points: vec![Point { x: 100.0, y: 100.0 }, Point { x: 110.0, y: 110.0 }],
+            color: Color { r: 255, g: 0, b: 0, a: 255 },
+            width: 2.0,
+            opacity: 1.0,
+        };
+        canvas.add_stroke(stroke1);
+        canvas.add_stroke(stroke2);
+
+        // Simulate the combined buffer logic from render_wgpu
+        let mut all_vertices: Vec<[f32; 7]> = Vec::new();
+        let mut stroke_ranges: Vec<std::ops::Range<u32>> = Vec::new();
+        for stroke in canvas.strokes() {
+            if stroke.points.len() >= 2 {
+                let start = all_vertices.len() as u32;
+                // Each 2-point stroke generates 4 vertices (triangle strip)
+                let verts = crate::geometry::generate_stroke_vertices(stroke);
+                let line_width = stroke.width;
+                for chunk in verts.chunks(6) {
+                    all_vertices.push([chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], line_width]);
+                }
+                let end = all_vertices.len() as u32;
+                stroke_ranges.push(start..end);
+            }
+        }
+
+        // Should have exactly 2 ranges for 2 strokes
+        assert_eq!(stroke_ranges.len(), 2);
+        // Ranges should not overlap
+        assert!(stroke_ranges[0].end <= stroke_ranges[1].start);
+        // Total vertices should equal sum of all ranges
+        let total_from_ranges: u32 = stroke_ranges.iter().map(|r| r.end - r.start).sum();
+        assert_eq!(total_from_ranges, all_vertices.len() as u32);
+    }
+
+    #[test]
+    fn test_combined_buffer_empty_canvas() {
+        // Verify that an empty canvas produces no vertex ranges
+        let canvas = Canvas::new();
+        let mut all_vertices: Vec<[f32; 7]> = Vec::new();
+        let mut stroke_ranges: Vec<std::ops::Range<u32>> = Vec::new();
+        for stroke in canvas.strokes() {
+            if stroke.points.len() >= 2 {
+                let start = all_vertices.len() as u32;
+                all_vertices.push([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, stroke.width]);
+                let end = all_vertices.len() as u32;
+                stroke_ranges.push(start..end);
+            }
+        }
+        assert!(stroke_ranges.is_empty());
+        assert!(all_vertices.is_empty());
+    }
+
+    #[test]
+    fn test_single_point_stroke_excluded() {
+        // Single-point strokes should be excluded (need at least 2 points)
+        use crate::canvas::{Canvas, Point, Stroke};
+
+        let mut canvas = Canvas::new();
+        let single_point = Stroke {
+            points: vec![Point { x: 50.0, y: 50.0 }],
+            color: Color::BLACK,
+            width: 2.0,
+            opacity: 1.0,
+        };
+        canvas.add_stroke(single_point);
+
+        let mut count = 0;
+        for stroke in canvas.strokes() {
+            if stroke.points.len() >= 2 {
+                count += 1;
+            }
+        }
+        assert_eq!(count, 0);
     }
 }

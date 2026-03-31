@@ -19,15 +19,8 @@ use crate::canvas::{ActiveStroke, Canvas, Point};
 use crate::logger;
 use crate::opengl_renderer::GlRenderer;
 use crate::preferences::Preferences;
+use crate::ui::{self, SliderType};
 use crate::window_backend::{MouseState as BackendMouseState, WindowBackend};
-
-/// Slider drag state
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SliderDrag {
-    Hue,
-    Saturation,
-    Value,
-}
 
 /// Represents the current state of mouse interaction
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -38,8 +31,7 @@ pub enum MouseState {
     Drawing,
 }
 
-/// Brush size options
-const BRUSH_SIZES: [f32; 5] = crate::canvas::BRUSH_SIZES;
+/// Brush size options (defined in canvas::BRUSH_SIZES)
 
 /// Window application state using GTK4
 #[allow(dead_code)]
@@ -71,7 +63,7 @@ pub struct WindowApp {
     /// Eraser mode active
     is_eraser: bool,
     /// Slider drag state (which slider is being dragged)
-    slider_drag: Option<SliderDrag>,
+    slider_drag: Option<SliderType>,
     /// User preferences
     preferences: Preferences,
 }
@@ -583,53 +575,22 @@ fn setup_mouse_events(
         *mouse_position_clone.borrow_mut() = point;
         *mouse_state_clone.borrow_mut() = MouseState::Drawing;
 
-        // Check HSV slider clicks (y=5-80)
-        if (5.0..=80.0).contains(&y) {
-            let slider_x = 10.0;
-            let slider_width = 200.0;
+        // Use shared UI hit detection
+        let custom_colors_snapshot = custom_colors_clone.borrow().clone();
+        let hit = ui::hit_test(x as f32, y as f32, &custom_colors_snapshot);
 
-            if x >= slider_x as f64 && x <= (slider_x + slider_width) as f64 {
-                if (5.0..=25.0).contains(&y) {
-                    // Hue slider
-                    let new_hue = ((x as f32 - slider_x) / slider_width * 360.0).clamp(0.0, 360.0);
-                    *hue_clone.borrow_mut() = new_hue;
-                    *selected_custom_index_clone.borrow_mut() = -1;
-                    *slider_drag_clone.borrow_mut() = Some(SliderDrag::Hue);
-                    update_hsv_prefs(
-                        &prefs_clone,
-                        *hue_clone.borrow(),
-                        *saturation_clone.borrow(),
-                        *value_clone.borrow(),
-                        custom_colors_clone.borrow().clone(),
-                    );
-                } else if (30.0..=50.0).contains(&y) {
-                    // Saturation slider
-                    let new_sat = ((x as f32 - slider_x) / slider_width * 100.0).clamp(0.0, 100.0);
-                    *saturation_clone.borrow_mut() = new_sat;
-                    *selected_custom_index_clone.borrow_mut() = -1;
-                    *slider_drag_clone.borrow_mut() = Some(SliderDrag::Saturation);
-                    update_hsv_prefs(
-                        &prefs_clone,
-                        *hue_clone.borrow(),
-                        *saturation_clone.borrow(),
-                        *value_clone.borrow(),
-                        custom_colors_clone.borrow().clone(),
-                    );
-                } else if (55.0..=75.0).contains(&y) {
-                    // Value slider
-                    let new_val = ((x as f32 - slider_x) / slider_width * 100.0).clamp(0.0, 100.0);
-                    *value_clone.borrow_mut() = new_val;
-                    *selected_custom_index_clone.borrow_mut() = -1;
-                    *slider_drag_clone.borrow_mut() = Some(SliderDrag::Value);
-                    update_hsv_prefs(
-                        &prefs_clone,
-                        *hue_clone.borrow(),
-                        *saturation_clone.borrow(),
-                        *value_clone.borrow(),
-                        custom_colors_clone.borrow().clone(),
-                    );
-                }
-
+        match hit {
+            ui::UiElement::HueSlider(value) => {
+                *hue_clone.borrow_mut() = value;
+                *selected_custom_index_clone.borrow_mut() = -1;
+                *slider_drag_clone.borrow_mut() = Some(SliderType::Hue);
+                update_hsv_prefs(
+                    &prefs_clone,
+                    *hue_clone.borrow(),
+                    *saturation_clone.borrow(),
+                    *value_clone.borrow(),
+                    custom_colors_clone.borrow().clone(),
+                );
                 if let Some(widget) = gesture.widget()
                     && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                 {
@@ -637,33 +598,82 @@ fn setup_mouse_events(
                 }
                 return;
             }
-        }
-
-        // Check custom palette click (y=90-110)
-        if (90.0..=110.0).contains(&y) {
-            let palette_x = 10.0;
-            let color_width = 20.0;
-            let spacing = 5.0;
-
-            // First, check if clicking on the save button (doesn't need borrow)
-            let current_len = custom_colors_clone.borrow().len();
-            let save_x = palette_x + (color_width + spacing) * current_len as f32;
-            if x >= save_x as f64 && x <= (save_x + color_width) as f64 {
+            ui::UiElement::SaturationSlider(value) => {
+                *saturation_clone.borrow_mut() = value;
+                *selected_custom_index_clone.borrow_mut() = -1;
+                *slider_drag_clone.borrow_mut() = Some(SliderType::Saturation);
+                update_hsv_prefs(
+                    &prefs_clone,
+                    *hue_clone.borrow(),
+                    *saturation_clone.borrow(),
+                    *value_clone.borrow(),
+                    custom_colors_clone.borrow().clone(),
+                );
+                if let Some(widget) = gesture.widget()
+                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                {
+                    gl_area.queue_render();
+                }
+                return;
+            }
+            ui::UiElement::ValueSlider(value) => {
+                *value_clone.borrow_mut() = value;
+                *selected_custom_index_clone.borrow_mut() = -1;
+                *slider_drag_clone.borrow_mut() = Some(SliderType::Value);
+                update_hsv_prefs(
+                    &prefs_clone,
+                    *hue_clone.borrow(),
+                    *saturation_clone.borrow(),
+                    *value_clone.borrow(),
+                    custom_colors_clone.borrow().clone(),
+                );
+                if let Some(widget) = gesture.widget()
+                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                {
+                    gl_area.queue_render();
+                }
+                return;
+            }
+            ui::UiElement::CustomColor(idx) => {
+                let custom = custom_colors_clone.borrow();
+                let color = custom[idx];
+                drop(custom);
+                let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
+                    r: color[0],
+                    g: color[1],
+                    b: color[2],
+                    a: 255,
+                });
+                *hue_clone.borrow_mut() = hsv.h;
+                *saturation_clone.borrow_mut() = hsv.s;
+                *value_clone.borrow_mut() = hsv.v;
+                *selected_custom_index_clone.borrow_mut() = idx as i32;
+                update_hsv_prefs(
+                    &prefs_clone,
+                    hsv.h,
+                    hsv.s,
+                    hsv.v,
+                    custom_colors_clone.borrow().clone(),
+                );
+                if let Some(widget) = gesture.widget()
+                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                {
+                    gl_area.queue_render();
+                }
+                return;
+            }
+            ui::UiElement::SaveColor => {
                 let h = *hue_clone.borrow();
                 let s = *saturation_clone.borrow();
                 let v = *value_clone.borrow();
                 let current = crate::canvas::hsv_to_rgb(h, s, v);
-
-                // FIFO: if full, remove oldest first
                 let mut colors = custom_colors_clone.borrow_mut();
                 if colors.len() >= 10 {
                     colors.remove(0);
                 }
                 colors.push([current.r, current.g, current.b]);
-                drop(colors); // Release borrow before updating prefs
-
+                drop(colors);
                 update_hsv_prefs(&prefs_clone, h, s, v, custom_colors_clone.borrow().clone());
-
                 if let Some(widget) = gesture.widget()
                     && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                 {
@@ -671,145 +681,85 @@ fn setup_mouse_events(
                 }
                 return;
             }
-
-            // Then check custom color clicks (needs borrow for iteration)
-            let custom = custom_colors_clone.borrow();
-            for (i, color) in custom.iter().enumerate() {
-                let color_x = palette_x + (color_width + spacing) * i as f32;
-                if x >= color_x as f64 && x <= (color_x + color_width) as f64 {
-                    let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
-                        r: color[0],
-                        g: color[1],
-                        b: color[2],
-                        a: 255,
-                    });
-                    *hue_clone.borrow_mut() = hsv.h;
-                    *saturation_clone.borrow_mut() = hsv.s;
-                    *value_clone.borrow_mut() = hsv.v;
-                    *selected_custom_index_clone.borrow_mut() = i as i32;
-                    update_hsv_prefs(
-                        &prefs_clone,
-                        hsv.h,
-                        hsv.s,
-                        hsv.v,
-                        custom_colors_clone.borrow().clone(),
-                    );
-
-                    if let Some(widget) = gesture.widget()
-                        && let Some(gl_area) = widget.downcast_ref::<GLArea>()
-                    {
-                        gl_area.queue_render();
-                    }
-                    return;
+            ui::UiElement::BrushSize(size) => {
+                *brush_size_clone.borrow_mut() = size;
+                println!("Selected brush size: {size}");
+                let mut prefs = prefs_clone.borrow_mut();
+                prefs.brush.default_size = size;
+                if let Err(e) = crate::preferences::save(&prefs) {
+                    eprintln!("Failed to save preferences: {e}");
                 }
-            }
-        }
-
-        // Check brush size selector (y=120-150)
-        if (120.0..=150.0).contains(&y) {
-            let selector_x = 10.0;
-            let button_size = 30.0;
-            let spacing = 10.0;
-
-            for (i, &size) in BRUSH_SIZES.iter().enumerate() {
-                let button_x = selector_x + (button_size + spacing) * i as f32;
-                if x >= button_x as f64 && x <= (button_x + button_size) as f64 {
-                    *brush_size_clone.borrow_mut() = size;
-                    println!("Selected brush size: {size}");
-                    let mut prefs = prefs_clone.borrow_mut();
-                    prefs.brush.default_size = size;
-                    if let Err(e) = crate::preferences::save(&prefs) {
-                        eprintln!("Failed to save preferences: {e}");
-                    }
-                    if let Some(widget) = gesture.widget()
-                        && let Some(gl_area) = widget.downcast_ref::<GLArea>()
-                    {
-                        gl_area.queue_render();
-                    }
-                    return;
-                }
-            }
-        }
-
-        // Check eraser button (y=155-185, x=10-40)
-        if (155.0..=185.0).contains(&y) && (10.0..=40.0).contains(&x) {
-            let mut is_eraser = is_eraser_clone.borrow_mut();
-            *is_eraser = !*is_eraser;
-            println!("Eraser mode: {}", if *is_eraser { "ON" } else { "OFF" });
-            if let Some(widget) = gesture.widget()
-                && let Some(gl_area) = widget.downcast_ref::<GLArea>()
-            {
-                gl_area.queue_render();
-            }
-            return;
-        }
-
-        // Check clear button (y=155-185, x=50-80)
-        if (155.0..=185.0).contains(&y) && (50.0..=80.0).contains(&x) {
-            canvas_clone.borrow_mut().clear();
-            logger::info("Canvas cleared");
-            println!("Canvas cleared");
-            if let Some(widget) = gesture.widget()
-                && let Some(gl_area) = widget.downcast_ref::<GLArea>()
-            {
-                gl_area.queue_render();
-            }
-            return;
-        }
-
-        // Check undo button (y=155-185, x=90-120)
-        if (155.0..=185.0).contains(&y) && (90.0..=120.0).contains(&x) {
-            let mut canvas = canvas_clone.borrow_mut();
-            if canvas.can_undo() {
-                canvas.undo();
-                logger::info("Undo: removed last stroke");
-                println!("Undo: removed last stroke");
                 if let Some(widget) = gesture.widget()
                     && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                 {
                     gl_area.queue_render();
                 }
+                return;
             }
-            return;
-        }
-
-        // Check redo button (y=155-185, x=130-160)
-        if (155.0..=185.0).contains(&y) && (130.0..=160.0).contains(&x) {
-            let mut canvas = canvas_clone.borrow_mut();
-            if canvas.can_redo() {
-                canvas.redo();
-                logger::info("Redo: restored last stroke");
-                println!("Redo: restored last stroke");
+            ui::UiElement::Eraser => {
+                let mut is_eraser = is_eraser_clone.borrow_mut();
+                *is_eraser = !*is_eraser;
+                println!("Eraser mode: {}", if *is_eraser { "ON" } else { "OFF" });
                 if let Some(widget) = gesture.widget()
                     && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                 {
                     gl_area.queue_render();
                 }
+                return;
             }
-            return;
-        }
-
-        // Check opacity preset (y=190-215)
-        if (190.0..=215.0).contains(&y) {
-            let opacity_presets = crate::canvas::OPACITY_PRESETS;
-            let selector_x = 10.0f64;
-            let button_width = 35.0f64;
-            let spacing = 10.0f64;
-
-            for (i, &opacity_val) in opacity_presets.iter().enumerate() {
-                let bx = selector_x + (button_width + spacing) * i as f64;
-                if x >= bx && x <= bx + button_width {
-                    *opacity_clone.borrow_mut() = opacity_val;
-                    prefs_clone.borrow_mut().brush.default_opacity = opacity_val;
-                    let _ = crate::preferences::save(&prefs_clone.borrow());
-                    logger::info(&format!("Opacity: {}", opacity_val));
+            ui::UiElement::Clear => {
+                canvas_clone.borrow_mut().clear();
+                logger::info("Canvas cleared");
+                println!("Canvas cleared");
+                if let Some(widget) = gesture.widget()
+                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                {
+                    gl_area.queue_render();
+                }
+                return;
+            }
+            ui::UiElement::Undo => {
+                let mut canvas = canvas_clone.borrow_mut();
+                if canvas.can_undo() {
+                    canvas.undo();
+                    logger::info("Undo: removed last stroke");
+                    println!("Undo: removed last stroke");
                     if let Some(widget) = gesture.widget()
                         && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                     {
                         gl_area.queue_render();
                     }
-                    return;
                 }
+                return;
+            }
+            ui::UiElement::Redo => {
+                let mut canvas = canvas_clone.borrow_mut();
+                if canvas.can_redo() {
+                    canvas.redo();
+                    logger::info("Redo: restored last stroke");
+                    println!("Redo: restored last stroke");
+                    if let Some(widget) = gesture.widget()
+                        && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                    {
+                        gl_area.queue_render();
+                    }
+                }
+                return;
+            }
+            ui::UiElement::Opacity(opacity) => {
+                *opacity_clone.borrow_mut() = opacity;
+                prefs_clone.borrow_mut().brush.default_opacity = opacity;
+                let _ = crate::preferences::save(&prefs_clone.borrow());
+                logger::info(&format!("Opacity: {}", opacity));
+                if let Some(widget) = gesture.widget()
+                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                {
+                    gl_area.queue_render();
+                }
+                return;
+            }
+            ui::UiElement::Canvas => {
+                // Not on any UI element — start drawing
             }
         }
 
@@ -915,57 +865,33 @@ fn setup_mouse_events(
         }
 
         // Handle slider dragging
-        if let Some(slider) = *slider_drag_motion.borrow() {
-            let slider_x = 10.0;
-            let slider_width = 200.0;
-
-            if x >= slider_x as f64 && x <= (slider_x + slider_width) as f64 {
-                match slider {
-                    SliderDrag::Hue => {
-                        let new_hue =
-                            ((x as f32 - slider_x) / slider_width * 360.0).clamp(0.0, 360.0);
-                        *hue_motion.borrow_mut() = new_hue;
-                        *selected_custom_index_motion.borrow_mut() = -1;
-                        update_hsv_prefs(
-                            &prefs_motion,
-                            *hue_motion.borrow(),
-                            *saturation_motion.borrow(),
-                            *value_motion.borrow(),
-                            custom_colors_motion.borrow().clone(),
-                        );
-                    }
-                    SliderDrag::Saturation => {
-                        let new_sat =
-                            ((x as f32 - slider_x) / slider_width * 100.0).clamp(0.0, 100.0);
-                        *saturation_motion.borrow_mut() = new_sat;
-                        *selected_custom_index_motion.borrow_mut() = -1;
-                        update_hsv_prefs(
-                            &prefs_motion,
-                            *hue_motion.borrow(),
-                            *saturation_motion.borrow(),
-                            *value_motion.borrow(),
-                            custom_colors_motion.borrow().clone(),
-                        );
-                    }
-                    SliderDrag::Value => {
-                        let new_val =
-                            ((x as f32 - slider_x) / slider_width * 100.0).clamp(0.0, 100.0);
-                        *value_motion.borrow_mut() = new_val;
-                        *selected_custom_index_motion.borrow_mut() = -1;
-                        update_hsv_prefs(
-                            &prefs_motion,
-                            *hue_motion.borrow(),
-                            *saturation_motion.borrow(),
-                            *value_motion.borrow(),
-                            custom_colors_motion.borrow().clone(),
-                        );
-                    }
+        let active_slider = *slider_drag_motion.borrow();
+        if let Some((slider, value)) = ui::slider_drag(x as f32, y as f32, active_slider) {
+            match slider {
+                SliderType::Hue => {
+                    *hue_motion.borrow_mut() = value;
+                    *selected_custom_index_motion.borrow_mut() = -1;
                 }
-                if let Some(widget) = controller.widget()
-                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
-                {
-                    gl_area.queue_render();
+                SliderType::Saturation => {
+                    *saturation_motion.borrow_mut() = value;
+                    *selected_custom_index_motion.borrow_mut() = -1;
                 }
+                SliderType::Value => {
+                    *value_motion.borrow_mut() = value;
+                    *selected_custom_index_motion.borrow_mut() = -1;
+                }
+            }
+            update_hsv_prefs(
+                &prefs_motion,
+                *hue_motion.borrow(),
+                *saturation_motion.borrow(),
+                *value_motion.borrow(),
+                custom_colors_motion.borrow().clone(),
+            );
+            if let Some(widget) = controller.widget()
+                && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+            {
+                gl_area.queue_render();
             }
         }
     });

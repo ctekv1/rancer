@@ -16,6 +16,7 @@ use crate::canvas::{ActiveStroke, Canvas, Point};
 use crate::logger;
 use crate::preferences::Preferences;
 use crate::renderer::{Renderer, RendererConfig};
+use crate::ui::{self, SliderType};
 use crate::window_backend::{MouseState as BackendMouseState, WindowBackend};
 
 #[cfg(windows)]
@@ -93,21 +94,13 @@ pub struct WindowApp {
     /// Eraser mode active
     is_eraser: bool,
     /// Slider drag state (which slider is being dragged)
-    slider_drag: Option<SliderDrag>,
+    slider_drag: Option<SliderType>,
     /// User preferences
     preferences: Preferences,
     /// Current keyboard modifiers state
     modifiers: ModifiersState,
     /// Scale factor for DPI scaling
     scale_factor: f64,
-}
-
-/// Slider drag state
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SliderDrag {
-    Hue,
-    Saturation,
-    Value,
 }
 
 impl WindowApp {
@@ -213,9 +206,20 @@ impl ApplicationHandler for WindowApp {
             let size = window.inner_size();
             let config = RendererConfig::default();
 
+            // Guard against zero-size window (can happen on some systems during resumed phase)
+            let render_width = if size.width > 0 { size.width } else { self.preferences.window.width };
+            let render_height = if size.height > 0 { size.height } else { self.preferences.window.height };
+
+            if size.width == 0 || size.height == 0 {
+                logger::warn(&format!(
+                    "Window inner_size reported as {}x{}, falling back to preferences {}x{}",
+                    size.width, size.height, render_width, render_height
+                ));
+            }
+
             // Use tokio runtime to initialize WGPU (async)
             let rt = tokio::runtime::Runtime::new().unwrap();
-            match rt.block_on(Renderer::new(config, window.clone(), (size.width, size.height))) {
+            match rt.block_on(Renderer::new(config, window.clone(), (render_width, render_height))) {
                 Ok(mut renderer) => {
                     logger::info("✅ WGPU renderer initialized successfully!");
                     renderer.print_backend_status();
@@ -283,6 +287,10 @@ impl ApplicationHandler for WindowApp {
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize((physical_size.width, physical_size.height));
                 }
+                {
+                    let mut canvas = self.canvas.borrow_mut();
+                    canvas.resize(physical_size.width, physical_size.height);
+                }
                 if let Some(window) = &self.window {
                     window.request_redraw();
                     window.request_redraw();
@@ -333,33 +341,14 @@ impl ApplicationHandler for WindowApp {
                             // Check if click is on UI elements
                             let x = self.mouse_position.x;
                             let y = self.mouse_position.y;
+                            let hit = ui::hit_test(x, y, &self.custom_colors);
 
-                            // Check HSV slider clicks (y=5-80)
-                            if (5.0..=80.0).contains(&y) {
-                                let slider_x = 10.0;
-                                let slider_width = 200.0;
-
-                                if x >= slider_x && x <= slider_x + slider_width {
-                                    if (5.0..=25.0).contains(&y) {
-                                        // Hue slider
-                                        self.hue = ((x - slider_x) / slider_width * 360.0)
-                                            .clamp(0.0, 360.0);
-                                        self.selected_custom_index = -1;
-                                        self.update_hsv_preferences();
-                                    } else if (30.0..=50.0).contains(&y) {
-                                        // Saturation slider
-                                        self.saturation = ((x - slider_x) / slider_width * 100.0)
-                                            .clamp(0.0, 100.0);
-                                        self.selected_custom_index = -1;
-                                        self.update_hsv_preferences();
-                                    } else if (55.0..=75.0).contains(&y) {
-                                        // Value slider
-                                        self.value = ((x - slider_x) / slider_width * 100.0)
-                                            .clamp(0.0, 100.0);
-                                        self.selected_custom_index = -1;
-                                        self.update_hsv_preferences();
-                                    }
-
+                            match hit {
+                                ui::UiElement::HueSlider(value) => {
+                                    self.hue = value;
+                                    self.selected_custom_index = -1;
+                                    self.slider_drag = Some(SliderType::Hue);
+                                    self.update_hsv_preferences();
                                     if let Some(renderer) = &mut self.renderer {
                                         renderer.set_hsv(self.hue, self.saturation, self.value);
                                     }
@@ -368,46 +357,54 @@ impl ApplicationHandler for WindowApp {
                                     }
                                     return;
                                 }
-                            }
-
-                            // Check custom palette click (y=90-110)
-                            if (90.0..=110.0).contains(&y) {
-                                let palette_x = 10.0;
-                                let color_width = 20.0;
-                                let spacing = 5.0;
-
-                                // Check custom color clicks
-                                for (i, _) in self.custom_colors.iter().enumerate() {
-                                    let color_x = palette_x + (color_width + spacing) * i as f32;
-                                    if x >= color_x && x <= color_x + color_width {
-                                        self.selected_custom_index = i as i32;
-                                        let color = self.custom_colors[i];
-                                        let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
-                                            r: color[0],
-                                            g: color[1],
-                                            b: color[2],
-                                            a: 255,
-                                        });
-                                        self.hue = hsv.h;
-                                        self.saturation = hsv.s;
-                                        self.value = hsv.v;
-                                        self.update_hsv_preferences();
-
-                                        if let Some(renderer) = &mut self.renderer {
-                                            renderer.set_hsv(self.hue, self.saturation, self.value);
-                                        }
-                                        if let Some(window) = &self.window {
-                                            window.request_redraw();
-                                        }
-                                        return;
+                                ui::UiElement::SaturationSlider(value) => {
+                                    self.saturation = value;
+                                    self.selected_custom_index = -1;
+                                    self.slider_drag = Some(SliderType::Saturation);
+                                    self.update_hsv_preferences();
+                                    if let Some(renderer) = &mut self.renderer {
+                                        renderer.set_hsv(self.hue, self.saturation, self.value);
                                     }
+                                    if let Some(window) = &self.window {
+                                        window.request_redraw();
+                                    }
+                                    return;
                                 }
-
-                                // Check save button (after custom colors)
-                                let save_x = palette_x
-                                    + (color_width + spacing) * self.custom_colors.len() as f32;
-                                if x >= save_x && x <= save_x + color_width {
-                                    // Save current color (FIFO: remove oldest if full)
+                                ui::UiElement::ValueSlider(value) => {
+                                    self.value = value;
+                                    self.selected_custom_index = -1;
+                                    self.slider_drag = Some(SliderType::Value);
+                                    self.update_hsv_preferences();
+                                    if let Some(renderer) = &mut self.renderer {
+                                        renderer.set_hsv(self.hue, self.saturation, self.value);
+                                    }
+                                    if let Some(window) = &self.window {
+                                        window.request_redraw();
+                                    }
+                                    return;
+                                }
+                                ui::UiElement::CustomColor(idx) => {
+                                    self.selected_custom_index = idx as i32;
+                                    let color = self.custom_colors[idx];
+                                    let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
+                                        r: color[0],
+                                        g: color[1],
+                                        b: color[2],
+                                        a: 255,
+                                    });
+                                    self.hue = hsv.h;
+                                    self.saturation = hsv.s;
+                                    self.value = hsv.v;
+                                    self.update_hsv_preferences();
+                                    if let Some(renderer) = &mut self.renderer {
+                                        renderer.set_hsv(self.hue, self.saturation, self.value);
+                                    }
+                                    if let Some(window) = &self.window {
+                                        window.request_redraw();
+                                    }
+                                    return;
+                                }
+                                ui::UiElement::SaveColor => {
                                     let current = crate::canvas::hsv_to_rgb(
                                         self.hue,
                                         self.saturation,
@@ -418,7 +415,6 @@ impl ApplicationHandler for WindowApp {
                                     }
                                     self.custom_colors.push([current.r, current.g, current.b]);
                                     self.update_hsv_preferences();
-
                                     if let Some(renderer) = &mut self.renderer {
                                         renderer.set_custom_colors(self.custom_colors.clone());
                                     }
@@ -427,119 +423,84 @@ impl ApplicationHandler for WindowApp {
                                     }
                                     return;
                                 }
-                            }
-
-                            // Check brush size selector click (y=120-150)
-                            if (120.0..=150.0).contains(&y) {
-                                let selector_x = 10.0;
-                                let button_size = 30.0;
-                                let spacing = 10.0;
-                                let brush_sizes = crate::canvas::BRUSH_SIZES;
-
-                                for (i, &size) in brush_sizes.iter().enumerate() {
-                                    let button_x = selector_x + (button_size + spacing) * i as f32;
-                                    if x >= button_x && x <= button_x + button_size {
-                                        self.brush_size = size;
-                                        self.preferences.brush.default_size = size;
-
-                                        // Save preferences on change
-                                        if let Err(e) = crate::preferences::save(&self.preferences)
-                                        {
-                                            logger::error(&format!(
-                                                "Failed to save preferences: {}",
-                                                e
-                                            ));
-                                        }
-
-                                        // Update renderer with new brush size
-                                        if let Some(renderer) = &mut self.renderer {
-                                            renderer.set_brush_size(size);
-                                        }
-                                        println!("Selected brush size: {}", size);
-                                        if let Some(window) = &self.window {
-                                            window.request_redraw();
-                                        }
-                                        return;
+                                ui::UiElement::BrushSize(size) => {
+                                    self.brush_size = size;
+                                    self.preferences.brush.default_size = size;
+                                    if let Err(e) = crate::preferences::save(&self.preferences) {
+                                        logger::error(&format!(
+                                            "Failed to save preferences: {}",
+                                            e
+                                        ));
                                     }
-                                }
-                            }
-
-                            // Check eraser button click (x=10 to x=40, y=155 to y=185)
-                            if (155.0..=185.0).contains(&y) && (10.0..=40.0).contains(&x) {
-                                self.is_eraser = !self.is_eraser;
-                                logger::info(&format!(
-                                    "Eraser mode: {}",
-                                    if self.is_eraser { "ON" } else { "OFF" }
-                                ));
-                                if let Some(renderer) = &mut self.renderer {
-                                    renderer.set_eraser(self.is_eraser);
-                                }
-                                if let Some(window) = &self.window {
-                                    window.request_redraw();
-                                }
-                                return;
-                            }
-
-                            // Check clear button click (x=50 to x=80, y=155 to y=185)
-                            if (155.0..=185.0).contains(&y) && (50.0..=80.0).contains(&x) {
-                                let mut canvas = self.canvas.borrow_mut();
-                                canvas.clear();
-                                logger::info("Canvas cleared");
-                                if let Some(window) = &self.window {
-                                    window.request_redraw();
-                                }
-                                return;
-                            }
-
-                            // Check undo button click (x=90 to x=120, y=155 to y=185)
-                            if (155.0..=185.0).contains(&y) && (90.0..=120.0).contains(&x) {
-                                let mut canvas = self.canvas.borrow_mut();
-                                if canvas.can_undo() {
-                                    canvas.undo();
-                                    logger::info("Undo: removed last stroke");
+                                    if let Some(renderer) = &mut self.renderer {
+                                        renderer.set_brush_size(size);
+                                    }
+                                    println!("Selected brush size: {}", size);
                                     if let Some(window) = &self.window {
                                         window.request_redraw();
                                     }
+                                    return;
                                 }
-                                return;
-                            }
-
-                            // Check redo button click (x=130 to x=160, y=155 to y=185)
-                            if (155.0..=185.0).contains(&y) && (130.0..=160.0).contains(&x) {
-                                let mut canvas = self.canvas.borrow_mut();
-                                if canvas.can_redo() {
-                                    canvas.redo();
-                                    logger::info("Redo: restored last stroke");
+                                ui::UiElement::Eraser => {
+                                    self.is_eraser = !self.is_eraser;
+                                    logger::info(&format!(
+                                        "Eraser mode: {}",
+                                        if self.is_eraser { "ON" } else { "OFF" }
+                                    ));
+                                    if let Some(renderer) = &mut self.renderer {
+                                        renderer.set_eraser(self.is_eraser);
+                                    }
                                     if let Some(window) = &self.window {
                                         window.request_redraw();
                                     }
+                                    return;
                                 }
-                                return;
-                            }
-
-                            // Check opacity preset clicks (y=190-215)
-                            if (190.0..=215.0).contains(&y) {
-                                let opacity_presets = crate::canvas::OPACITY_PRESETS;
-                                let selector_x = 10.0;
-                                let button_width = 35.0;
-                                let spacing = 10.0;
-
-                                for (i, &opacity) in opacity_presets.iter().enumerate() {
-                                    let bx = selector_x + (button_width + spacing) * i as f32;
-                                    if x >= bx && x <= bx + button_width {
-                                        self.opacity = opacity;
-                                        self.preferences.brush.default_size = self.brush_size;
-                                        self.preferences.brush.default_opacity = opacity;
-                                        let _ = crate::preferences::save(&self.preferences);
-                                        if let Some(renderer) = &mut self.renderer {
-                                            renderer.set_opacity(opacity);
-                                        }
-                                        logger::info(&format!("Opacity: {}", opacity));
+                                ui::UiElement::Clear => {
+                                    let mut canvas = self.canvas.borrow_mut();
+                                    canvas.clear();
+                                    logger::info("Canvas cleared");
+                                    if let Some(window) = &self.window {
+                                        window.request_redraw();
+                                    }
+                                    return;
+                                }
+                                ui::UiElement::Undo => {
+                                    let mut canvas = self.canvas.borrow_mut();
+                                    if canvas.can_undo() {
+                                        canvas.undo();
+                                        logger::info("Undo: removed last stroke");
                                         if let Some(window) = &self.window {
                                             window.request_redraw();
                                         }
-                                        return;
                                     }
+                                    return;
+                                }
+                                ui::UiElement::Redo => {
+                                    let mut canvas = self.canvas.borrow_mut();
+                                    if canvas.can_redo() {
+                                        canvas.redo();
+                                        logger::info("Redo: restored last stroke");
+                                        if let Some(window) = &self.window {
+                                            window.request_redraw();
+                                        }
+                                    }
+                                    return;
+                                }
+                                ui::UiElement::Opacity(opacity) => {
+                                    self.opacity = opacity;
+                                    self.preferences.brush.default_opacity = opacity;
+                                    let _ = crate::preferences::save(&self.preferences);
+                                    if let Some(renderer) = &mut self.renderer {
+                                        renderer.set_opacity(opacity);
+                                    }
+                                    logger::info(&format!("Opacity: {}", opacity));
+                                    if let Some(window) = &self.window {
+                                        window.request_redraw();
+                                    }
+                                    return;
+                                }
+                                ui::UiElement::Canvas => {
+                                    // Not on any UI element — start drawing
                                 }
                             }
 
@@ -648,44 +609,27 @@ impl ApplicationHandler for WindowApp {
                 }
 
                 // Handle slider dragging
-                if let Some(slider) = self.slider_drag {
-                    let slider_x = 10.0;
-                    let slider_width = 200.0;
-                    let x = point.x;
-
-                    if x >= slider_x && x <= slider_x + slider_width {
-                        match slider {
-                            SliderDrag::Hue => {
-                                self.hue =
-                                    ((x - slider_x) / slider_width * 360.0).clamp(0.0, 360.0);
-                                self.selected_custom_index = -1;
-                                self.update_hsv_preferences();
-                                if let Some(renderer) = &mut self.renderer {
-                                    renderer.set_hsv(self.hue, self.saturation, self.value);
-                                }
-                            }
-                            SliderDrag::Saturation => {
-                                self.saturation =
-                                    ((x - slider_x) / slider_width * 100.0).clamp(0.0, 100.0);
-                                self.selected_custom_index = -1;
-                                self.update_hsv_preferences();
-                                if let Some(renderer) = &mut self.renderer {
-                                    renderer.set_hsv(self.hue, self.saturation, self.value);
-                                }
-                            }
-                            SliderDrag::Value => {
-                                self.value =
-                                    ((x - slider_x) / slider_width * 100.0).clamp(0.0, 100.0);
-                                self.selected_custom_index = -1;
-                                self.update_hsv_preferences();
-                                if let Some(renderer) = &mut self.renderer {
-                                    renderer.set_hsv(self.hue, self.saturation, self.value);
-                                }
-                            }
+                if let Some((slider, value)) = ui::slider_drag(point.x, point.y, self.slider_drag) {
+                    match slider {
+                        SliderType::Hue => {
+                            self.hue = value;
+                            self.selected_custom_index = -1;
                         }
-                        if let Some(window) = &self.window {
-                            window.request_redraw();
+                        SliderType::Saturation => {
+                            self.saturation = value;
+                            self.selected_custom_index = -1;
                         }
+                        SliderType::Value => {
+                            self.value = value;
+                            self.selected_custom_index = -1;
+                        }
+                    }
+                    self.update_hsv_preferences();
+                    if let Some(renderer) = &mut self.renderer {
+                        renderer.set_hsv(self.hue, self.saturation, self.value);
+                    }
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
                     }
                 }
             }
@@ -963,5 +907,43 @@ mod tests {
 
         let canvas = app.canvas();
         assert_eq!(canvas.borrow().strokes().len(), 0);
+    }
+
+    #[test]
+    fn test_zero_size_window_guard() {
+        // Verify that when window.inner_size() returns (0, 0),
+        // the fallback to preferences dimensions is used
+        let preferences = Preferences::default();
+        assert_eq!(preferences.window.width, 1280);
+        assert_eq!(preferences.window.height, 720);
+
+        // Simulate the guard logic: if size is zero, use preferences
+        let zero_size = (0u32, 0u32);
+        let render_width = if zero_size.0 > 0 { zero_size.0 } else { preferences.window.width };
+        let render_height = if zero_size.1 > 0 { zero_size.1 } else { preferences.window.height };
+        assert_eq!(render_width, 1280);
+        assert_eq!(render_height, 720);
+    }
+
+    #[test]
+    fn test_nonzero_size_window_uses_actual_size() {
+        // When window.inner_size() returns a valid size, it should be used
+        let preferences = Preferences::default();
+        let actual_size = (1920u32, 1080u32);
+        let render_width = if actual_size.0 > 0 { actual_size.0 } else { preferences.window.width };
+        let render_height = if actual_size.1 > 0 { actual_size.1 } else { preferences.window.height };
+        assert_eq!(render_width, 1920);
+        assert_eq!(render_height, 1080);
+    }
+
+    #[test]
+    fn test_partial_zero_size_guard() {
+        // Guard should work even if only one dimension is zero
+        let preferences = Preferences::default();
+        let partial_zero = (800u32, 0u32);
+        let render_width = if partial_zero.0 > 0 { partial_zero.0 } else { preferences.window.width };
+        let render_height = if partial_zero.1 > 0 { partial_zero.1 } else { preferences.window.height };
+        assert_eq!(render_width, 800);
+        assert_eq!(render_height, 720);
     }
 }
