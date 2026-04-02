@@ -430,7 +430,7 @@ impl WindowBackend for WindowApp {
                     }
                 }
 
-                if let Some(ref renderer) = *gl_renderer_clone.borrow() {
+                if let Some(ref mut renderer) = *gl_renderer_clone.borrow_mut() {
                     let canvas = canvas_clone.borrow();
                     let active_stroke = active_stroke_clone.borrow();
                     let current_brush_size = *brush_for_render.borrow();
@@ -443,15 +443,20 @@ impl WindowBackend for WindowApp {
                     let selected_custom_index = *selected_custom_index_for_render.borrow();
                     let width = gl_area.width();
                     let height = gl_area.height();
-
+                    // DPI-aware: approximate logical size using a scale factor if available
+                    let dpi_scale: f32 = 1.0; // default
+                    let width_logical = (width as f32) / dpi_scale;
+                    let height_logical = (height as f32) / dpi_scale;
+                    // Update logical size and render using logical dimensions
+                    renderer.set_canvas_logical_size(width_logical, height_logical);
                     renderer.render_hsv(
                         &canvas,
                         &active_stroke,
                         current_brush_size,
                         is_eraser,
                         current_opacity,
-                        width,
-                        height,
+                        width_logical as i32,
+                        height_logical as i32,
                         hue,
                         saturation,
                         value,
@@ -541,7 +546,7 @@ fn setup_mouse_events(
     value: Rc<RefCell<f32>>,
     custom_colors: Rc<RefCell<Vec<[u8; 3]>>>,
     selected_custom_index: Rc<RefCell<i32>>,
-    slider_drag: Rc<RefCell<Option<SliderDrag>>>,
+    slider_drag: Rc<RefCell<Option<SliderType>>>,
     preferences: Rc<RefCell<crate::preferences::Preferences>>,
 ) {
     // Mouse click handler for left button

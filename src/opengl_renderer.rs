@@ -36,6 +36,8 @@ pub struct GlRenderer {
     vao: glow::VertexArray,
     vbo: glow::Buffer,
     canvas_size_uniform: glow::UniformLocation,
+    // store logical canvas size for DPI-aware rendering
+    canvas_logical_size: std::cell::Cell<(f32, f32)>,
 }
 
 impl GlRenderer {
@@ -81,10 +83,15 @@ impl GlRenderer {
                 vao,
                 vbo,
                 canvas_size_uniform,
+                canvas_logical_size: std::cell::Cell::new((1.0, 1.0)),
             })
         }
     }
 
+    // Update the canvas logical size (width/height after DPI scaling)
+    pub fn set_canvas_logical_size(&self, w: f32, h: f32) {
+        self.canvas_logical_size.set((w, h));
+    }
     /// Compile vertex and fragment shaders into a program
     #[allow(clippy::unnecessary_safety_comment)]
     unsafe fn compile_shaders(gl: &glow::Context) -> Result<glow::Program, String> {
@@ -156,8 +163,10 @@ impl GlRenderer {
             self.gl.clear(glow::COLOR_BUFFER_BIT);
 
             self.gl.use_program(Some(self.program));
+            // Use logical canvas size for coordinate mapping
+            let (lw, lh) = self.canvas_logical_size.get();
             self.gl
-                .uniform_2_f32(Some(&self.canvas_size_uniform), width as f32, height as f32);
+                .uniform_2_f32(Some(&self.canvas_size_uniform), lw, lh);
             self.gl.bind_vertex_array(Some(self.vao));
 
             // Draw committed strokes
