@@ -49,12 +49,12 @@
     - [x] Update commit_stroke to commit to active layer
     - [x] Update undo/redo to work per-layer
     - [x] Add MAX_LAYERS constant (20)
-  - [ ] Phase 2: Renderer Updates
-    - [ ] Update WGPU renderer to iterate layers bottom-to-top
-    - [ ] Skip invisible layers in render loop
-    - [ ] Apply layer opacity as alpha multiplier
-    - [ ] Render active stroke on active layer
-    - [ ] Update OpenGL renderer with same logic
+  - [x] Phase 2: Renderer Updates
+    - [x] Update WGPU renderer to iterate layers bottom-to-top
+    - [x] Skip invisible layers in render loop
+    - [x] Apply layer opacity as alpha multiplier
+    - [x] Render active stroke on active layer
+    - [x] Update OpenGL renderer with same logic
   - [ ] Phase 3: Backend Integration (window_winit.rs)
     - [ ] Add active_layer_index to WindowApp state
     - [ ] Update stroke commit flow to use active layer

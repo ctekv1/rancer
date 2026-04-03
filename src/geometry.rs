@@ -94,11 +94,19 @@ pub fn generate_stroke_vertices_with_opacity(stroke: &Stroke, layer_opacity: f32
 
 /// Generate vertex data for an active stroke being drawn
 pub fn generate_active_stroke_vertices(active: &ActiveStroke) -> Vec<f32> {
+    generate_active_stroke_vertices_with_opacity(active, 1.0)
+}
+
+/// Generate vertex data for an active stroke with layer opacity applied
+pub fn generate_active_stroke_vertices_with_opacity(
+    active: &ActiveStroke,
+    layer_opacity: f32,
+) -> Vec<f32> {
     let color = [
         active.color().r as f32 / 255.0,
         active.color().g as f32 / 255.0,
         active.color().b as f32 / 255.0,
-        active.opacity(),
+        active.opacity() * layer_opacity,
     ];
     generate_stroke_vertex_strip(active.points(), color, active.width() / 2.0)
 }

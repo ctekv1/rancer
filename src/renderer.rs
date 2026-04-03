@@ -738,8 +738,9 @@ impl Renderer {
             if let Some(active_stroke) = &self.active_stroke
                 && active_stroke.points().len() >= 2
             {
+                let layer_opacity = self.canvas.layers()[self.canvas.active_layer()].opacity;
                 let start = all_stroke_vertices.len() as u32;
-                all_stroke_vertices.extend(self.generate_active_stroke_vertices(active_stroke));
+                all_stroke_vertices.extend(self.generate_active_stroke_vertices_with_layer_opacity(active_stroke, layer_opacity));
                 let end = all_stroke_vertices.len() as u32;
                 stroke_ranges.push(start..end);
             }
@@ -830,12 +831,13 @@ impl Renderer {
         to_vertices_7(&flat, stroke.width)
     }
 
-    /// Generate vertices for an active stroke being drawn (as a smooth triangle strip)
-    fn generate_active_stroke_vertices(
+    /// Generate vertices for an active stroke with layer opacity applied
+    fn generate_active_stroke_vertices_with_layer_opacity(
         &self,
         active_stroke: &crate::canvas::ActiveStroke,
+        layer_opacity: f32,
     ) -> Vec<[f32; 7]> {
-        let flat = geometry::generate_active_stroke_vertices(active_stroke);
+        let flat = geometry::generate_active_stroke_vertices_with_opacity(active_stroke, layer_opacity);
         to_vertices_7(&flat, active_stroke.width())
     }
 

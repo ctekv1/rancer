@@ -226,7 +226,9 @@ impl GlRenderer {
 
             // Draw active stroke (with zoom/pan transform)
             if let Some(active) = active_stroke {
-                let vertices = Self::generate_active_stroke_vertices(active);
+                let layer_opacity = canvas.layers()[canvas.active_layer()].opacity;
+                let vertices =
+                    Self::generate_active_stroke_vertices_with_opacity(active, layer_opacity);
                 if !vertices.is_empty() {
                     self.upload_and_draw(&vertices, glow::TRIANGLE_STRIP);
                 }
@@ -331,9 +333,12 @@ impl GlRenderer {
         geometry::generate_stroke_vertices_with_opacity(stroke, layer_opacity)
     }
 
-    /// Generate vertex data for an active stroke being drawn
-    fn generate_active_stroke_vertices(active: &ActiveStroke) -> Vec<f32> {
-        geometry::generate_active_stroke_vertices(active)
+    /// Generate vertex data for an active stroke with layer opacity
+    fn generate_active_stroke_vertices_with_opacity(
+        active: &ActiveStroke,
+        layer_opacity: f32,
+    ) -> Vec<f32> {
+        geometry::generate_active_stroke_vertices_with_opacity(active, layer_opacity)
     }
 
     /// Generate vertices for HSV slider UI
