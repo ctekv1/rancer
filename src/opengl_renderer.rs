@@ -13,9 +13,12 @@ const VERTEX_SHADER_SOURCE: &str = r#"
     attribute vec2 position;
     attribute vec4 color;
     uniform vec2 canvas_size;
+    uniform float zoom;
+    uniform vec2 pan_offset;
     varying vec4 v_color;
     void main() {
-        vec2 pos = position / canvas_size * 2.0 - 1.0;
+        vec2 world_pos = (position - pan_offset) * zoom;
+        vec2 pos = world_pos / canvas_size * 2.0 - 1.0;
         gl_Position = vec4(pos.x, -pos.y, 0.0, 1.0);
         v_color = color;
     }
@@ -36,8 +39,13 @@ pub struct GlRenderer {
     vao: glow::VertexArray,
     vbo: glow::Buffer,
     canvas_size_uniform: glow::UniformLocation,
+    zoom_uniform: glow::UniformLocation,
+    pan_offset_uniform: glow::UniformLocation,
     // store logical canvas size for DPI-aware rendering
     canvas_logical_size: std::cell::Cell<(f32, f32)>,
+    // viewport transform state
+    zoom: std::cell::Cell<f32>,
+    pan_offset: std::cell::Cell<(f32, f32)>,
 }
 
 impl GlRenderer {
@@ -48,6 +56,12 @@ impl GlRenderer {
             let canvas_size_uniform = gl
                 .get_uniform_location(program, "canvas_size")
                 .ok_or_else(|| "Failed to get canvas_size uniform location".to_string())?;
+            let zoom_uniform = gl
+                .get_uniform_location(program, "zoom")
+                .ok_or_else(|| "Failed to get zoom uniform location".to_string())?;
+            let pan_offset_uniform = gl
+                .get_uniform_location(program, "pan_offset")
+                .ok_or_else(|| "Failed to get pan_offset uniform location".to_string())?;
 
             let vao = gl
                 .create_vertex_array()
@@ -83,7 +97,11 @@ impl GlRenderer {
                 vao,
                 vbo,
                 canvas_size_uniform,
+                zoom_uniform,
+                pan_offset_uniform,
                 canvas_logical_size: std::cell::Cell::new((1.0, 1.0)),
+                zoom: std::cell::Cell::new(1.0),
+                pan_offset: std::cell::Cell::new((0.0, 0.0)),
             })
         }
     }
@@ -92,6 +110,27 @@ impl GlRenderer {
     pub fn set_canvas_logical_size(&self, w: f32, h: f32) {
         self.canvas_logical_size.set((w, h));
     }
+
+    // Set zoom level (1.0 = 100%)
+    pub fn set_zoom(&self, zoom: f32) {
+        self.zoom.set(zoom);
+    }
+
+    // Get current zoom level
+    pub fn zoom(&self) -> f32 {
+        self.zoom.get()
+    }
+
+    // Set pan offset (in canvas coordinates)
+    pub fn set_pan(&self, offset: (f32, f32)) {
+        self.pan_offset.set(offset);
+    }
+
+    // Get current pan offset
+    pub fn pan_offset(&self) -> (f32, f32) {
+        self.pan_offset.get()
+    }
+
     /// Compile vertex and fragment shaders into a program
     #[allow(clippy::unnecessary_safety_comment)]
     unsafe fn compile_shaders(gl: &glow::Context) -> Result<glow::Program, String> {
@@ -167,23 +206,36 @@ impl GlRenderer {
             let (lw, lh) = self.canvas_logical_size.get();
             self.gl
                 .uniform_2_f32(Some(&self.canvas_size_uniform), lw, lh);
+
+            // Set zoom and pan uniforms
+            let zoom = self.zoom.get();
+            let (pan_x, pan_y) = self.pan_offset.get();
+            self.gl.uniform_1_f32(Some(&self.zoom_uniform), zoom);
+            self.gl
+                .uniform_2_f32(Some(&self.pan_offset_uniform), pan_x, pan_y);
+
             self.gl.bind_vertex_array(Some(self.vao));
 
-            // Draw committed strokes
-            for stroke in canvas.strokes() {
-                let vertices = Self::generate_stroke_vertices(stroke);
+            // Draw committed strokes (with zoom/pan transform)
+            for (stroke, layer_opacity) in canvas.all_strokes() {
+                let vertices = Self::generate_stroke_vertices_with_opacity(stroke, layer_opacity);
                 if !vertices.is_empty() {
                     self.upload_and_draw(&vertices, glow::TRIANGLE_STRIP);
                 }
             }
 
-            // Draw active stroke
+            // Draw active stroke (with zoom/pan transform)
             if let Some(active) = active_stroke {
                 let vertices = Self::generate_active_stroke_vertices(active);
                 if !vertices.is_empty() {
                     self.upload_and_draw(&vertices, glow::TRIANGLE_STRIP);
                 }
             }
+
+            // Reset zoom/pan for UI elements (UI stays fixed on screen)
+            self.gl.uniform_1_f32(Some(&self.zoom_uniform), 1.0);
+            self.gl
+                .uniform_2_f32(Some(&self.pan_offset_uniform), 0.0, 0.0);
 
             // Draw HSV sliders UI
             let hsv_vertices = Self::generate_hsv_slider_vertices(hue, saturation, value);
@@ -234,6 +286,18 @@ impl GlRenderer {
                 self.upload_and_draw(&export_vertices, glow::TRIANGLES);
             }
 
+            // Draw zoom in button UI
+            let zoom_in_vertices = Self::generate_zoom_in_button_vertices();
+            if !zoom_in_vertices.is_empty() {
+                self.upload_and_draw(&zoom_in_vertices, glow::TRIANGLES);
+            }
+
+            // Draw zoom out button UI
+            let zoom_out_vertices = Self::generate_zoom_out_button_vertices();
+            if !zoom_out_vertices.is_empty() {
+                self.upload_and_draw(&zoom_out_vertices, glow::TRIANGLES);
+            }
+
             // Draw opacity preset buttons UI
             let opacity_vertices = Self::generate_opacity_preset_vertices(opacity);
             if !opacity_vertices.is_empty() {
@@ -259,9 +323,12 @@ impl GlRenderer {
         }
     }
 
-    /// Generate vertex data for a committed stroke as a triangle strip
-    fn generate_stroke_vertices(stroke: &crate::canvas::Stroke) -> Vec<f32> {
-        geometry::generate_stroke_vertices(stroke)
+    /// Generate vertex data for a committed stroke with layer opacity
+    fn generate_stroke_vertices_with_opacity(
+        stroke: &crate::canvas::Stroke,
+        layer_opacity: f32,
+    ) -> Vec<f32> {
+        geometry::generate_stroke_vertices_with_opacity(stroke, layer_opacity)
     }
 
     /// Generate vertex data for an active stroke being drawn
@@ -307,6 +374,16 @@ impl GlRenderer {
     /// Generate vertices for export button UI
     fn generate_export_button_vertices() -> Vec<f32> {
         geometry::generate_export_button_vertices()
+    }
+
+    /// Generate vertices for zoom in button UI
+    fn generate_zoom_in_button_vertices() -> Vec<f32> {
+        geometry::generate_zoom_in_button_vertices()
+    }
+
+    /// Generate vertices for zoom out button UI
+    fn generate_zoom_out_button_vertices() -> Vec<f32> {
+        geometry::generate_zoom_out_button_vertices()
     }
 
     /// Generate vertices for opacity preset buttons UI

@@ -98,6 +98,14 @@ pub struct WindowApp {
     modifiers: ModifiersState,
     /// Scale factor for DPI scaling
     scale_factor: f64,
+    /// Viewport zoom level (1.0 = 100%)
+    zoom: f32,
+    /// Viewport pan offset (in canvas coordinates)
+    pan_offset: (f32, f32),
+    /// Whether space key is held for panning
+    is_panning: bool,
+    /// Last mouse position for panning delta calculation
+    last_mouse_position: Point,
 }
 
 impl WindowApp {
@@ -124,7 +132,18 @@ impl WindowApp {
             preferences,
             modifiers: ModifiersState::empty(),
             scale_factor: 1.0,
+            zoom: 1.0,
+            pan_offset: (0.0, 0.0),
+            is_panning: false,
+            last_mouse_position: Point { x: 0.0, y: 0.0 },
         }
+    }
+
+    /// Transform screen coordinates to canvas coordinates using current zoom/pan
+    fn screen_to_canvas(&self, screen_x: f32, screen_y: f32) -> Point {
+        let canvas_x = screen_x / self.zoom + self.pan_offset.0;
+        let canvas_y = screen_y / self.zoom + self.pan_offset.1;
+        Point { x: canvas_x, y: canvas_y }
     }
 
     /// Export canvas to PNG file
@@ -262,6 +281,57 @@ impl ApplicationHandler for WindowApp {
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.modifiers = modifiers.state();
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                // Handle zoom with mouse wheel
+                let zoom_factor = 1.25;
+                let old_zoom = self.zoom;
+                
+                let new_zoom = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, dy) => {
+                        if dy > 0.0 {
+                            // Scroll up = zoom in
+                            (old_zoom * zoom_factor).min(10.0)
+                        } else if dy < 0.0 {
+                            // Scroll down = zoom out
+                            (old_zoom / zoom_factor).max(0.1)
+                        } else {
+                            old_zoom
+                        }
+                    }
+                    winit::event::MouseScrollDelta::PixelDelta(delta) => {
+                        if delta.y > 0.0 {
+                            (old_zoom * zoom_factor).min(10.0)
+                        } else if delta.y < 0.0 {
+                            (old_zoom / zoom_factor).max(0.1)
+                        } else {
+                            old_zoom
+                        }
+                    }
+                };
+                
+                if (new_zoom - old_zoom).abs() > 0.001 {
+                    // Zoom toward mouse position:
+                    // 1. Calculate where mouse is in canvas coordinates before zoom
+                    let mouse_canvas_x = self.mouse_position.x / old_zoom + self.pan_offset.0;
+                    let mouse_canvas_y = self.mouse_position.y / old_zoom + self.pan_offset.1;
+                    
+                    // 2. Calculate new pan so that same canvas point is under mouse after zoom
+                    let new_pan_x = mouse_canvas_x - self.mouse_position.x / new_zoom;
+                    let new_pan_y = mouse_canvas_y - self.mouse_position.y / new_zoom;
+                    
+                    self.zoom = new_zoom;
+                    self.pan_offset = (new_pan_x, new_pan_y);
+                    
+                    // Update renderer
+                    if let Some(renderer) = &mut self.renderer {
+                        renderer.set_zoom(new_zoom);
+                        renderer.set_pan(self.pan_offset);
+                    }
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                }
             }
             WindowEvent::Resized(physical_size) => {
                 // Update scale factor (may change if window moves between monitors)
@@ -500,6 +570,32 @@ impl ApplicationHandler for WindowApp {
                                     self.export_canvas_to_file();
                                     return;
                                 }
+                                ui::UiElement::ZoomIn => {
+                                    let new_zoom = (self.zoom * 1.25).min(10.0);
+                                    if (new_zoom - self.zoom).abs() > 0.001 {
+                                        self.zoom = new_zoom;
+                                        if let Some(renderer) = &mut self.renderer {
+                                            renderer.set_zoom(new_zoom);
+                                        }
+                                        if let Some(window) = &self.window {
+                                            window.request_redraw();
+                                        }
+                                    }
+                                    return;
+                                }
+                                ui::UiElement::ZoomOut => {
+                                    let new_zoom = (self.zoom / 1.25).max(0.1);
+                                    if (new_zoom - self.zoom).abs() > 0.001 {
+                                        self.zoom = new_zoom;
+                                        if let Some(renderer) = &mut self.renderer {
+                                            renderer.set_zoom(new_zoom);
+                                        }
+                                        if let Some(window) = &self.window {
+                                            window.request_redraw();
+                                        }
+                                    }
+                                    return;
+                                }
                                 ui::UiElement::Opacity(opacity) => {
                                     self.opacity = opacity;
                                     self.preferences.brush.default_opacity = opacity;
@@ -542,9 +638,10 @@ impl ApplicationHandler for WindowApp {
                             // Store the active stroke
                             *self.active_stroke.borrow_mut() = Some(active_stroke);
 
-                            // Add the current mouse position as the first point
+                            // Add the current mouse position as the first point (in canvas coords)
                             if let Some(active_stroke) = &mut *self.active_stroke.borrow_mut() {
-                                active_stroke.add_point(self.mouse_position);
+                                let canvas_point = self.screen_to_canvas(self.mouse_position.x, self.mouse_position.y);
+                                active_stroke.add_point(canvas_point);
                                 println!(
                                     "Added first point to active stroke: ({}, {})",
                                     self.mouse_position.x, self.mouse_position.y
@@ -601,18 +698,40 @@ impl ApplicationHandler for WindowApp {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                let point = Point {
+                let screen_point = Point {
                     x: position.x as f32,
                     y: position.y as f32,
                 };
-                self.mouse_position = point;
+                self.mouse_position = screen_point;
 
-                // If we're drawing, add the point to the active stroke
+                // Handle panning when space is held
+                if self.is_panning {
+                    let dx = screen_point.x - self.last_mouse_position.x;
+                    let dy = screen_point.y - self.last_mouse_position.y;
+                    let (old_pan_x, old_pan_y) = self.pan_offset;
+                    // Pan in opposite direction of mouse movement (drag canvas with mouse)
+                    self.pan_offset = (old_pan_x - dx / self.zoom, old_pan_y - dy / self.zoom);
+                    self.last_mouse_position = screen_point;
+                    if let Some(renderer) = &mut self.renderer {
+                        renderer.set_zoom(self.zoom);
+                        renderer.set_pan(self.pan_offset);
+                    }
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                    return;
+                }
+
+                // Update last mouse position for panning
+                self.last_mouse_position = screen_point;
+
+                // If we're drawing, add the point to the active stroke (transform to canvas coords)
                 if self.mouse_state == MouseState::Drawing
                     && let Some(active_stroke) = &mut *self.active_stroke.borrow_mut()
                 {
-                    active_stroke.add_point(point);
-                    println!("Added point to active stroke: ({}, {})", point.x, point.y);
+                    let canvas_point = self.screen_to_canvas(screen_point.x, screen_point.y);
+                    active_stroke.add_point(canvas_point);
+                    println!("Added point to active stroke: ({}, {})", canvas_point.x, canvas_point.y);
                     println!(
                         "Active stroke now has {} points",
                         active_stroke.points().len()
@@ -622,8 +741,8 @@ impl ApplicationHandler for WindowApp {
                     }
                 }
 
-                // Handle slider dragging
-                if let Some((slider, value)) = ui::slider_drag(point.x, point.y, self.slider_drag) {
+                // Handle slider dragging (UI stays fixed, no transform)
+                if let Some((slider, value)) = ui::slider_drag(screen_point.x, screen_point.y, self.slider_drag) {
                     match slider {
                         SliderType::Hue => {
                             self.hue = value;
@@ -651,6 +770,11 @@ impl ApplicationHandler for WindowApp {
                 event: key_event, ..
             } => {
                 if key_event.state == winit::event::ElementState::Pressed {
+                    // Handle space key for panning
+                    if let winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) = key_event.logical_key {
+                        self.is_panning = true;
+                    }
+                    
                     // Check for 's' key (save/export)
                     // Note: Ctrl modifier detection may need additional handling
                     if let winit::keyboard::Key::Character(ref c) = key_event.logical_key
@@ -813,6 +937,11 @@ impl ApplicationHandler for WindowApp {
                                 }
                             }
                         }
+                        winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) => {
+                            if key_event.state == winit::event::ElementState::Released {
+                                self.is_panning = false;
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -920,7 +1049,7 @@ mod tests {
         let app = WindowApp::new(preferences);
 
         let canvas = app.canvas();
-        assert_eq!(canvas.borrow().strokes().len(), 0);
+        assert_eq!(canvas.borrow().all_strokes().len(), 0);
     }
 
     #[test]

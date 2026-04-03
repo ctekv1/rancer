@@ -78,6 +78,10 @@ pub struct Renderer {
     ui_pipeline: Option<wgpu::RenderPipeline>,
     /// Window size
     window_size: (u32, u32),
+    /// Viewport zoom level (1.0 = 100%)
+    zoom: f32,
+    /// Viewport pan offset (in canvas coordinates)
+    pan_offset: (f32, f32),
     /// Pipeline layout for recreation
     pipeline_layout: Option<wgpu::PipelineLayout>,
     /// Shader module for recreation
@@ -132,6 +136,8 @@ impl Renderer {
                     render_pipeline: Some(render_pipeline),
                     ui_pipeline: Some(ui_pipeline),
                     window_size,
+                    zoom: 1.0,
+                    pan_offset: (0.0, 0.0),
                     pipeline_layout: Some(pipeline_layout),
                     shader: Some(shader),
                     window: Some(window),
@@ -163,6 +169,8 @@ impl Renderer {
                         render_pipeline: None,
                         ui_pipeline: None,
                         window_size,
+                        zoom: 1.0,
+                        pan_offset: (0.0, 0.0),
                         pipeline_layout: None,
                         shader: None,
                         window: Some(window),
@@ -642,7 +650,15 @@ impl Renderer {
         // Use actual texture dimensions to ensure consistency with viewport
         let texture_width = output.texture.width() as f32;
         let texture_height = output.texture.height() as f32;
-        let uniform_data = [texture_width, texture_height];
+        
+        // Uniform buffer: [texture_width, texture_height, zoom, pan_offset_x, pan_offset_y]
+        let uniform_data = [
+            texture_width,
+            texture_height,
+            self.zoom,
+            self.pan_offset.0,
+            self.pan_offset.1,
+        ];
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Uniform Buffer"),
             contents: bytemuck::cast_slice(&uniform_data),
@@ -711,10 +727,10 @@ impl Renderer {
             // but draw each stroke separately to avoid connecting them
             let mut all_stroke_vertices = Vec::new();
             let mut stroke_ranges = Vec::new();
-            for stroke in self.canvas.strokes() {
+            for (stroke, layer_opacity) in self.canvas.all_strokes() {
                 if stroke.points.len() >= 2 {
                     let start = all_stroke_vertices.len() as u32;
-                    all_stroke_vertices.extend(self.generate_stroke_vertices(stroke));
+                    all_stroke_vertices.extend(self.generate_stroke_vertices_with_layer_opacity(stroke, layer_opacity));
                     let end = all_stroke_vertices.len() as u32;
                     stroke_ranges.push(start..end);
                 }
@@ -739,6 +755,28 @@ impl Renderer {
                 }
             }
 
+            // Reset zoom to 1.0 and pan to (0,0) for UI (UI stays fixed on screen)
+            let ui_uniform_data = [
+                uniform_data[0],
+                uniform_data[1],
+                1.0,
+                0.0,
+                0.0,
+            ];
+            let ui_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("UI Uniform Buffer"),
+                contents: bytemuck::cast_slice(&ui_uniform_data),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+            let ui_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("UI Uniform Bind Group"),
+                layout: &bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: ui_uniform_buffer.as_entire_binding(),
+                }],
+            });
+
             // Draw all UI elements in a single combined buffer
             if let Some(ui_pipeline) = &self.ui_pipeline {
                 let mut all_ui_vertices: Vec<[f32; 7]> = Vec::new();
@@ -755,6 +793,8 @@ impl Renderer {
                 all_ui_vertices.extend(self.generate_undo_button_vertices());
                 all_ui_vertices.extend(self.generate_redo_button_vertices());
                 all_ui_vertices.extend(self.generate_export_button_vertices());
+                all_ui_vertices.extend(self.generate_zoom_in_button_vertices());
+                all_ui_vertices.extend(self.generate_zoom_out_button_vertices());
                 all_ui_vertices.extend(self.generate_opacity_preset_vertices());
 
                 if !all_ui_vertices.is_empty() {
@@ -765,6 +805,7 @@ impl Renderer {
                             usage: wgpu::BufferUsages::VERTEX,
                         });
                     render_pass.set_pipeline(ui_pipeline);
+                    render_pass.set_bind_group(0, &ui_bind_group, &[]);
                     render_pass.set_vertex_buffer(0, ui_vertex_buffer.slice(..));
                     render_pass.draw(0..all_ui_vertices.len() as u32, 0..1);
                 }
@@ -783,9 +824,9 @@ impl Renderer {
         Ok(())
     }
 
-    /// Generate vertices for a single stroke (as a smooth triangle strip)
-    fn generate_stroke_vertices(&self, stroke: &crate::canvas::Stroke) -> Vec<[f32; 7]> {
-        let flat = geometry::generate_stroke_vertices(stroke);
+    /// Generate vertices for a single stroke with layer opacity
+    fn generate_stroke_vertices_with_layer_opacity(&self, stroke: &crate::canvas::Stroke, layer_opacity: f32) -> Vec<[f32; 7]> {
+        let flat = geometry::generate_stroke_vertices_with_opacity(stroke, layer_opacity);
         to_vertices_7(&flat, stroke.width)
     }
 
@@ -851,6 +892,18 @@ impl Renderer {
         to_vertices_7(&flat, 0.0)
     }
 
+    /// Generate vertices for zoom in button
+    fn generate_zoom_in_button_vertices(&self) -> Vec<[f32; 7]> {
+        let flat = geometry::generate_zoom_in_button_vertices();
+        to_vertices_7(&flat, 0.0)
+    }
+
+    /// Generate vertices for zoom out button
+    fn generate_zoom_out_button_vertices(&self) -> Vec<[f32; 7]> {
+        let flat = geometry::generate_zoom_out_button_vertices();
+        to_vertices_7(&flat, 0.0)
+    }
+
     /// Generate vertices for opacity preset buttons
     fn generate_opacity_preset_vertices(&self) -> Vec<[f32; 7]> {
         let flat = geometry::generate_opacity_preset_vertices(self.opacity);
@@ -860,6 +913,26 @@ impl Renderer {
     /// Get the current canvas
     pub fn canvas(&self) -> &Canvas {
         &self.canvas
+    }
+
+    /// Set zoom level (1.0 = 100%)
+    pub fn set_zoom(&mut self, zoom: f32) {
+        self.zoom = zoom;
+    }
+
+    /// Get current zoom level
+    pub fn zoom(&self) -> f32 {
+        self.zoom
+    }
+
+    /// Set pan offset (in canvas coordinates)
+    pub fn set_pan(&mut self, offset: (f32, f32)) {
+        self.pan_offset = offset;
+    }
+
+    /// Get current pan offset
+    pub fn pan_offset(&self) -> (f32, f32) {
+        self.pan_offset
     }
 
     /// Check if WGPU backend is being used
@@ -949,17 +1022,17 @@ mod tests {
             width: 2.0,
             opacity: 1.0,
         };
-        canvas.add_stroke(stroke1);
-        canvas.add_stroke(stroke2);
+        canvas.add_stroke_to_layer(stroke1, 0);
+        canvas.add_stroke_to_layer(stroke2, 0);
 
         // Simulate the combined buffer logic from render_wgpu
         let mut all_vertices: Vec<[f32; 7]> = Vec::new();
         let mut stroke_ranges: Vec<std::ops::Range<u32>> = Vec::new();
-        for stroke in canvas.strokes() {
+        for (stroke, layer_opacity) in canvas.all_strokes() {
             if stroke.points.len() >= 2 {
                 let start = all_vertices.len() as u32;
                 // Each 2-point stroke generates 4 vertices (triangle strip)
-                let verts = crate::geometry::generate_stroke_vertices(stroke);
+                let verts = crate::geometry::generate_stroke_vertices_with_opacity(stroke, layer_opacity);
                 let line_width = stroke.width;
                 for chunk in verts.chunks(6) {
                     all_vertices.push([
@@ -986,10 +1059,16 @@ mod tests {
         let canvas = Canvas::new();
         let mut all_vertices: Vec<[f32; 7]> = Vec::new();
         let mut stroke_ranges: Vec<std::ops::Range<u32>> = Vec::new();
-        for stroke in canvas.strokes() {
+        for (stroke, layer_opacity) in canvas.all_strokes() {
             if stroke.points.len() >= 2 {
                 let start = all_vertices.len() as u32;
-                all_vertices.push([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, stroke.width]);
+                let verts = crate::geometry::generate_stroke_vertices_with_opacity(stroke, layer_opacity);
+                let line_width = stroke.width;
+                for chunk in verts.chunks(6) {
+                    all_vertices.push([
+                        chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], line_width,
+                    ]);
+                }
                 let end = all_vertices.len() as u32;
                 stroke_ranges.push(start..end);
             }
@@ -1010,10 +1089,10 @@ mod tests {
             width: 2.0,
             opacity: 1.0,
         };
-        canvas.add_stroke(single_point);
+        canvas.add_stroke_to_layer(single_point, 0);
 
         let mut count = 0;
-        for stroke in canvas.strokes() {
+        for (stroke, _) in canvas.all_strokes() {
             if stroke.points.len() >= 2 {
                 count += 1;
             }

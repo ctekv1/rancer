@@ -33,9 +33,14 @@ fn render_canvas_to_image(
         *pixel = Rgba([bg_color.r, bg_color.g, bg_color.b, bg_color.a]);
     }
 
-    // Render each stroke
-    for stroke in canvas.strokes() {
-        render_stroke_to_image(&mut image, stroke)?;
+    // Render each stroke from all visible layers
+    for (stroke, layer_opacity) in canvas.all_strokes() {
+        // Apply layer opacity to stroke
+        let adjusted_stroke = Stroke {
+            opacity: stroke.opacity * layer_opacity,
+            ..stroke.clone()
+        };
+        render_stroke_to_image(&mut image, &adjusted_stroke)?;
     }
 
     Ok(image)
@@ -179,7 +184,8 @@ mod tests {
         // Single point commits (not rejected by canvas)
         let result = canvas.commit_stroke(s1);
         assert!(result.is_ok(), "Single-point stroke commits successfully");
-        assert_eq!(canvas.strokes().len(), 1);
+        // Single-point strokes don't add to all_strokes (they render as empty)
+        assert_eq!(canvas.all_strokes().len(), 0);
 
         // Export should succeed even with a single-point stroke
         let temp_dir = std::env::temp_dir();

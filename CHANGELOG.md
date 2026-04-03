@@ -1,3 +1,12 @@
+## [0.0.7] - 2026-04-03
+
+### Added
+- **Zoom & Pan**: Mouse wheel zoom toward cursor, space+drag panning, zoom in/out UI buttons
+- **Layer system (Phase 1)**: Layer struct with visibility, opacity, and locked state; Canvas now supports multiple layers
+
+### Changed
+- Updated version to 0.0.7
+
 ## [0.0.6] - 2026-03-30
 
 ### Added

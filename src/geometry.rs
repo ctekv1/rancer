@@ -78,11 +78,16 @@ fn generate_stroke_vertex_strip(points: &[Point], color: [f32; 4], half_width: f
 
 /// Generate vertex data for a committed stroke
 pub fn generate_stroke_vertices(stroke: &Stroke) -> Vec<f32> {
+    generate_stroke_vertices_with_opacity(stroke, 1.0)
+}
+
+/// Generate vertex data for a committed stroke with layer opacity applied
+pub fn generate_stroke_vertices_with_opacity(stroke: &Stroke, layer_opacity: f32) -> Vec<f32> {
     let color = [
         stroke.color.r as f32 / 255.0,
         stroke.color.g as f32 / 255.0,
         stroke.color.b as f32 / 255.0,
-        stroke.opacity,
+        stroke.opacity * layer_opacity,
     ];
     generate_stroke_vertex_strip(&stroke.points, color, stroke.width / 2.0)
 }
@@ -838,6 +843,96 @@ pub fn generate_export_button_vertices() -> Vec<f32> {
         export_y + button_size - padding,
         export_x + button_size - padding,
         export_y + button_size - padding,
+        line_width,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ));
+
+    vertices
+}
+
+/// Generate vertices for the zoom in button (+)
+pub fn generate_zoom_in_button_vertices() -> Vec<f32> {
+    let mut vertices = Vec::new();
+    let zoom_x = 210.0;
+    let zoom_y = 155.0;
+    let button_size = 30.0;
+
+    // Background (blue)
+    vertices.extend(generate_rect(
+        zoom_x,
+        zoom_y,
+        button_size,
+        button_size,
+        0.3,
+        0.3,
+        0.7,
+        1.0,
+    ));
+
+    // Plus sign (white)
+    let line_width = 4.0;
+    let padding = 8.0;
+
+    // Horizontal line
+    vertices.extend(generate_rotated_rect(
+        zoom_x + padding,
+        zoom_y + button_size / 2.0,
+        zoom_x + button_size - padding,
+        zoom_y + button_size / 2.0,
+        line_width,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ));
+
+    // Vertical line
+    vertices.extend(generate_rotated_rect(
+        zoom_x + button_size / 2.0,
+        zoom_y + padding,
+        zoom_x + button_size / 2.0,
+        zoom_y + button_size - padding,
+        line_width,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ));
+
+    vertices
+}
+
+/// Generate vertices for the zoom out button (-)
+pub fn generate_zoom_out_button_vertices() -> Vec<f32> {
+    let mut vertices = Vec::new();
+    let zoom_x = 250.0;
+    let zoom_y = 155.0;
+    let button_size = 30.0;
+
+    // Background (blue)
+    vertices.extend(generate_rect(
+        zoom_x,
+        zoom_y,
+        button_size,
+        button_size,
+        0.3,
+        0.3,
+        0.7,
+        1.0,
+    ));
+
+    // Minus sign (white)
+    let line_width = 4.0;
+    let padding = 8.0;
+
+    vertices.extend(generate_rotated_rect(
+        zoom_x + padding,
+        zoom_y + button_size / 2.0,
+        zoom_x + button_size - padding,
+        zoom_y + button_size / 2.0,
         line_width,
         1.0,
         1.0,

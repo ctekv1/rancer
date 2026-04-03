@@ -31,6 +31,10 @@ pub enum UiElement {
     Redo,
     /// Export canvas button clicked
     Export,
+    /// Zoom in button clicked
+    ZoomIn,
+    /// Zoom out button clicked
+    ZoomOut,
     /// Opacity preset button clicked
     Opacity(f32),
     /// Not on any UI element — canvas area
@@ -125,6 +129,16 @@ pub fn hit_test(x: f32, y: f32, custom_colors: &[[u8; 3]]) -> UiElement {
     // Export button (y=155-185, x=170-200)
     if (155.0..=185.0).contains(&y) && (170.0..=200.0).contains(&x) {
         return UiElement::Export;
+    }
+
+    // Zoom in button (y=155-185, x=210-240)
+    if (155.0..=185.0).contains(&y) && (210.0..=240.0).contains(&x) {
+        return UiElement::ZoomIn;
+    }
+
+    // Zoom out button (y=155-185, x=250-280)
+    if (155.0..=185.0).contains(&y) && (250.0..=280.0).contains(&x) {
+        return UiElement::ZoomOut;
     }
 
     // Opacity presets (y=190-215)
@@ -333,5 +347,17 @@ mod tests {
     fn test_slider_drag_out_of_bounds() {
         let result = slider_drag(5.0, 15.0, Some(SliderType::Hue));
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_hit_test_zoom_in_button() {
+        let result = hit_test(225.0, 170.0, &[]);
+        assert_eq!(result, UiElement::ZoomIn);
+    }
+
+    #[test]
+    fn test_hit_test_zoom_out_button() {
+        let result = hit_test(265.0, 170.0, &[]);
+        assert_eq!(result, UiElement::ZoomOut);
     }
 }

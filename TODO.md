@@ -1,5 +1,9 @@
 # Rancer Roadmap
 
+## Completed (v0.0.7)
+
+- [x] Zoom & Pan - Mouse wheel zoom toward cursor, space+drag panning, zoom buttons
+
 ## Completed (v0.0.6)
 
 - [x] Custom Color Picker - HSV picker with sliders and custom saved colors (FIFO palette)
@@ -14,9 +18,63 @@
 
 ## Tier 2 - Professional Features (v0.0.7+)
 
-- [ ] Zoom & Pan - Mouse wheel zoom, space+drag pan
+- [x] Zoom & Pan - Mouse wheel zoom, space+drag pan, zoom buttons
+  - [x] Phase 1: Shader Changes
+    - [x] Add zoom/pan uniforms to WGPU shader (render.wgsl)
+    - [x] Add zoom/pan uniforms to OpenGL shader (opengl_renderer.rs)
+    - [x] Update vertex transform to apply zoom/pan
+    - [x] Adjust line width by zoom factor (cancelled - not needed for MVP)
+  - [x] Phase 2: Renderer State
+    - [x] Add zoom/pan fields to WGPU Renderer struct
+    - [x] Add zoom/pan fields to OpenGL Renderer struct
+    - [x] Add set_zoom/set_pan public methods to both renderers
+  - [x] Phase 3: Mouse Coordinate Transform
+    - [x] Transform mouse coords in window_winit.rs (drawing)
+    - [x] Transform mouse coords in window_gtk4.rs (drawing)
+    - [x] Transform canvas hit test coords in ui.rs (cancelled - not needed for Approach A: UI stays fixed)
+  - [x] Phase 4: Zoom/Pan Input Handlers
+    - [x] Handle mouse wheel zoom in window_winit.rs
+    - [x] Handle mouse wheel zoom in window_gtk4.rs
+    - [x] Handle space+drag pan in window_winit.rs
+    - [x] Handle space+drag pan in window_gtk4.rs
+  - [x] Zoom toward mouse cursor position
+  - [x] Zoom in/out UI buttons
 - [ ] Brush Types - Round, square, spray, calligraphy
 - [ ] Layer System - Multiple layers, reorder, visibility toggle
+  - [x] Phase 1: Data Model (canvas.rs)
+    - [x] Add Layer struct (name, strokes, visible, opacity, locked)
+    - [x] Update Canvas struct with layers Vec and active_layer index
+    - [x] Add layer methods: add_layer, remove_layer, set_active_layer, move_layer
+    - [x] Add layer utility: toggle_visibility, set_opacity, clear_layer
+    - [x] Update commit_stroke to commit to active layer
+    - [x] Update undo/redo to work per-layer
+    - [x] Add MAX_LAYERS constant (20)
+  - [ ] Phase 2: Renderer Updates
+    - [ ] Update WGPU renderer to iterate layers bottom-to-top
+    - [ ] Skip invisible layers in render loop
+    - [ ] Apply layer opacity as alpha multiplier
+    - [ ] Render active stroke on active layer
+    - [ ] Update OpenGL renderer with same logic
+  - [ ] Phase 3: Backend Integration (window_winit.rs)
+    - [ ] Add active_layer_index to WindowApp state
+    - [ ] Update stroke commit flow to use active layer
+    - [ ] Add layer state persistence in preferences
+  - [ ] Phase 4: Backend Integration (window_gtk4.rs)
+    - [ ] Add active_layer_index to WindowApp state
+    - [ ] Update stroke commit flow to use active layer
+  - [ ] Phase 5: Layer Panel UI (geometry.rs)
+    - [ ] Add generate_layer_panel_vertices function
+    - [ ] Add generate_layer_row_vertices function
+    - [ ] Add generate_add_layer_button_vertices
+    - [ ] Add generate_delete_layer_button_vertices
+    - [ ] Add generate_layer_visibility_toggle_vertices
+  - [ ] Phase 6: Layer Panel UI (ui.rs)
+    - [ ] Add LayerPanel, LayerRow, AddLayer, DeleteLayer, LayerVisibilityToggle variants
+    - [ ] Add hit_test for layer panel elements
+  - [ ] Phase 7: Testing
+    - [ ] Add unit tests for layer CRUD operations
+    - [ ] Test undo/redo with multiple layers
+    - [ ] Test layer visibility toggle
 - [ ] Selection Tool - Rectangular selection with move/copy
 - [ ] Transform Tools - Scale, rotate, flip canvas/strokes
 

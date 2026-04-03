@@ -10,7 +10,7 @@ use gtk4::gdk::ModifierType;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Application, ApplicationWindow, EventControllerKey, EventControllerMotion, GLArea, GestureClick,
+    Application, ApplicationWindow, EventControllerKey, EventControllerMotion, EventControllerScroll, GLArea, GestureClick,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -66,6 +66,14 @@ pub struct WindowApp {
     slider_drag: Option<SliderType>,
     /// User preferences
     preferences: Preferences,
+    /// Viewport zoom level (1.0 = 100%)
+    zoom: f32,
+    /// Viewport pan offset (in canvas coordinates)
+    pan_offset: (f32, f32),
+    /// Whether space key is held for panning
+    is_panning: bool,
+    /// Last mouse position for panning delta calculation
+    last_mouse_position: Point,
 }
 
 impl WindowApp {
@@ -95,6 +103,10 @@ impl WindowApp {
             is_eraser: false,
             slider_drag: None,
             preferences,
+            zoom: 1.0,
+            pan_offset: (0.0, 0.0),
+            is_panning: false,
+            last_mouse_position: Point { x: 0.0, y: 0.0 },
         }
     }
 
@@ -112,6 +124,14 @@ impl WindowApp {
         self.preferences.palette.v = self.value;
         self.preferences.palette.custom_colors = self.custom_colors.clone();
         let _ = crate::preferences::save(&self.preferences);
+    }
+
+    /// Transform screen coordinates to canvas coordinates using current zoom/pan
+    #[allow(dead_code)]
+    fn screen_to_canvas(&self, screen_x: f32, screen_y: f32) -> Point {
+        let canvas_x = screen_x / self.zoom + self.pan_offset.0;
+        let canvas_y = screen_y / self.zoom + self.pan_offset.1;
+        Point { x: canvas_x, y: canvas_y }
     }
 }
 
@@ -171,15 +191,19 @@ impl WindowBackend for WindowApp {
             let custom_colors_shared = Rc::new(RefCell::new(custom_colors.clone()));
             let selected_custom_index_shared = Rc::new(RefCell::new(selected_custom_index));
             let slider_drag_shared = Rc::new(RefCell::new(slider_drag));
+            let zoom_shared = Rc::new(RefCell::new(1.0f32));
+            let pan_offset_shared = Rc::new(RefCell::new((0.0f32, 0.0f32)));
+            let is_panning_shared = Rc::new(RefCell::new(false));
             let gl_renderer: Rc<RefCell<Option<GlRenderer>>> = Rc::new(RefCell::new(None));
 
             // Set up mouse event handlers
+            let mouse_position_rc = Rc::new(RefCell::new(mouse_position));
             setup_mouse_events(
                 &gl_area,
                 &canvas,
                 &active_stroke,
                 mouse_state,
-                mouse_position,
+                mouse_position_rc.clone(),
                 brush_size_shared.clone(),
                 opacity_shared.clone(),
                 is_eraser_shared.clone(),
@@ -190,6 +214,10 @@ impl WindowBackend for WindowApp {
                 selected_custom_index_shared.clone(),
                 slider_drag_shared.clone(),
                 preferences.clone(),
+                zoom_shared.clone(),
+                pan_offset_shared.clone(),
+                is_panning_shared.clone(),
+                Point { x: 0.0, y: 0.0 },
             );
 
             // Set up keyboard handler
@@ -205,8 +233,18 @@ impl WindowBackend for WindowApp {
             let value_kb = value_shared.clone();
             let custom_colors_kb = custom_colors_shared.clone();
             let selected_custom_index_kb = selected_custom_index_shared.clone();
+            let zoom_kb = zoom_shared.clone();
+            let pan_offset_kb = pan_offset_shared.clone();
+            let _zoom_kb = zoom_kb;
+            let _pan_offset_kb = pan_offset_kb;
+            let is_panning_kb = is_panning_shared.clone();
 
             key_controller.connect_key_pressed(move |_controller, key, _keycode, state| {
+                // Handle space key for panning
+                if key == gtk4::gdk::Key::space {
+                    *is_panning_kb.borrow_mut() = true;
+                }
+                
                 match key {
                     gtk4::gdk::Key::s | gtk4::gdk::Key::S => {
                         // Export canvas to PNG
@@ -381,7 +419,55 @@ impl WindowBackend for WindowApp {
                 }
             });
 
+            // Handle space key release for panning
+            let is_panning_release = is_panning_shared.clone();
+            key_controller.connect_key_released(move |_controller, key, _keycode, _state| {
+                if key == gtk4::gdk::Key::space {
+                    *is_panning_release.borrow_mut() = false;
+                }
+            });
+
             gl_area.add_controller(key_controller);
+
+            // Set up scroll handler for zoom
+            let zoom_scroll = zoom_shared.clone();
+            let pan_scroll = pan_offset_shared.clone();
+            let gl_area_scroll = gl_area.clone();
+            let mouse_pos_for_scroll = mouse_position_rc.clone();
+            let scroll_controller = EventControllerScroll::new(gtk4::EventControllerScrollFlags::VERTICAL);
+            scroll_controller.connect_scroll(move |_controller, _dx, dy| {
+                let old_zoom = *zoom_scroll.borrow();
+                let zoom_factor = 1.25;
+                let new_zoom = if dy < 0.0 {
+                    // Scroll up = zoom in
+                    (old_zoom * zoom_factor).min(10.0)
+                } else if dy > 0.0 {
+                    // Scroll down = zoom out
+                    (old_zoom / zoom_factor).max(0.1)
+                } else {
+                    old_zoom
+                };
+                
+                if (new_zoom - old_zoom).abs() > 0.001 {
+                    // Zoom toward mouse position:
+                    // 1. Calculate where mouse is in canvas coordinates before zoom
+                    let old_pan = *pan_scroll.borrow();
+                    let mouse_pos = *mouse_pos_for_scroll.borrow();
+                    let mouse_canvas_x = mouse_pos.x / old_zoom + old_pan.0;
+                    let mouse_canvas_y = mouse_pos.y / old_zoom + old_pan.1;
+                    
+                    // 2. Calculate new pan so that same canvas point is under mouse after zoom
+                    let new_pan_x = mouse_canvas_x - mouse_pos.x / new_zoom;
+                    let new_pan_y = mouse_canvas_y - mouse_pos.y / new_zoom;
+                    
+                    *zoom_scroll.borrow_mut() = new_zoom;
+                    *pan_scroll.borrow_mut() = (new_pan_x, new_pan_y);
+                    
+                    gl_area_scroll.queue_render();
+                }
+                glib::Propagation::Stop
+            });
+            gl_area.add_controller(scroll_controller);
 
             // Set up OpenGL render callback
             let gl_renderer_clone = gl_renderer.clone();
@@ -431,6 +517,12 @@ impl WindowBackend for WindowApp {
                 }
 
                 if let Some(ref mut renderer) = *gl_renderer_clone.borrow_mut() {
+                    // Update zoom and pan from shared state
+                    let current_zoom = *zoom_shared.borrow();
+                    let current_pan = *pan_offset_shared.borrow();
+                    renderer.set_zoom(current_zoom);
+                    renderer.set_pan(current_pan);
+                    
                     let canvas = canvas_clone.borrow();
                     let active_stroke = active_stroke_clone.borrow();
                     let current_brush_size = *brush_for_render.borrow();
@@ -537,7 +629,7 @@ fn setup_mouse_events(
     canvas: &Rc<RefCell<Canvas>>,
     active_stroke: &Rc<RefCell<Option<ActiveStroke>>>,
     mouse_state: MouseState,
-    mouse_position: Point,
+    mouse_position: Rc<RefCell<Point>>,
     brush_size: Rc<RefCell<f32>>,
     opacity: Rc<RefCell<f32>>,
     is_eraser: Rc<RefCell<bool>>,
@@ -548,6 +640,10 @@ fn setup_mouse_events(
     selected_custom_index: Rc<RefCell<i32>>,
     slider_drag: Rc<RefCell<Option<SliderType>>>,
     preferences: Rc<RefCell<crate::preferences::Preferences>>,
+    zoom: Rc<RefCell<f32>>,
+    pan_offset: Rc<RefCell<(f32, f32)>>,
+    is_panning: Rc<RefCell<bool>>,
+    last_mouse_position: Point,
 ) {
     // Mouse click handler for left button
     let click_gesture = GestureClick::new();
@@ -556,7 +652,7 @@ fn setup_mouse_events(
     let canvas_clone = canvas.clone();
     let active_stroke_clone = active_stroke.clone();
     let mouse_state_clone = Rc::new(RefCell::new(mouse_state));
-    let mouse_position_clone = Rc::new(RefCell::new(mouse_position));
+    let mouse_position_clone = mouse_position;
     let brush_size_clone = brush_size.clone();
     let opacity_clone = opacity.clone();
     let is_eraser_clone = is_eraser.clone();
@@ -567,6 +663,8 @@ fn setup_mouse_events(
     let selected_custom_index_clone = selected_custom_index.clone();
     let prefs_clone = preferences.clone();
     let slider_drag_clone = slider_drag.clone();
+    let zoom_clone = zoom.clone();
+    let pan_offset_clone = pan_offset.clone();
 
     // Clone Rc's for use in other closures
     let mouse_state_clone2 = mouse_state_clone.clone();
@@ -790,6 +888,32 @@ fn setup_mouse_events(
                 }
                 return;
             }
+            ui::UiElement::ZoomIn => {
+                let mut zoom = zoom_clone.borrow_mut();
+                let new_zoom = (*zoom * 1.25).min(10.0);
+                if (new_zoom - *zoom).abs() > 0.001 {
+                    *zoom = new_zoom;
+                    if let Some(widget) = gesture.widget()
+                        && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                    {
+                        gl_area.queue_render();
+                    }
+                }
+                return;
+            }
+            ui::UiElement::ZoomOut => {
+                let mut zoom = zoom_clone.borrow_mut();
+                let new_zoom = (*zoom / 1.25).max(0.1);
+                if (new_zoom - *zoom).abs() > 0.001 {
+                    *zoom = new_zoom;
+                    if let Some(widget) = gesture.widget()
+                        && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                    {
+                        gl_area.queue_render();
+                    }
+                }
+                return;
+            }
             ui::UiElement::Canvas => {
                 // Not on any UI element — start drawing
             }
@@ -820,8 +944,13 @@ fn setup_mouse_events(
 
         *active_stroke_clone.borrow_mut() = Some(active_stroke);
 
+        // Transform first point to canvas coordinates
+        let zoom = *zoom_clone.borrow();
+        let pan = *pan_offset_clone.borrow();
+        let canvas_x = point.x / zoom + pan.0;
+        let canvas_y = point.y / zoom + pan.1;
         if let Some(active_stroke) = &mut *active_stroke_clone.borrow_mut() {
-            active_stroke.add_point(point);
+            active_stroke.add_point(Point { x: canvas_x, y: canvas_y });
             println!(
                 "Added first point to active stroke: ({}, {})",
                 point.x, point.y
@@ -873,6 +1002,10 @@ fn setup_mouse_events(
     let selected_custom_index_motion = selected_custom_index.clone();
     let prefs_motion = preferences.clone();
     let custom_colors_motion = custom_colors.clone();
+    let zoom_motion = zoom.clone();
+    let pan_offset_motion = pan_offset.clone();
+    let is_panning_motion = is_panning.clone();
+    let last_mouse_position_motion = Rc::new(RefCell::new(last_mouse_position));
 
     motion_controller.connect_motion(move |controller, x, y| {
         let point = Point {
@@ -881,10 +1014,38 @@ fn setup_mouse_events(
         };
         *mouse_position_clone3.borrow_mut() = point;
 
+        // Handle panning when space is held - use delta
+        if *is_panning_motion.borrow() {
+            let zoom = *zoom_motion.borrow();
+            let old_pan = *pan_offset_motion.borrow();
+            let last_pos = *last_mouse_position_motion.borrow();
+            let dx = point.x - last_pos.x;
+            let dy = point.y - last_pos.y;
+            // Pan in opposite direction of mouse movement (drag canvas with mouse)
+            let new_pan_x = old_pan.0 - dx / zoom;
+            let new_pan_y = old_pan.1 - dy / zoom;
+            *pan_offset_motion.borrow_mut() = (new_pan_x, new_pan_y);
+            *last_mouse_position_motion.borrow_mut() = point;
+            if let Some(widget) = controller.widget()
+                && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+            {
+                gl_area.queue_render();
+            }
+            return;
+        }
+
+        // Update last mouse position for panning
+        *last_mouse_position_motion.borrow_mut() = point;
+
         if *mouse_state_clone4.borrow() == MouseState::Drawing
             && let Some(active_stroke) = &mut *active_stroke_clone3.borrow_mut()
         {
-            active_stroke.add_point(point);
+            // Transform to canvas coordinates
+            let zoom = *zoom_motion.borrow();
+            let pan = *pan_offset_motion.borrow();
+            let canvas_x = point.x / zoom + pan.0;
+            let canvas_y = point.y / zoom + pan.1;
+            active_stroke.add_point(Point { x: canvas_x, y: canvas_y });
             println!(
                 "Active stroke now has {} points",
                 active_stroke.points().len()
