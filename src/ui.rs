@@ -37,6 +37,18 @@ pub enum UiElement {
     ZoomOut,
     /// Opacity preset button clicked
     Opacity(f32),
+    /// Layer row clicked (select layer)
+    LayerRow(usize),
+    /// Layer visibility toggle clicked
+    LayerVisibility(usize),
+    /// Add layer button clicked
+    AddLayer,
+    /// Delete layer button clicked
+    DeleteLayer,
+    /// Move active layer up button clicked
+    MoveLayerUp,
+    /// Move active layer down button clicked
+    MoveLayerDown,
     /// Not on any UI element — canvas area
     Canvas,
 }
@@ -51,7 +63,14 @@ const OPACITY_PRESETS: [f32; 4] = [0.25, 0.5, 0.75, 1.0];
 ///
 /// Returns the UI element that was hit, or `UiElement::Canvas` if not on any UI element.
 /// Coordinates are in logical pixels, matching the geometry.rs vertex positions.
-pub fn hit_test(x: f32, y: f32, custom_colors: &[[u8; 3]]) -> UiElement {
+pub fn hit_test(
+    x: f32,
+    y: f32,
+    custom_colors: &[[u8; 3]],
+    layer_count: usize,
+    _active_layer: usize,
+    window_width: f32,
+) -> UiElement {
     // HSV Sliders area (y=5-80)
     if (5.0..=80.0).contains(&y) {
         let slider_x = 10.0;
@@ -155,6 +174,66 @@ pub fn hit_test(x: f32, y: f32, custom_colors: &[[u8; 3]]) -> UiElement {
         }
     }
 
+    // Layer panel (right side)
+    let panel_width = 150.0;
+    let panel_x = window_width - panel_width - 10.0;
+    let panel_top_y = 10.0;
+    let row_height = 25.0;
+    let max_visible_rows = 8;
+    let panel_bottom_y = panel_top_y + (max_visible_rows as f32 * row_height) + 65.0;
+
+    if x >= panel_x && x <= panel_x + panel_width && y >= panel_top_y && y <= panel_bottom_y {
+        // Add layer button (below rows)
+        let add_btn_y = panel_top_y + (max_visible_rows as f32 * row_height) + 5.0;
+        let add_btn_height = 25.0;
+        let add_btn_width = 60.0;
+        if y >= add_btn_y && y <= add_btn_y + add_btn_height && x <= panel_x + add_btn_width {
+            return UiElement::AddLayer;
+        }
+
+        // Delete layer button (next to add)
+        let del_btn_x = panel_x + add_btn_width + 10.0;
+        if y >= add_btn_y
+            && y <= add_btn_y + add_btn_height
+            && x >= del_btn_x
+            && x <= del_btn_x + 60.0
+        {
+            return UiElement::DeleteLayer;
+        }
+
+        // Move up button (below add/delete)
+        let move_btn_y = add_btn_y + add_btn_height + 5.0;
+        let move_btn_width = 60.0;
+        if y >= move_btn_y && y <= move_btn_y + add_btn_height && x <= panel_x + move_btn_width {
+            return UiElement::MoveLayerUp;
+        }
+
+        // Move down button (next to move up)
+        let move_down_x = panel_x + move_btn_width + 10.0;
+        if y >= move_btn_y
+            && y <= move_btn_y + add_btn_height
+            && x >= move_down_x
+            && x <= move_down_x + 60.0
+        {
+            return UiElement::MoveLayerDown;
+        }
+
+        // Layer rows
+        let visible_count = layer_count.min(max_visible_rows);
+        for i in 0..visible_count {
+            let row_y = panel_top_y + (i as f32 * row_height);
+            let row_bottom = row_y + row_height;
+            if y >= row_y && y <= row_bottom {
+                // Visibility toggle (left 20px of row)
+                if x >= panel_x + 2.0 && x <= panel_x + 22.0 {
+                    return UiElement::LayerVisibility(i);
+                }
+                // Rest of row (select layer)
+                return UiElement::LayerRow(i);
+            }
+        }
+    }
+
     UiElement::Canvas
 }
 
@@ -223,7 +302,7 @@ mod tests {
 
     #[test]
     fn test_hit_test_hue_slider() {
-        let result = hit_test(110.0, 15.0, &[]);
+        let result = hit_test(110.0, 15.0, &[], 0, 0, 1280.0);
         match result {
             UiElement::HueSlider(val) => assert!((val - 180.0).abs() < 1.0),
             _ => panic!("Expected HueSlider, got {:?}", result),
@@ -232,7 +311,7 @@ mod tests {
 
     #[test]
     fn test_hit_test_saturation_slider() {
-        let result = hit_test(110.0, 40.0, &[]);
+        let result = hit_test(110.0, 40.0, &[], 0, 0, 1280.0);
         match result {
             UiElement::SaturationSlider(val) => assert!((val - 50.0).abs() < 1.0),
             _ => panic!("Expected SaturationSlider, got {:?}", result),
@@ -241,7 +320,7 @@ mod tests {
 
     #[test]
     fn test_hit_test_value_slider() {
-        let result = hit_test(110.0, 65.0, &[]);
+        let result = hit_test(110.0, 65.0, &[], 0, 0, 1280.0);
         match result {
             UiElement::ValueSlider(val) => assert!((val - 50.0).abs() < 1.0),
             _ => panic!("Expected ValueSlider, got {:?}", result),
@@ -250,43 +329,43 @@ mod tests {
 
     #[test]
     fn test_hit_test_canvas_area() {
-        let result = hit_test(500.0, 500.0, &[]);
+        let result = hit_test(500.0, 500.0, &[], 0, 0, 1280.0);
         assert_eq!(result, UiElement::Canvas);
     }
 
     #[test]
     fn test_hit_test_eraser_button() {
-        let result = hit_test(25.0, 170.0, &[]);
+        let result = hit_test(25.0, 170.0, &[], 0, 0, 1280.0);
         assert_eq!(result, UiElement::Eraser);
     }
 
     #[test]
     fn test_hit_test_clear_button() {
-        let result = hit_test(65.0, 170.0, &[]);
+        let result = hit_test(65.0, 170.0, &[], 0, 0, 1280.0);
         assert_eq!(result, UiElement::Clear);
     }
 
     #[test]
     fn test_hit_test_undo_button() {
-        let result = hit_test(105.0, 170.0, &[]);
+        let result = hit_test(105.0, 170.0, &[], 0, 0, 1280.0);
         assert_eq!(result, UiElement::Undo);
     }
 
     #[test]
     fn test_hit_test_redo_button() {
-        let result = hit_test(145.0, 170.0, &[]);
+        let result = hit_test(145.0, 170.0, &[], 0, 0, 1280.0);
         assert_eq!(result, UiElement::Redo);
     }
 
     #[test]
     fn test_hit_test_export_button() {
-        let result = hit_test(185.0, 170.0, &[]);
+        let result = hit_test(185.0, 170.0, &[], 0, 0, 1280.0);
         assert_eq!(result, UiElement::Export);
     }
 
     #[test]
     fn test_hit_test_brush_size() {
-        let result = hit_test(25.0, 135.0, &[]);
+        let result = hit_test(25.0, 135.0, &[], 0, 0, 1280.0);
         match result {
             UiElement::BrushSize(size) => assert_eq!(size, 3.0),
             _ => panic!("Expected BrushSize, got {:?}", result),
@@ -295,7 +374,7 @@ mod tests {
 
     #[test]
     fn test_hit_test_opacity() {
-        let result = hit_test(27.0, 200.0, &[]);
+        let result = hit_test(27.0, 200.0, &[], 0, 0, 1280.0);
         match result {
             UiElement::Opacity(val) => assert!((val - 0.25).abs() < 0.01),
             _ => panic!("Expected Opacity, got {:?}", result),
@@ -305,7 +384,7 @@ mod tests {
     #[test]
     fn test_hit_test_custom_color() {
         let colors: [[u8; 3]; 3] = [[255, 0, 0], [0, 255, 0], [0, 0, 255]];
-        let result = hit_test(20.0, 100.0, &colors);
+        let result = hit_test(20.0, 100.0, &colors, 0, 0, 1280.0);
         match result {
             UiElement::CustomColor(idx) => assert_eq!(idx, 0),
             _ => panic!("Expected CustomColor, got {:?}", result),
@@ -315,7 +394,7 @@ mod tests {
     #[test]
     fn test_hit_test_save_color_button() {
         let colors: [[u8; 3]; 2] = [[255, 0, 0], [0, 255, 0]];
-        let result = hit_test(70.0, 100.0, &colors);
+        let result = hit_test(70.0, 100.0, &colors, 0, 0, 1280.0);
         assert_eq!(result, UiElement::SaveColor);
     }
 
@@ -351,13 +430,13 @@ mod tests {
 
     #[test]
     fn test_hit_test_zoom_in_button() {
-        let result = hit_test(225.0, 170.0, &[]);
+        let result = hit_test(225.0, 170.0, &[], 0, 0, 1280.0);
         assert_eq!(result, UiElement::ZoomIn);
     }
 
     #[test]
     fn test_hit_test_zoom_out_button() {
-        let result = hit_test(265.0, 170.0, &[]);
+        let result = hit_test(265.0, 170.0, &[], 0, 0, 1280.0);
         assert_eq!(result, UiElement::ZoomOut);
     }
 }

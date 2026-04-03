@@ -797,6 +797,7 @@ impl Renderer {
                 all_ui_vertices.extend(self.generate_zoom_in_button_vertices());
                 all_ui_vertices.extend(self.generate_zoom_out_button_vertices());
                 all_ui_vertices.extend(self.generate_opacity_preset_vertices());
+                all_ui_vertices.extend(self.generate_layer_panel_vertices());
 
                 if !all_ui_vertices.is_empty() {
                     let ui_vertex_buffer =
@@ -909,6 +910,15 @@ impl Renderer {
     /// Generate vertices for opacity preset buttons
     fn generate_opacity_preset_vertices(&self) -> Vec<[f32; 7]> {
         let flat = geometry::generate_opacity_preset_vertices(self.opacity);
+        to_vertices_7(&flat, 0.0)
+    }
+
+    /// Generate vertices for the layer panel UI
+    fn generate_layer_panel_vertices(&self) -> Vec<[f32; 7]> {
+        let layers: Vec<(String, bool, f32, bool)> = self.canvas.layers().iter()
+            .map(|l| (l.name.clone(), l.visible, l.opacity, l.locked))
+            .collect();
+        let flat = geometry::generate_layer_panel_vertices(&layers, self.canvas.active_layer(), self.window_size.0 as f32);
         to_vertices_7(&flat, 0.0)
     }
 

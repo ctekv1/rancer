@@ -74,6 +74,8 @@ pub struct WindowApp {
     is_panning: bool,
     /// Last mouse position for panning delta calculation
     last_mouse_position: Point,
+    /// Index of the active layer
+    active_layer: usize,
 }
 
 impl WindowApp {
@@ -107,6 +109,7 @@ impl WindowApp {
             pan_offset: (0.0, 0.0),
             is_panning: false,
             last_mouse_position: Point { x: 0.0, y: 0.0 },
+            active_layer: 0,
         }
     }
 
@@ -680,7 +683,16 @@ fn setup_mouse_events(
 
         // Use shared UI hit detection
         let custom_colors_snapshot = custom_colors_clone.borrow().clone();
-        let hit = ui::hit_test(x as f32, y as f32, &custom_colors_snapshot);
+        let canvas_hit = canvas_clone.borrow();
+        let layer_count = canvas_hit.layer_count();
+        let active_layer = canvas_hit.active_layer();
+        drop(canvas_hit);
+        let window_width = if let Some(widget) = gesture.widget() {
+            widget.allocated_width() as f32
+        } else {
+            1280.0
+        };
+        let hit = ui::hit_test(x as f32, y as f32, &custom_colors_snapshot, layer_count, active_layer, window_width);
 
         match hit {
             ui::UiElement::HueSlider(value) => {
@@ -914,12 +926,86 @@ fn setup_mouse_events(
                 }
                 return;
             }
+            ui::UiElement::LayerRow(index) => {
+                let _ = canvas_clone.borrow_mut().set_active_layer(index);
+                if let Some(widget) = gesture.widget()
+                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                {
+                    gl_area.queue_render();
+                }
+                return;
+            }
+            ui::UiElement::LayerVisibility(index) => {
+                let _ = canvas_clone.borrow_mut().toggle_layer_visibility(index);
+                if let Some(widget) = gesture.widget()
+                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                {
+                    gl_area.queue_render();
+                }
+                return;
+            }
+            ui::UiElement::AddLayer => {
+                let mut canvas = canvas_clone.borrow_mut();
+                if canvas.layer_count() < crate::canvas::MAX_LAYERS {
+                    let _ = canvas.add_layer(None);
+                    let new_index = canvas.layer_count() - 1;
+                    let _ = canvas.set_active_layer(new_index);
+                }
+                if let Some(widget) = gesture.widget()
+                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                {
+                    gl_area.queue_render();
+                }
+                return;
+            }
+            ui::UiElement::DeleteLayer => {
+                let mut canvas = canvas_clone.borrow_mut();
+                if canvas.layer_count() > 1 {
+                    let current = canvas.active_layer();
+                    let _ = canvas.remove_layer(current);
+                }
+                if let Some(widget) = gesture.widget()
+                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                {
+                    gl_area.queue_render();
+                }
+                return;
+            }
+            ui::UiElement::MoveLayerUp => {
+                let mut canvas = canvas_clone.borrow_mut();
+                let idx = canvas.active_layer();
+                if idx > 0 {
+                    let _ = canvas.move_layer(idx, idx - 1);
+                }
+                if let Some(widget) = gesture.widget()
+                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                {
+                    gl_area.queue_render();
+                }
+                return;
+            }
+            ui::UiElement::MoveLayerDown => {
+                let mut canvas = canvas_clone.borrow_mut();
+                let idx = canvas.active_layer();
+                if idx < canvas.layer_count() - 1 {
+                    let _ = canvas.move_layer(idx, idx + 1);
+                }
+                if let Some(widget) = gesture.widget()
+                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                {
+                    gl_area.queue_render();
+                }
+                return;
+            }
             ui::UiElement::Canvas => {
                 // Not on any UI element — start drawing
             }
         }
 
         // If not on UI, start drawing
+        if canvas_clone.borrow().is_active_layer_locked() {
+            return;
+        }
         let is_eraser = *is_eraser_clone.borrow();
         let h = *hue_clone.borrow();
         let s = *saturation_clone.borrow();

@@ -55,26 +55,28 @@
     - [x] Apply layer opacity as alpha multiplier
     - [x] Render active stroke on active layer
     - [x] Update OpenGL renderer with same logic
-  - [ ] Phase 3: Backend Integration (window_winit.rs)
-    - [ ] Add active_layer_index to WindowApp state
-    - [ ] Update stroke commit flow to use active layer
-    - [ ] Add layer state persistence in preferences
-  - [ ] Phase 4: Backend Integration (window_gtk4.rs)
-    - [ ] Add active_layer_index to WindowApp state
-    - [ ] Update stroke commit flow to use active layer
-  - [ ] Phase 5: Layer Panel UI (geometry.rs)
-    - [ ] Add generate_layer_panel_vertices function
-    - [ ] Add generate_layer_row_vertices function
-    - [ ] Add generate_add_layer_button_vertices
-    - [ ] Add generate_delete_layer_button_vertices
-    - [ ] Add generate_layer_visibility_toggle_vertices
-  - [ ] Phase 6: Layer Panel UI (ui.rs)
-    - [ ] Add LayerPanel, LayerRow, AddLayer, DeleteLayer, LayerVisibilityToggle variants
-    - [ ] Add hit_test for layer panel elements
-  - [ ] Phase 7: Testing
-    - [ ] Add unit tests for layer CRUD operations
-    - [ ] Test undo/redo with multiple layers
-    - [ ] Test layer visibility toggle
+  - [x] Phase 3: Backend Integration (window_winit.rs)
+    - [x] Add active_layer_index to WindowApp state
+    - [x] Update stroke commit flow to use active layer
+    - [x] Add layer state persistence in preferences
+  - [x] Phase 4: Backend Integration (window_gtk4.rs)
+    - [x] Add active_layer_index to WindowApp state
+    - [x] Update stroke commit flow to use active layer
+  - [x] Phase 5: Layer Panel UI (geometry.rs)
+    - [x] Add generate_layer_panel_vertices function
+    - [x] Add generate_layer_row_vertices function
+    - [x] Add generate_add_layer_button_vertices
+    - [x] Add generate_delete_layer_button_vertices
+    - [x] Add generate_layer_visibility_toggle_vertices
+  - [x] Phase 6: Layer Panel UI (ui.rs)
+    - [x] Add LayerPanel, LayerRow, AddLayer, DeleteLayer, LayerVisibilityToggle variants
+    - [x] Add hit_test for layer panel elements
+  - [x] Phase 7: Testing
+    - [x] Add unit tests for layer CRUD operations
+    - [x] Test undo/redo with multiple layers
+    - [x] Test layer visibility toggle
+  - [ ] Known Issues
+    - [ ] Layer rendering order inverted — bottom of list renders on top, needs `.rev()` in `all_strokes()`
 - [ ] Selection Tool - Rectangular selection with move/copy
 - [ ] Transform Tools - Scale, rotate, flip canvas/strokes
 

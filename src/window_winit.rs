@@ -106,6 +106,9 @@ pub struct WindowApp {
     is_panning: bool,
     /// Last mouse position for panning delta calculation
     last_mouse_position: Point,
+    /// Index of the active layer
+    #[allow(dead_code)]
+    active_layer: usize,
 }
 
 impl WindowApp {
@@ -136,6 +139,7 @@ impl WindowApp {
             pan_offset: (0.0, 0.0),
             is_panning: false,
             last_mouse_position: Point { x: 0.0, y: 0.0 },
+            active_layer: 0,
         }
     }
 
@@ -421,7 +425,12 @@ impl ApplicationHandler for WindowApp {
                             // Check if click is on UI elements
                             let x = self.mouse_position.x;
                             let y = self.mouse_position.y;
-                            let hit = ui::hit_test(x, y, &self.custom_colors);
+                            let window_width = self.window.as_ref().map(|w| w.inner_size().width as f32).unwrap_or(1280.0);
+                            let canvas = self.canvas.borrow();
+                            let layer_count = canvas.layer_count();
+                            let active_layer = canvas.active_layer();
+                            drop(canvas);
+                            let hit = ui::hit_test(x, y, &self.custom_colors, layer_count, active_layer, window_width);
 
                             match hit {
                                 ui::UiElement::HueSlider(value) => {
@@ -609,12 +618,82 @@ impl ApplicationHandler for WindowApp {
                                     }
                                     return;
                                 }
+                                ui::UiElement::LayerRow(index) => {
+                                    if self.canvas.borrow_mut().set_active_layer(index).is_ok() {
+                                        self.active_layer = index;
+                                        if let Some(window) = &self.window {
+                                            window.request_redraw();
+                                        }
+                                    }
+                                    return;
+                                }
+                                ui::UiElement::LayerVisibility(index) => {
+                                    let _ = self.canvas.borrow_mut().toggle_layer_visibility(index);
+                                    if let Some(window) = &self.window {
+                                        window.request_redraw();
+                                    }
+                                    return;
+                                }
+                                ui::UiElement::AddLayer => {
+                                    let mut canvas = self.canvas.borrow_mut();
+                                    if canvas.layer_count() < crate::canvas::MAX_LAYERS {
+                                        let _ = canvas.add_layer(None);
+                                        let new_index = canvas.layer_count() - 1;
+                                        let _ = canvas.set_active_layer(new_index);
+                                        self.active_layer = new_index;
+                                    }
+                                    if let Some(window) = &self.window {
+                                        window.request_redraw();
+                                    }
+                                    return;
+                                }
+                                ui::UiElement::DeleteLayer => {
+                                    let mut canvas = self.canvas.borrow_mut();
+                                    if canvas.layer_count() > 1 {
+                                        let _ = canvas.remove_layer(self.active_layer);
+                                        self.active_layer = canvas.active_layer();
+                                    }
+                                    if let Some(window) = &self.window {
+                                        window.request_redraw();
+                                    }
+                                    return;
+                                }
+                                ui::UiElement::MoveLayerUp => {
+                                    let mut canvas = self.canvas.borrow_mut();
+                                    let idx = self.active_layer;
+                                    if idx > 0 {
+                                        let _ = canvas.move_layer(idx, idx - 1);
+                                        self.active_layer = canvas.active_layer();
+                                    }
+                                    if let Some(window) = &self.window {
+                                        window.request_redraw();
+                                    }
+                                    return;
+                                }
+                                ui::UiElement::MoveLayerDown => {
+                                    let mut canvas = self.canvas.borrow_mut();
+                                    let idx = self.active_layer;
+                                    if idx < canvas.layer_count() - 1 {
+                                        let _ = canvas.move_layer(idx, idx + 1);
+                                        self.active_layer = canvas.active_layer();
+                                    }
+                                    if let Some(window) = &self.window {
+                                        window.request_redraw();
+                                    }
+                                    return;
+                                }
                                 ui::UiElement::Canvas => {
                                     // Not on any UI element — start drawing
                                 }
                             }
 
                             // If not on UI, start drawing
+                            {
+                                let canvas = self.canvas.borrow();
+                                if canvas.is_active_layer_locked() {
+                                    return;
+                                }
+                            }
                             self.mouse_state = MouseState::Drawing;
 
                             // Begin a new active stroke

@@ -206,6 +206,8 @@ pub struct Canvas {
     layers: Vec<Layer>,
     /// Currently active layer index
     active_layer: usize,
+    /// Undo stack: stores (layer_index, stroke) tuples
+    undo_stack: Vec<(usize, Stroke)>,
 }
 
 impl Default for Canvas {
@@ -216,6 +218,7 @@ impl Default for Canvas {
             background_color: Color::WHITE,
             layers: vec![Layer::new("Background".to_string())],
             active_layer: 0,
+            undo_stack: Vec::new(),
         }
     }
 }
@@ -249,6 +252,7 @@ impl Canvas {
         for layer in &mut self.layers {
             layer.strokes.clear();
         }
+        self.undo_stack.clear();
     }
 
     /// Get canvas dimensions
@@ -382,6 +386,7 @@ impl Canvas {
     /// Add a stroke to the active layer
     pub fn add_stroke_to_active_layer(&mut self, stroke: Stroke) {
         self.layers[self.active_layer].strokes.push(stroke);
+        self.undo_stack.clear();
     }
 
     /// Add a stroke to a specific layer (for testing)
@@ -395,16 +400,16 @@ impl Canvas {
     /// Undo the last stroke on the active layer
     pub fn undo(&mut self) {
         if let Some(stroke) = self.layers[self.active_layer].strokes.pop() {
-            // Store as (layer_index, stroke) for redo
-            // For simplicity, we store in a flat undo stack for now
-            // This is a placeholder - proper implementation would need layer-aware undo
-            let _ = stroke; // TODO: implement layer-aware undo
+            self.undo_stack.push((self.active_layer, stroke));
         }
     }
 
     /// Redo the last undone stroke
     pub fn redo(&mut self) {
-        // TODO: implement layer-aware redo
+        if let Some((layer_index, stroke)) = self.undo_stack.pop()
+            && layer_index < self.layers.len() {
+            self.layers[layer_index].strokes.push(stroke);
+        }
     }
 
     /// Check if there are strokes available to undo on active layer
@@ -414,7 +419,7 @@ impl Canvas {
 
     /// Check if there are strokes available to redo
     pub fn can_redo(&self) -> bool {
-        false // TODO: implement redo tracking
+        !self.undo_stack.is_empty()
     }
 
     /// Get all strokes from all visible layers (for rendering)
@@ -778,6 +783,43 @@ mod tests {
 
         canvas.undo();
         assert_eq!(canvas.all_strokes().len(), 1);
+
+        canvas.redo();
+        assert_eq!(canvas.all_strokes().len(), 2);
+    }
+
+    #[test]
+    fn test_undo_redo_with_multiple_strokes() {
+        let mut canvas = Canvas::new();
+
+        for i in 0..5 {
+            let mut s = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
+            s.add_point(Point {
+                x: i as f32 * 10.0,
+                y: i as f32 * 10.0,
+            });
+            s.add_point(Point {
+                x: i as f32 * 10.0 + 1.0,
+                y: i as f32 * 10.0 + 1.0,
+            });
+            canvas.commit_stroke(s).unwrap();
+        }
+        assert_eq!(canvas.all_strokes().len(), 5);
+        assert!(canvas.can_undo());
+        assert!(!canvas.can_redo());
+
+        for _ in 0..3 {
+            canvas.undo();
+        }
+        assert_eq!(canvas.all_strokes().len(), 2);
+        assert!(canvas.can_undo());
+        assert!(canvas.can_redo());
+
+        canvas.redo();
+        assert_eq!(canvas.all_strokes().len(), 3);
+
+        canvas.redo();
+        assert_eq!(canvas.all_strokes().len(), 4);
     }
 
     #[test]
@@ -965,6 +1007,239 @@ mod tests {
         canvas.commit_stroke(s).unwrap();
         assert_eq!(canvas.all_strokes().len(), 1);
         assert_eq!(canvas.all_strokes()[0].0.points.len(), 100);
+    }
+
+    // --- Layer tests ---
+
+    #[test]
+    fn test_layer_default_values() {
+        let layer = Layer::default();
+        assert_eq!(layer.name, "Layer 1");
+        assert!(layer.visible);
+        assert_eq!(layer.opacity, 1.0);
+        assert!(!layer.locked);
+        assert!(layer.strokes.is_empty());
+    }
+
+    #[test]
+    fn test_canvas_starts_with_background_layer() {
+        let canvas = Canvas::new();
+        assert_eq!(canvas.layer_count(), 1);
+        assert_eq!(canvas.active_layer(), 0);
+        assert_eq!(canvas.layers()[0].name, "Background");
+    }
+
+    #[test]
+    fn test_add_layer() {
+        let mut canvas = Canvas::new();
+        assert!(canvas.add_layer(Some("TestLayer".to_string())).is_ok());
+        assert_eq!(canvas.layer_count(), 2);
+        assert_eq!(canvas.layers()[1].name, "TestLayer");
+    }
+
+    #[test]
+    fn test_add_layer_default_name() {
+        let mut canvas = Canvas::new();
+        canvas.add_layer(None).unwrap();
+        assert_eq!(canvas.layers()[1].name, "Layer 1");
+    }
+
+    #[test]
+    fn test_add_layer_max_limit() {
+        let mut canvas = Canvas::new();
+        for _ in 0..19 {
+            canvas.add_layer(None).unwrap();
+        }
+        assert_eq!(canvas.layer_count(), 20);
+        assert!(canvas.add_layer(None).is_err());
+    }
+
+    #[test]
+    fn test_remove_layer() {
+        let mut canvas = Canvas::new();
+        canvas.add_layer(None).unwrap();
+        canvas.add_layer(None).unwrap();
+        assert_eq!(canvas.layer_count(), 3);
+        assert!(canvas.remove_layer(1).is_ok());
+        assert_eq!(canvas.layer_count(), 2);
+    }
+
+    #[test]
+    fn test_cannot_remove_background_layer() {
+        let mut canvas = Canvas::new();
+        canvas.add_layer(None).unwrap();
+        assert!(canvas.remove_layer(0).is_err());
+    }
+
+    #[test]
+    fn test_remove_layer_adjusts_active() {
+        let mut canvas = Canvas::new();
+        canvas.add_layer(None).unwrap();
+        canvas.add_layer(None).unwrap();
+        canvas.set_active_layer(2).unwrap();
+        canvas.remove_layer(2).unwrap();
+        assert_eq!(canvas.active_layer(), 1);
+    }
+
+    #[test]
+    fn test_move_layer() {
+        let mut canvas = Canvas::new();
+        canvas.add_layer(Some("A".to_string())).unwrap();
+        canvas.add_layer(Some("B".to_string())).unwrap();
+        // Initial: [Background, A, B]
+        canvas.move_layer(0, 2).unwrap();
+        // After moving index 0 to index 2: [A, B, Background]
+        assert_eq!(canvas.layers()[0].name, "A");
+        assert_eq!(canvas.layers()[1].name, "B");
+        assert_eq!(canvas.layers()[2].name, "Background");
+    }
+
+    #[test]
+    fn test_toggle_layer_visibility() {
+        let mut canvas = Canvas::new();
+        canvas.add_layer(None).unwrap();
+        assert!(canvas.layers()[1].visible);
+        canvas.toggle_layer_visibility(1).unwrap();
+        assert!(!canvas.layers()[1].visible);
+    }
+
+    #[test]
+    fn test_set_layer_opacity() {
+        let mut canvas = Canvas::new();
+        canvas.add_layer(None).unwrap();
+        canvas.set_layer_opacity(1, 0.5).unwrap();
+        assert_eq!(canvas.layers()[1].opacity, 0.5);
+    }
+
+    #[test]
+    fn test_set_layer_opacity_clamped() {
+        let mut canvas = Canvas::new();
+        canvas.add_layer(None).unwrap();
+        canvas.set_layer_opacity(1, 2.0).unwrap();
+        assert_eq!(canvas.layers()[1].opacity, 1.0);
+        canvas.set_layer_opacity(1, -1.0).unwrap();
+        assert_eq!(canvas.layers()[1].opacity, 0.0);
+    }
+
+    #[test]
+    fn test_toggle_layer_lock() {
+        let mut canvas = Canvas::new();
+        canvas.add_layer(None).unwrap();
+        assert!(!canvas.layers()[1].locked);
+        canvas.toggle_layer_lock(1).unwrap();
+        assert!(canvas.layers()[1].locked);
+    }
+
+    #[test]
+    fn test_clear_layer() {
+        let mut canvas = Canvas::new();
+        let stroke = Stroke {
+            points: vec![Point { x: 0.0, y: 0.0 }, Point { x: 10.0, y: 10.0 }],
+            color: Color::BLACK,
+            width: 2.0,
+            opacity: 1.0,
+        };
+        canvas.add_stroke_to_layer(stroke, 0);
+        assert_eq!(canvas.layers()[0].strokes.len(), 1);
+        canvas.clear_layer(0).unwrap();
+        assert_eq!(canvas.layers()[0].strokes.len(), 0);
+    }
+
+    #[test]
+    fn test_all_strokes_respects_visibility() {
+        let mut canvas = Canvas::new();
+        let stroke1 = Stroke {
+            points: vec![Point { x: 0.0, y: 0.0 }, Point { x: 10.0, y: 10.0 }],
+            color: Color::BLACK,
+            width: 2.0,
+            opacity: 1.0,
+        };
+        canvas.add_stroke_to_layer(stroke1, 0);
+        canvas.add_layer(None).unwrap();
+        let stroke2 = Stroke {
+            points: vec![Point { x: 20.0, y: 20.0 }, Point { x: 30.0, y: 30.0 }],
+            color: Color::BLACK,
+            width: 2.0,
+            opacity: 1.0,
+        };
+        canvas.add_stroke_to_layer(stroke2, 1);
+        assert_eq!(canvas.all_strokes().len(), 2);
+        canvas.toggle_layer_visibility(0).unwrap();
+        assert_eq!(canvas.all_strokes().len(), 1);
+    }
+
+    #[test]
+    fn test_all_strokes_applies_layer_opacity() {
+        let mut canvas = Canvas::new();
+        let stroke = Stroke {
+            points: vec![Point { x: 0.0, y: 0.0 }, Point { x: 10.0, y: 10.0 }],
+            color: Color::BLACK,
+            width: 2.0,
+            opacity: 1.0,
+        };
+        canvas.add_stroke_to_layer(stroke, 0);
+        canvas.set_layer_opacity(0, 0.5).unwrap();
+        let strokes = canvas.all_strokes();
+        assert_eq!(strokes.len(), 1);
+        assert_eq!(strokes[0].1, 0.5);
+    }
+
+    #[test]
+    fn test_undo_redo_with_multiple_layers() {
+        let mut canvas = Canvas::new();
+        canvas.add_layer(None).unwrap();
+        canvas.set_active_layer(0).unwrap();
+        let mut s1 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
+        s1.add_point(Point { x: 0.0, y: 0.0 });
+        s1.add_point(Point { x: 10.0, y: 10.0 });
+        canvas.commit_stroke(s1).unwrap();
+
+        canvas.set_active_layer(1).unwrap();
+        let mut s2 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
+        s2.add_point(Point { x: 20.0, y: 20.0 });
+        s2.add_point(Point { x: 30.0, y: 30.0 });
+        canvas.commit_stroke(s2).unwrap();
+
+        assert_eq!(canvas.all_strokes().len(), 2);
+
+        canvas.set_active_layer(1).unwrap();
+        canvas.undo();
+        assert_eq!(canvas.all_strokes().len(), 1);
+
+        canvas.redo();
+        assert_eq!(canvas.all_strokes().len(), 2);
+    }
+
+    #[test]
+    fn test_is_active_layer_locked() {
+        let mut canvas = Canvas::new();
+        assert!(!canvas.is_active_layer_locked());
+        canvas.toggle_layer_lock(0).unwrap();
+        assert!(canvas.is_active_layer_locked());
+    }
+
+    #[test]
+    fn test_clear_clears_all_layers() {
+        let mut canvas = Canvas::new();
+        canvas.add_layer(None).unwrap();
+        let stroke1 = Stroke {
+            points: vec![Point { x: 0.0, y: 0.0 }, Point { x: 10.0, y: 10.0 }],
+            color: Color::BLACK,
+            width: 2.0,
+            opacity: 1.0,
+        };
+        canvas.add_stroke_to_layer(stroke1, 0);
+        let stroke2 = Stroke {
+            points: vec![Point { x: 20.0, y: 20.0 }, Point { x: 30.0, y: 30.0 }],
+            color: Color::BLACK,
+            width: 2.0,
+            opacity: 1.0,
+        };
+        canvas.add_stroke_to_layer(stroke2, 1);
+        assert_eq!(canvas.all_strokes().len(), 2);
+        canvas.clear();
+        assert_eq!(canvas.all_strokes().len(), 0);
+        assert!(!canvas.can_redo());
     }
 
     // --- brush_size_up/down tests ---

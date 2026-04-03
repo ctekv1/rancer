@@ -306,6 +306,16 @@ impl GlRenderer {
                 self.upload_and_draw(&opacity_vertices, glow::TRIANGLES);
             }
 
+            // Draw layer panel UI
+            let layer_panel_vertices = Self::generate_layer_panel_vertices(
+                canvas.layers(),
+                canvas.active_layer(),
+                width as f32,
+            );
+            if !layer_panel_vertices.is_empty() {
+                self.upload_and_draw(&layer_panel_vertices, glow::TRIANGLES);
+            }
+
             self.gl.bind_vertex_array(None);
         }
     }
@@ -394,6 +404,19 @@ impl GlRenderer {
     /// Generate vertices for opacity preset buttons UI
     fn generate_opacity_preset_vertices(opacity: f32) -> Vec<f32> {
         geometry::generate_opacity_preset_vertices(opacity)
+    }
+
+    /// Generate vertices for layer panel UI
+    fn generate_layer_panel_vertices(
+        layers: &[crate::canvas::Layer],
+        active_layer: usize,
+        window_width: f32,
+    ) -> Vec<f32> {
+        let layer_data: Vec<(String, bool, f32, bool)> = layers
+            .iter()
+            .map(|l| (l.name.clone(), l.visible, l.opacity, l.locked))
+            .collect();
+        geometry::generate_layer_panel_vertices(&layer_data, active_layer, window_width)
     }
 }
 

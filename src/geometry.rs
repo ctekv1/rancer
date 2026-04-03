@@ -1224,6 +1224,316 @@ pub fn generate_opacity_preset_vertices(selected_opacity: f32) -> Vec<f32> {
     vertices
 }
 
+/// Generate vertices for the layer panel UI on the right side of the window
+pub fn generate_layer_panel_vertices(
+    layers: &[(String, bool, f32, bool)],
+    active_layer: usize,
+    window_width: f32,
+) -> Vec<f32> {
+    let mut vertices = Vec::new();
+    let panel_width = 150.0;
+    let panel_x = window_width - panel_width - 10.0;
+    let panel_top_y = 10.0;
+    let row_height = 25.0;
+    let max_visible_rows = 8;
+
+    // Panel background
+    let panel_height = (max_visible_rows as f32 * row_height) + 60.0;
+    vertices.extend(generate_rect(
+        panel_x - 5.0,
+        panel_top_y - 5.0,
+        panel_width + 10.0,
+        panel_height + 10.0,
+        0.15,
+        0.15,
+        0.15,
+        0.9,
+    ));
+
+    // Panel border
+    let border = 1.0;
+    vertices.extend(generate_rect(
+        panel_x - 5.0 - border,
+        panel_top_y - 5.0 - border,
+        panel_width + 10.0 + border * 2.0,
+        border,
+        0.4,
+        0.4,
+        0.4,
+        1.0,
+    ));
+    vertices.extend(generate_rect(
+        panel_x - 5.0 - border,
+        panel_top_y + panel_height + 5.0,
+        panel_width + 10.0 + border * 2.0,
+        border,
+        0.4,
+        0.4,
+        0.4,
+        1.0,
+    ));
+    vertices.extend(generate_rect(
+        panel_x - 5.0 - border,
+        panel_top_y - 5.0,
+        border,
+        panel_height + 10.0,
+        0.4,
+        0.4,
+        0.4,
+        1.0,
+    ));
+    vertices.extend(generate_rect(
+        panel_x + panel_width + 5.0,
+        panel_top_y - 5.0,
+        border,
+        panel_height + 10.0,
+        0.4,
+        0.4,
+        0.4,
+        1.0,
+    ));
+
+    // Layer rows
+    let visible_count = layers.len().min(max_visible_rows);
+    for (i, (_name, visible, opacity, locked)) in layers.iter().enumerate().take(visible_count) {
+        let row_y = panel_top_y + (i as f32 * row_height);
+        let is_active = i == active_layer;
+
+        // Row background
+        let bg_alpha = if is_active { 0.3 } else { 0.0 };
+        if bg_alpha > 0.0 {
+            vertices.extend(generate_rect(
+                panel_x,
+                row_y,
+                panel_width,
+                row_height - 2.0,
+                0.3,
+                0.3,
+                0.7,
+                bg_alpha,
+            ));
+        }
+
+        // Visibility toggle (eye icon as a square)
+        let vis_x = panel_x + 3.0;
+        let vis_y = row_y + 5.0;
+        let vis_size = 15.0;
+        if *visible {
+            // Green square for visible
+            vertices.extend(generate_rect(
+                vis_x, vis_y, vis_size, vis_size, 0.2, 0.8, 0.2, 1.0,
+            ));
+        } else {
+            // Red square for hidden
+            vertices.extend(generate_rect(
+                vis_x, vis_y, vis_size, vis_size, 0.8, 0.2, 0.2, 0.6,
+            ));
+        }
+
+        // Lock indicator (small yellow square)
+        if *locked {
+            vertices.extend(generate_rect(
+                vis_x + vis_size + 2.0,
+                vis_y + 2.0,
+                11.0,
+                11.0,
+                0.9,
+                0.8,
+                0.0,
+                1.0,
+            ));
+        }
+
+        // Layer name (as a thin colored bar since we can't render text)
+        let name_x = panel_x + 25.0;
+        let name_y = row_y + 10.0;
+        let name_w = panel_width - 30.0;
+        let name_h = 5.0;
+        let _opacity = *opacity;
+        vertices.extend(generate_rect(
+            name_x, name_y, name_w, name_h, 0.9, 0.9, 0.9, 1.0,
+        ));
+
+        // Opacity bar below name
+        let op_bar_x = panel_x + 25.0;
+        let op_bar_y = row_y + 17.0;
+        let op_bar_w = (panel_width - 30.0) * opacity;
+        vertices.extend(generate_rect(
+            op_bar_x,
+            op_bar_y,
+            op_bar_w.max(1.0),
+            3.0,
+            0.5,
+            0.5,
+            0.5,
+            0.8,
+        ));
+    }
+
+    // Add layer button
+    let btn_y = panel_top_y + (max_visible_rows as f32 * row_height) + 5.0;
+    let btn_width = 60.0;
+    let btn_height = 25.0;
+    vertices.extend(generate_rect(
+        panel_x + 5.0,
+        btn_y,
+        btn_width,
+        btn_height,
+        0.2,
+        0.6,
+        0.2,
+        1.0,
+    ));
+    // Plus sign
+    let plus_x = panel_x + 5.0 + btn_width / 2.0;
+    let plus_y = btn_y + btn_height / 2.0;
+    let line_w = 3.0;
+    vertices.extend(generate_rotated_rect(
+        panel_x + 15.0,
+        plus_y,
+        panel_x + 5.0 + btn_width - 15.0,
+        plus_y,
+        line_w,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ));
+    vertices.extend(generate_rotated_rect(
+        plus_x,
+        btn_y + 6.0,
+        plus_x,
+        btn_y + btn_height - 6.0,
+        line_w,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ));
+
+    // Delete layer button
+    let del_x = panel_x + btn_width + 15.0;
+    vertices.extend(generate_rect(
+        del_x, btn_y, btn_width, btn_height, 0.6, 0.2, 0.2, 1.0,
+    ));
+    // Minus sign
+    vertices.extend(generate_rotated_rect(
+        del_x + 10.0,
+        btn_y + btn_height / 2.0,
+        del_x + btn_width - 10.0,
+        btn_y + btn_height / 2.0,
+        line_w,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ));
+
+    // Move up button
+    let move_btn_y = btn_y + btn_height + 5.0;
+    vertices.extend(generate_rect(
+        panel_x + 5.0,
+        move_btn_y,
+        btn_width,
+        btn_height,
+        0.4,
+        0.4,
+        0.7,
+        1.0,
+    ));
+    // Up arrow (simple triangle using rects)
+    let up_cx = panel_x + 5.0 + btn_width / 2.0;
+    let up_cy = move_btn_y + btn_height / 2.0;
+    // Horizontal base
+    vertices.extend(generate_rect(
+        up_cx - 8.0,
+        up_cy + 3.0,
+        16.0,
+        2.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ));
+    // Left diagonal
+    vertices.extend(generate_rotated_rect(
+        up_cx - 6.0,
+        up_cy + 2.0,
+        up_cx,
+        up_cy - 4.0,
+        1.5,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ));
+    // Right diagonal
+    vertices.extend(generate_rotated_rect(
+        up_cx + 6.0,
+        up_cy + 2.0,
+        up_cx,
+        up_cy - 4.0,
+        1.5,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ));
+
+    // Move down button
+    let move_down_x = panel_x + btn_width + 15.0;
+    vertices.extend(generate_rect(
+        move_down_x,
+        move_btn_y,
+        btn_width,
+        btn_height,
+        0.4,
+        0.4,
+        0.7,
+        1.0,
+    ));
+    // Down arrow
+    let down_cx = move_down_x + btn_width / 2.0;
+    let down_cy = move_btn_y + btn_height / 2.0;
+    // Horizontal base
+    vertices.extend(generate_rect(
+        down_cx - 8.0,
+        down_cy - 5.0,
+        16.0,
+        2.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ));
+    // Left diagonal
+    vertices.extend(generate_rotated_rect(
+        down_cx - 6.0,
+        down_cy - 2.0,
+        down_cx,
+        down_cy + 4.0,
+        1.5,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ));
+    // Right diagonal
+    vertices.extend(generate_rotated_rect(
+        down_cx + 6.0,
+        down_cy - 2.0,
+        down_cx,
+        down_cy + 4.0,
+        1.5,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ));
+
+    vertices
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
