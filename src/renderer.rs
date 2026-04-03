@@ -98,7 +98,16 @@ impl Renderer {
 
         // Try to initialize WGPU
         match Self::init_wgpu(&window, window_size, &config).await {
-            Ok((device, queue, surface, surface_config, render_pipeline, ui_pipeline, pipeline_layout, shader)) => {
+            Ok((
+                device,
+                queue,
+                surface,
+                surface_config,
+                render_pipeline,
+                ui_pipeline,
+                pipeline_layout,
+                shader,
+            )) => {
                 logger::info("✅ WGPU initialized successfully!");
                 logger::info("   - Backend: GPU (WGPU)");
                 logger::info(&format!("   - Device: {:?}", device));
@@ -134,7 +143,7 @@ impl Renderer {
                 {
                     logger::warn("Falling back to Cairo software rendering (Linux)");
                     logger::info("   - Backend: Cairo (CPU)");
-                    return Ok(Self {
+                    Ok(Self {
                         canvas: Canvas::new(),
                         hue: 0.0,
                         saturation: 100.0,
@@ -157,7 +166,7 @@ impl Renderer {
                         pipeline_layout: None,
                         shader: None,
                         window: Some(window),
-                    });
+                    })
                 }
                 #[cfg(target_os = "windows")]
                 {
@@ -423,11 +432,19 @@ impl Renderer {
         // creating intermediate render targets, which is more complex)
         // The config.msaa_samples value is stored but not used for pipeline creation
         let sample_count = 1;
-        logger::info(&format!("Using MSAA sample count: {} (swapchain rendering)", sample_count));
+        logger::info(&format!(
+            "Using MSAA sample count: {} (swapchain rendering)",
+            sample_count
+        ));
 
         // Create pipelines with the determined sample count
-        let (render_pipeline, ui_pipeline) =
-            Self::create_pipelines(&device, &shader, &pipeline_layout, surface_format, sample_count);
+        let (render_pipeline, ui_pipeline) = Self::create_pipelines(
+            &device,
+            &shader,
+            &pipeline_layout,
+            surface_format,
+            sample_count,
+        );
 
         Ok((
             device,
@@ -462,18 +479,11 @@ impl Renderer {
             self.surface_config = Some(new_config);
 
             // Recreate pipelines on resize (sample_count=1 for swapchain rendering)
-            if let (Some(device), Some(pipeline_layout), Some(shader)) = (
-                &self.device,
-                &self.pipeline_layout,
-                &self.shader,
-            ) {
-                let (render_pipeline, ui_pipeline) = Self::create_pipelines(
-                    device,
-                    shader,
-                    pipeline_layout,
-                    surface_format,
-                    1,
-                );
+            if let (Some(device), Some(pipeline_layout), Some(shader)) =
+                (&self.device, &self.pipeline_layout, &self.shader)
+            {
+                let (render_pipeline, ui_pipeline) =
+                    Self::create_pipelines(device, shader, pipeline_layout, surface_format, 1);
                 self.render_pipeline = Some(render_pipeline);
                 self.ui_pipeline = Some(ui_pipeline);
             }
@@ -604,7 +614,7 @@ impl Renderer {
             let max_texture_size = device.limits().max_texture_dimension_2d;
             let clamped_width = self.window_size.0.min(max_texture_size);
             let clamped_height = self.window_size.1.min(max_texture_size);
-            
+
             if config.width != clamped_width || config.height != clamped_height {
                 let mut new_config = config.clone();
                 new_config.width = clamped_width;
@@ -628,9 +638,6 @@ impl Renderer {
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-
-        // Generate vertices from canvas strokes (one continuous buffer)
-        let _vertices = self.generate_vertices();
 
         // Use actual texture dimensions to ensure consistency with viewport
         let texture_width = output.texture.width() as f32;
@@ -712,21 +719,20 @@ impl Renderer {
                     stroke_ranges.push(start..end);
                 }
             }
-            if let Some(active_stroke) = &self.active_stroke {
-                if active_stroke.points().len() >= 2 {
-                    let start = all_stroke_vertices.len() as u32;
-                    all_stroke_vertices.extend(self.generate_active_stroke_vertices(active_stroke));
-                    let end = all_stroke_vertices.len() as u32;
-                    stroke_ranges.push(start..end);
-                }
+            if let Some(active_stroke) = &self.active_stroke
+                && active_stroke.points().len() >= 2
+            {
+                let start = all_stroke_vertices.len() as u32;
+                all_stroke_vertices.extend(self.generate_active_stroke_vertices(active_stroke));
+                let end = all_stroke_vertices.len() as u32;
+                stroke_ranges.push(start..end);
             }
             if !all_stroke_vertices.is_empty() {
-                let vertex_buffer =
-                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Combined Stroke Vertex Buffer"),
-                        contents: bytemuck::cast_slice(&all_stroke_vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
+                let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Combined Stroke Vertex Buffer"),
+                    contents: bytemuck::cast_slice(&all_stroke_vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
                 render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                 for range in stroke_ranges {
                     render_pass.draw(range, 0..1);
@@ -737,13 +743,18 @@ impl Renderer {
             if let Some(ui_pipeline) = &self.ui_pipeline {
                 let mut all_ui_vertices: Vec<[f32; 7]> = Vec::new();
 
-                all_ui_vertices.extend(self.generate_hsv_sliders(self.hue, self.saturation, self.value));
+                all_ui_vertices.extend(self.generate_hsv_sliders(
+                    self.hue,
+                    self.saturation,
+                    self.value,
+                ));
                 all_ui_vertices.extend(self.generate_custom_palette_vertices());
                 all_ui_vertices.extend(self.generate_brush_size_vertices(self.brush_size));
                 all_ui_vertices.extend(self.generate_eraser_button_vertices(self.is_eraser));
                 all_ui_vertices.extend(self.generate_clear_button_vertices());
                 all_ui_vertices.extend(self.generate_undo_button_vertices());
                 all_ui_vertices.extend(self.generate_redo_button_vertices());
+                all_ui_vertices.extend(self.generate_export_button_vertices());
                 all_ui_vertices.extend(self.generate_opacity_preset_vertices());
 
                 if !all_ui_vertices.is_empty() {
@@ -761,12 +772,12 @@ impl Renderer {
         }
 
         queue.submit(std::iter::once(encoder.finish()));
-        
+
         // Notify window before presenting to help compositor update window regions
         if let Some(ref window) = self.window {
             window.pre_present_notify();
         }
-        
+
         output.present();
 
         Ok(())
@@ -785,31 +796,6 @@ impl Renderer {
     ) -> Vec<[f32; 7]> {
         let flat = geometry::generate_active_stroke_vertices(active_stroke);
         to_vertices_7(&flat, active_stroke.width())
-    }
-
-    /// Generate vertices from canvas strokes for WGPU rendering
-    fn generate_vertices(&self) -> Vec<[f32; 6]> {
-        let mut vertices = Vec::new();
-
-        for stroke in self.canvas.strokes() {
-            let color = [
-                stroke.color.r as f32 / 255.0,
-                stroke.color.g as f32 / 255.0,
-                stroke.color.b as f32 / 255.0,
-                stroke.opacity,
-            ];
-
-            for point in &stroke.points {
-                vertices.push([point.x, point.y, color[0], color[1], color[2], color[3]]);
-            }
-
-            // Add a degenerate vertex to separate strokes
-            if !stroke.points.is_empty() {
-                vertices.push([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
-            }
-        }
-
-        vertices
     }
 
     /// Generate vertices for HSV sliders
@@ -859,18 +845,16 @@ impl Renderer {
         to_vertices_7(&flat, 0.0)
     }
 
+    /// Generate vertices for export button
+    fn generate_export_button_vertices(&self) -> Vec<[f32; 7]> {
+        let flat = geometry::generate_export_button_vertices();
+        to_vertices_7(&flat, 0.0)
+    }
+
     /// Generate vertices for opacity preset buttons
     fn generate_opacity_preset_vertices(&self) -> Vec<[f32; 7]> {
         let flat = geometry::generate_opacity_preset_vertices(self.opacity);
         to_vertices_7(&flat, 0.0)
-    }
-
-    /// Render using software fallback (stub - WGPU is now primary)
-    /// This method is kept for compatibility but WGPU is the primary renderer
-    pub fn render_software(&self, _width: u32, _height: u32) {
-        // Software rendering fallback is no longer needed with winit + WGPU
-        // WGPU handles all rendering through the GPU
-        logger::debug("Software rendering fallback called - using WGPU instead");
     }
 
     /// Get the current canvas
@@ -956,7 +940,12 @@ mod tests {
         };
         let stroke2 = Stroke {
             points: vec![Point { x: 100.0, y: 100.0 }, Point { x: 110.0, y: 110.0 }],
-            color: Color { r: 255, g: 0, b: 0, a: 255 },
+            color: Color {
+                r: 255,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
             width: 2.0,
             opacity: 1.0,
         };
@@ -973,7 +962,9 @@ mod tests {
                 let verts = crate::geometry::generate_stroke_vertices(stroke);
                 let line_width = stroke.width;
                 for chunk in verts.chunks(6) {
-                    all_vertices.push([chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], line_width]);
+                    all_vertices.push([
+                        chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], line_width,
+                    ]);
                 }
                 let end = all_vertices.len() as u32;
                 stroke_ranges.push(start..end);

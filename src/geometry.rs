@@ -769,6 +769,85 @@ pub fn generate_clear_button_vertices() -> Vec<f32> {
     vertices
 }
 
+/// Generate vertices for the export canvas button
+/// The button shows a download/arrow symbol and is positioned next to the redo button
+pub fn generate_export_button_vertices() -> Vec<f32> {
+    let mut vertices = Vec::new();
+    let export_x = 170.0;
+    let export_y = 155.0;
+    let button_size = 30.0;
+
+    // Background (green)
+    vertices.extend(generate_rect(
+        export_x,
+        export_y,
+        button_size,
+        button_size,
+        0.3,
+        0.7,
+        0.3,
+        1.0,
+    ));
+
+    // Arrow pointing down (export symbol)
+    let line_width = 4.0;
+    let padding = 6.0;
+
+    // Vertical line from top-center to bottom-center
+    vertices.extend(generate_rotated_rect(
+        export_x + button_size / 2.0,
+        export_y + padding,
+        export_x + button_size / 2.0,
+        export_y + button_size - padding - 4.0,
+        line_width,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ));
+
+    // Arrow head: diagonal from center to bottom-left
+    vertices.extend(generate_rotated_rect(
+        export_x + button_size / 2.0,
+        export_y + button_size - padding - 4.0,
+        export_x + padding + 4.0,
+        export_y + button_size - padding,
+        line_width,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ));
+
+    // Arrow head: diagonal from center to bottom-right
+    vertices.extend(generate_rotated_rect(
+        export_x + button_size / 2.0,
+        export_y + button_size - padding - 4.0,
+        export_x + button_size - padding - 4.0,
+        export_y + button_size - padding,
+        line_width,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ));
+
+    // Horizontal line at bottom (tray)
+    vertices.extend(generate_rotated_rect(
+        export_x + padding,
+        export_y + button_size - padding,
+        export_x + button_size - padding,
+        export_y + button_size - padding,
+        line_width,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ));
+
+    vertices
+}
+
 /// Generate vertices for the undo button
 /// The button shows a left arrow symbol
 pub fn generate_undo_button_vertices(can_undo: bool) -> Vec<f32> {

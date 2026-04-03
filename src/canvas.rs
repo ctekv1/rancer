@@ -250,148 +250,6 @@ impl Canvas {
     pub fn can_redo(&self) -> bool {
         !self.undo_stack.is_empty()
     }
-
-    /// Export canvas to a simple representation
-    /// TODO: Replace with actual image export (PNG, etc.)
-    pub fn export(&self) -> CanvasExport {
-        CanvasExport {
-            width: self.width,
-            height: self.height,
-            background: self.background_color,
-            stroke_count: self.strokes.len(),
-        }
-    }
-}
-
-/// Simple export representation of canvas state
-/// TODO: Replace with actual image data export
-#[derive(Debug)]
-pub struct CanvasExport {
-    pub width: u32,
-    pub height: u32,
-    pub background: Color,
-    pub stroke_count: usize,
-}
-
-/// A palette of predefined colors for drawing
-#[derive(Debug, Clone)]
-pub struct ColorPalette {
-    /// List of available colors
-    colors: Vec<Color>,
-    /// Index of currently selected color
-    selected_index: usize,
-}
-
-impl Default for ColorPalette {
-    fn default() -> Self {
-        let colors = vec![
-            Color::BLACK, // 0 - Black
-            Color::WHITE, // 1 - White
-            Color {
-                r: 255,
-                g: 0,
-                b: 0,
-                a: 255,
-            }, // 2 - Red
-            Color {
-                r: 0,
-                g: 255,
-                b: 0,
-                a: 255,
-            }, // 3 - Green
-            Color {
-                r: 0,
-                g: 0,
-                b: 255,
-                a: 255,
-            }, // 4 - Blue
-            Color {
-                r: 255,
-                g: 255,
-                b: 0,
-                a: 255,
-            }, // 5 - Yellow
-            Color {
-                r: 255,
-                g: 0,
-                b: 255,
-                a: 255,
-            }, // 6 - Magenta
-            Color {
-                r: 0,
-                g: 255,
-                b: 255,
-                a: 255,
-            }, // 7 - Cyan
-            Color {
-                r: 64,
-                g: 64,
-                b: 64,
-                a: 255,
-            }, // 8 - Dark Gray
-            Color {
-                r: 139,
-                g: 69,
-                b: 19,
-                a: 255,
-            }, // 9 - Brown
-        ];
-
-        Self {
-            colors,
-            selected_index: 0, // Default to black
-        }
-    }
-}
-
-impl ColorPalette {
-    /// Create a new color palette with a default set of colors
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Get the currently selected color
-    pub fn current_color(&self) -> Color {
-        self.colors[self.selected_index]
-    }
-
-    /// Select a color by index
-    pub fn select_color(&mut self, index: usize) -> Result<(), String> {
-        if index < self.colors.len() {
-            self.selected_index = index;
-            Ok(())
-        } else {
-            Err(format!(
-                "Color index {} out of range (0-{})",
-                index,
-                self.colors.len() - 1
-            ))
-        }
-    }
-
-    /// Get all available colors
-    pub fn colors(&self) -> &[Color] {
-        &self.colors
-    }
-
-    /// Get the index of the currently selected color
-    pub fn selected_index(&self) -> usize {
-        self.selected_index
-    }
-
-    /// Add a custom color to the palette
-    pub fn add_color(&mut self, color: Color) {
-        self.colors.push(color);
-        // Keep selection valid if we were at the end
-        if self.selected_index >= self.colors.len() - 1 {
-            self.selected_index = self.colors.len() - 1;
-        }
-    }
-
-    /// Get the number of colors in the palette
-    pub fn color_count(&self) -> usize {
-        self.colors.len()
-    }
 }
 
 /// Default brush sizes available in the application
@@ -500,17 +358,6 @@ impl Canvas {
         ActiveStroke::new(color, width, opacity)
     }
 
-    /// Begin a new active stroke using the current color from a palette
-    pub fn begin_stroke_with_palette(
-        &mut self,
-        palette: &ColorPalette,
-        width: f32,
-        opacity: f32,
-    ) -> ActiveStroke {
-        let color = palette.current_color();
-        self.begin_stroke(color, width, opacity)
-    }
-
     /// Commit an active stroke to the canvas
     pub fn commit_stroke(&mut self, active_stroke: ActiveStroke) -> Result<(), String> {
         if let Some(stroke) = active_stroke.commit() {
@@ -525,6 +372,25 @@ impl Canvas {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const RED: Color = Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    const BLUE: Color = Color {
+        r: 0,
+        g: 0,
+        b: 255,
+        a: 255,
+    };
+    const GREEN: Color = Color {
+        r: 0,
+        g: 255,
+        b: 0,
+        a: 255,
+    };
 
     #[test]
     fn test_canvas_creation() {
@@ -560,117 +426,10 @@ mod tests {
     }
 
     #[test]
-    fn test_color_palette_creation() {
-        let palette = ColorPalette::new();
-
-        // Should have 10 default colors
-        assert_eq!(palette.color_count(), 10);
-
-        // Default selection should be black (index 0)
-        assert_eq!(palette.selected_index(), 0);
-        assert_eq!(palette.current_color(), Color::BLACK);
-
-        // Should have all expected default colors
-        let colors = palette.colors();
-        assert_eq!(colors[0], Color::BLACK);
-        assert_eq!(colors[1], Color::WHITE);
-        assert_eq!(
-            colors[2],
-            Color {
-                r: 255,
-                g: 0,
-                b: 0,
-                a: 255
-            }
-        ); // Red
-        assert_eq!(
-            colors[8],
-            Color {
-                r: 64,
-                g: 64,
-                b: 64,
-                a: 255
-            }
-        ); // Dark Gray
-        assert_eq!(
-            colors[9],
-            Color {
-                r: 139,
-                g: 69,
-                b: 19,
-                a: 255
-            }
-        ); // Brown
-    }
-
-    #[test]
-    fn test_color_palette_selection() {
-        let mut palette = ColorPalette::new();
-
-        // Select red (index 2)
-        assert!(palette.select_color(2).is_ok());
-        assert_eq!(palette.selected_index(), 2);
-        assert_eq!(
-            palette.current_color(),
-            Color {
-                r: 255,
-                g: 0,
-                b: 0,
-                a: 255
-            }
-        );
-
-        // Select blue (index 4)
-        assert!(palette.select_color(4).is_ok());
-        assert_eq!(palette.selected_index(), 4);
-        assert_eq!(
-            palette.current_color(),
-            Color {
-                r: 0,
-                g: 0,
-                b: 255,
-                a: 255
-            }
-        );
-
-        // Try to select invalid index
-        assert!(palette.select_color(15).is_err());
-        assert_eq!(palette.selected_index(), 4); // Should remain unchanged
-    }
-
-    #[test]
-    fn test_color_palette_add_color() {
-        let mut palette = ColorPalette::new();
-        let initial_count = palette.color_count();
-
-        // Add a custom purple color
-        let purple = Color {
-            r: 128,
-            g: 0,
-            b: 128,
-            a: 255,
-        };
-        palette.add_color(purple);
-
-        assert_eq!(palette.color_count(), initial_count + 1);
-        assert_eq!(palette.colors()[initial_count], purple);
-
-        // Selecting the new color should work
-        assert!(palette.select_color(initial_count).is_ok());
-        assert_eq!(palette.current_color(), purple);
-    }
-
-    #[test]
     fn test_active_stroke_creation() {
-        let color = Color {
-            r: 255,
-            g: 0,
-            b: 0,
-            a: 255,
-        };
-        let active_stroke = ActiveStroke::new(color, 3.0, 0.8);
+        let active_stroke = ActiveStroke::new(RED, 3.0, 0.8);
 
-        assert_eq!(active_stroke.color(), color);
+        assert_eq!(active_stroke.color(), RED);
         assert_eq!(active_stroke.width(), 3.0);
         assert_eq!(active_stroke.opacity(), 0.8);
         assert!(active_stroke.is_empty());
@@ -679,15 +438,8 @@ mod tests {
 
     #[test]
     fn test_active_stroke_point_addition() {
-        let red_color = Color {
-            r: 255,
-            g: 0,
-            b: 0,
-            a: 255,
-        };
-        let mut active_stroke = ActiveStroke::new(red_color, 2.0, 1.0);
+        let mut active_stroke = ActiveStroke::new(RED, 2.0, 1.0);
 
-        // Add some points
         active_stroke.add_point(Point { x: 10.0, y: 20.0 });
         active_stroke.add_point(Point { x: 15.0, y: 25.0 });
         active_stroke.add_point(Point { x: 20.0, y: 30.0 });
@@ -700,22 +452,14 @@ mod tests {
 
     #[test]
     fn test_active_stroke_commit() {
-        let blue_color = Color {
-            r: 0,
-            g: 0,
-            b: 255,
-            a: 255,
-        };
-        let mut active_stroke = ActiveStroke::new(blue_color, 4.0, 0.5);
+        let mut active_stroke = ActiveStroke::new(BLUE, 4.0, 0.5);
 
-        // Add points to the stroke
         active_stroke.add_point(Point { x: 0.0, y: 0.0 });
         active_stroke.add_point(Point { x: 5.0, y: 5.0 });
 
-        // Commit the stroke
         let committed_stroke = active_stroke.commit().expect("Should commit successfully");
 
-        assert_eq!(committed_stroke.color, blue_color);
+        assert_eq!(committed_stroke.color, BLUE);
         assert_eq!(committed_stroke.width, 4.0);
         assert_eq!(committed_stroke.opacity, 0.5);
         assert_eq!(committed_stroke.points.len(), 2);
@@ -725,15 +469,8 @@ mod tests {
 
     #[test]
     fn test_active_stroke_commit_empty() {
-        let green_color = Color {
-            r: 0,
-            g: 255,
-            b: 0,
-            a: 255,
-        };
-        let active_stroke = ActiveStroke::new(green_color, 1.0, 1.0);
+        let active_stroke = ActiveStroke::new(GREEN, 1.0, 1.0);
 
-        // Try to commit empty stroke
         let result = active_stroke.commit();
         assert!(result.is_none(), "Empty stroke should not commit");
     }
@@ -741,23 +478,18 @@ mod tests {
     #[test]
     fn test_canvas_active_stroke_integration() {
         let mut canvas = Canvas::new();
-        let palette = ColorPalette::new();
 
-        // Begin a stroke with palette color (default black)
-        let mut active_stroke = canvas.begin_stroke_with_palette(&palette, 2.0, 1.0);
+        let mut active_stroke = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
         assert_eq!(active_stroke.color(), Color::BLACK);
         assert_eq!(active_stroke.width(), 2.0);
         assert_eq!(active_stroke.opacity(), 1.0);
 
-        // Add points to the active stroke
         active_stroke.add_point(Point { x: 10.0, y: 10.0 });
         active_stroke.add_point(Point { x: 20.0, y: 20.0 });
 
-        // Commit the stroke
         assert!(canvas.commit_stroke(active_stroke).is_ok());
         assert_eq!(canvas.strokes().len(), 1);
 
-        // Verify the committed stroke
         let committed_stroke = &canvas.strokes()[0];
         assert_eq!(committed_stroke.color, Color::BLACK);
         assert_eq!(committed_stroke.width, 2.0);
@@ -768,12 +500,9 @@ mod tests {
     #[test]
     fn test_canvas_commit_empty_stroke() {
         let mut canvas = Canvas::new();
-        let palette = ColorPalette::new();
 
-        // Begin a stroke but don't add any points
-        let active_stroke = canvas.begin_stroke_with_palette(&palette, 2.0, 1.0);
+        let active_stroke = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
 
-        // Try to commit empty stroke
         let result = canvas.commit_stroke(active_stroke);
         assert!(result.is_err());
         assert_eq!(canvas.strokes().len(), 0);
@@ -782,42 +511,20 @@ mod tests {
     #[test]
     fn test_canvas_multiple_strokes_with_different_colors() {
         let mut canvas = Canvas::new();
-        let mut palette = ColorPalette::new();
 
-        // Draw first stroke in red
-        palette.select_color(2).unwrap(); // Red
-        let mut stroke1 = canvas.begin_stroke_with_palette(&palette, 3.0, 1.0);
+        let mut stroke1 = canvas.begin_stroke(RED, 3.0, 1.0);
         stroke1.add_point(Point { x: 0.0, y: 0.0 });
         stroke1.add_point(Point { x: 10.0, y: 10.0 });
         canvas.commit_stroke(stroke1).unwrap();
 
-        // Draw second stroke in blue
-        palette.select_color(4).unwrap(); // Blue
-        let mut stroke2 = canvas.begin_stroke_with_palette(&palette, 2.0, 0.8);
+        let mut stroke2 = canvas.begin_stroke(BLUE, 2.0, 0.8);
         stroke2.add_point(Point { x: 20.0, y: 20.0 });
         stroke2.add_point(Point { x: 30.0, y: 30.0 });
         canvas.commit_stroke(stroke2).unwrap();
 
-        // Verify both strokes are present with correct colors
         assert_eq!(canvas.strokes().len(), 2);
-        assert_eq!(
-            canvas.strokes()[0].color,
-            Color {
-                r: 255,
-                g: 0,
-                b: 0,
-                a: 255
-            }
-        ); // Red
-        assert_eq!(
-            canvas.strokes()[1].color,
-            Color {
-                r: 0,
-                g: 0,
-                b: 255,
-                a: 255
-            }
-        ); // Blue
+        assert_eq!(canvas.strokes()[0].color, RED);
+        assert_eq!(canvas.strokes()[1].color, BLUE);
         assert_eq!(canvas.strokes()[0].width, 3.0);
         assert_eq!(canvas.strokes()[1].width, 2.0);
     }
@@ -826,23 +533,22 @@ mod tests {
     fn test_undo_on_empty_canvas() {
         let mut canvas = Canvas::new();
         assert_eq!(canvas.strokes().len(), 0);
-        canvas.undo(); // Should be a no-op, not panic
+        canvas.undo();
         assert_eq!(canvas.strokes().len(), 0);
     }
 
     #[test]
     fn test_redo_with_empty_stack() {
         let mut canvas = Canvas::new();
-        canvas.redo(); // Should be a no-op, not panic
+        canvas.redo();
         assert_eq!(canvas.strokes().len(), 0);
     }
 
     #[test]
     fn test_new_stroke_clears_undo_stack() {
         let mut canvas = Canvas::new();
-        let palette = ColorPalette::new();
 
-        let mut s1 = canvas.begin_stroke_with_palette(&palette, 2.0, 1.0);
+        let mut s1 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
         s1.add_point(Point { x: 0.0, y: 0.0 });
         s1.add_point(Point { x: 10.0, y: 10.0 });
         canvas.commit_stroke(s1).unwrap();
@@ -851,7 +557,7 @@ mod tests {
         assert!(canvas.can_redo());
         assert_eq!(canvas.strokes().len(), 0);
 
-        let mut s2 = canvas.begin_stroke_with_palette(&palette, 2.0, 1.0);
+        let mut s2 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
         s2.add_point(Point { x: 20.0, y: 20.0 });
         s2.add_point(Point { x: 30.0, y: 30.0 });
         canvas.commit_stroke(s2).unwrap();
@@ -868,8 +574,7 @@ mod tests {
         assert!(!canvas.can_undo());
         assert!(!canvas.can_redo());
 
-        let palette = ColorPalette::new();
-        let mut s1 = canvas.begin_stroke_with_palette(&palette, 2.0, 1.0);
+        let mut s1 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
         s1.add_point(Point { x: 0.0, y: 0.0 });
         canvas.commit_stroke(s1).unwrap();
 
@@ -888,35 +593,29 @@ mod tests {
     #[test]
     fn test_undo_redo_cycle() {
         let mut canvas = Canvas::new();
-        let palette = ColorPalette::new();
 
-        // Draw two strokes
-        let mut s1 = canvas.begin_stroke_with_palette(&palette, 2.0, 1.0);
+        let mut s1 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
         s1.add_point(Point { x: 0.0, y: 0.0 });
         s1.add_point(Point { x: 10.0, y: 10.0 });
         canvas.commit_stroke(s1).unwrap();
 
-        let mut s2 = canvas.begin_stroke_with_palette(&palette, 3.0, 1.0);
+        let mut s2 = canvas.begin_stroke(Color::BLACK, 3.0, 1.0);
         s2.add_point(Point { x: 20.0, y: 20.0 });
         s2.add_point(Point { x: 30.0, y: 30.0 });
         canvas.commit_stroke(s2).unwrap();
 
         assert_eq!(canvas.strokes().len(), 2);
 
-        // Undo last stroke
         canvas.undo();
         assert_eq!(canvas.strokes().len(), 1);
 
-        // Redo it back
         canvas.redo();
         assert_eq!(canvas.strokes().len(), 2);
 
-        // Undo both
         canvas.undo();
         canvas.undo();
         assert_eq!(canvas.strokes().len(), 0);
 
-        // Undo on empty canvas again
         canvas.undo();
         assert_eq!(canvas.strokes().len(), 0);
     }
@@ -924,9 +623,8 @@ mod tests {
     #[test]
     fn test_clear_resets_all_stacks() {
         let mut canvas = Canvas::new();
-        let palette = ColorPalette::new();
 
-        let mut s1 = canvas.begin_stroke_with_palette(&palette, 2.0, 1.0);
+        let mut s1 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
         s1.add_point(Point { x: 0.0, y: 0.0 });
         s1.add_point(Point { x: 10.0, y: 10.0 });
         canvas.commit_stroke(s1).unwrap();
@@ -935,7 +633,6 @@ mod tests {
         assert_eq!(canvas.strokes().len(), 0);
 
         canvas.clear();
-        // After clear, redo should bring nothing back
         canvas.redo();
         assert_eq!(canvas.strokes().len(), 0);
     }
@@ -956,23 +653,6 @@ mod tests {
 
         canvas.resize(800, 600);
         assert_eq!(canvas.size(), (800, 600));
-    }
-
-    #[test]
-    fn test_export_stroke_count() {
-        let mut canvas = Canvas::new();
-        let palette = ColorPalette::new();
-
-        let export1 = canvas.export();
-        assert_eq!(export1.stroke_count, 0);
-
-        let mut s1 = canvas.begin_stroke_with_palette(&palette, 2.0, 1.0);
-        s1.add_point(Point { x: 0.0, y: 0.0 });
-        s1.add_point(Point { x: 10.0, y: 10.0 });
-        canvas.commit_stroke(s1).unwrap();
-
-        let export2 = canvas.export();
-        assert_eq!(export2.stroke_count, 1);
     }
 
     #[test]
@@ -1007,22 +687,11 @@ mod tests {
     }
 
     #[test]
-    fn test_color_palette_default_colors_count() {
-        let palette = ColorPalette::new();
-        assert_eq!(palette.color_count(), 10);
-    }
-
-    #[test]
     fn test_add_stroke_directly() {
         let mut canvas = Canvas::new();
         let stroke = Stroke {
             points: vec![Point { x: 0.0, y: 0.0 }, Point { x: 10.0, y: 10.0 }],
-            color: Color {
-                r: 255,
-                g: 0,
-                b: 0,
-                a: 255,
-            },
+            color: RED,
             width: 5.0,
             opacity: 1.0,
         };
@@ -1072,10 +741,9 @@ mod tests {
     #[test]
     fn test_multiple_undo_redo_cycles() {
         let mut canvas = Canvas::new();
-        let palette = ColorPalette::new();
 
         for i in 0..5 {
-            let mut s = canvas.begin_stroke_with_palette(&palette, 2.0, 1.0);
+            let mut s = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
             s.add_point(Point {
                 x: i as f32 * 10.0,
                 y: i as f32 * 10.0,
@@ -1103,10 +771,9 @@ mod tests {
     #[test]
     fn test_stroke_iteration() {
         let mut canvas = Canvas::new();
-        let palette = ColorPalette::new();
 
         for i in 0..3 {
-            let mut s = canvas.begin_stroke_with_palette(&palette, 2.0, 1.0);
+            let mut s = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
             s.add_point(Point {
                 x: i as f32,
                 y: i as f32,
@@ -1123,21 +790,10 @@ mod tests {
     }
 
     #[test]
-    fn test_palette_get_all_colors() {
-        let palette = ColorPalette::new();
-        assert!(palette.color_count() > 0);
-
-        for color in palette.colors() {
-            assert!(color.a > 0);
-        }
-    }
-
-    #[test]
     fn test_active_stroke_with_opacity() {
         let mut canvas = Canvas::new();
-        let palette = ColorPalette::new();
 
-        let mut s = canvas.begin_stroke_with_palette(&palette, 5.0, 0.5);
+        let mut s = canvas.begin_stroke(Color::BLACK, 5.0, 0.5);
         s.add_point(Point { x: 0.0, y: 0.0 });
         s.add_point(Point { x: 10.0, y: 10.0 });
 
@@ -1153,9 +809,8 @@ mod tests {
     #[test]
     fn test_canvas_clear_with_active_stroke() {
         let mut canvas = Canvas::new();
-        let palette = ColorPalette::new();
 
-        let mut s = canvas.begin_stroke_with_palette(&palette, 2.0, 1.0);
+        let mut s = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
         s.add_point(Point { x: 0.0, y: 0.0 });
         canvas.commit_stroke(s).unwrap();
 
@@ -1168,9 +823,8 @@ mod tests {
     #[test]
     fn test_stroke_with_many_points() {
         let mut canvas = Canvas::new();
-        let palette = ColorPalette::new();
 
-        let mut s = canvas.begin_stroke_with_palette(&palette, 3.0, 1.0);
+        let mut s = canvas.begin_stroke(Color::BLACK, 3.0, 1.0);
         for i in 0..100 {
             s.add_point(Point {
                 x: i as f32,
@@ -1182,22 +836,6 @@ mod tests {
         canvas.commit_stroke(s).unwrap();
         assert_eq!(canvas.strokes().len(), 1);
         assert_eq!(canvas.strokes()[0].points.len(), 100);
-    }
-
-    #[test]
-    fn test_export_info() {
-        let mut canvas = Canvas::with_size(800, 600);
-        let palette = ColorPalette::new();
-
-        let mut s = canvas.begin_stroke_with_palette(&palette, 2.0, 1.0);
-        s.add_point(Point { x: 0.0, y: 0.0 });
-        s.add_point(Point { x: 100.0, y: 100.0 });
-        canvas.commit_stroke(s).unwrap();
-
-        let export = canvas.export();
-        assert_eq!(export.width, 800);
-        assert_eq!(export.height, 600);
-        assert_eq!(export.stroke_count, 1);
     }
 
     // --- brush_size_up/down tests ---

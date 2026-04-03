@@ -32,7 +32,7 @@ pub enum MouseState {
 }
 
 /// Brush size options (defined in canvas::BRUSH_SIZES)
-
+///
 /// Window application state using GTK4
 #[allow(dead_code)]
 pub struct WindowApp {
@@ -756,6 +756,33 @@ fn setup_mouse_events(
                 prefs_clone.borrow_mut().brush.default_opacity = opacity;
                 let _ = crate::preferences::save(&prefs_clone.borrow());
                 logger::info(&format!("Opacity: {}", opacity));
+                if let Some(widget) = gesture.widget()
+                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                {
+                    gl_area.queue_render();
+                }
+                return;
+            }
+            ui::UiElement::Export => {
+                let canvas_ref = canvas_clone.borrow();
+                let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+                let filename = format!("rancer_export_{timestamp}.png");
+                let export_path = dirs::picture_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from("."))
+                    .join(filename);
+
+                logger::info(&format!("Exporting canvas to: {export_path:?}"));
+
+                match crate::export::export_to_png(&canvas_ref, &export_path) {
+                    Ok(_) => {
+                        logger::info(&format!("Export successful: {export_path:?}"));
+                        println!("Exported to: {export_path:?}");
+                    }
+                    Err(e) => {
+                        logger::error(&format!("Export failed: {e}"));
+                        eprintln!("Export failed: {e}");
+                    }
+                }
                 if let Some(widget) = gesture.widget()
                     && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                 {

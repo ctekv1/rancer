@@ -228,6 +228,12 @@ impl GlRenderer {
                 self.upload_and_draw(&redo_vertices, glow::TRIANGLES);
             }
 
+            // Draw export button UI
+            let export_vertices = Self::generate_export_button_vertices();
+            if !export_vertices.is_empty() {
+                self.upload_and_draw(&export_vertices, glow::TRIANGLES);
+            }
+
             // Draw opacity preset buttons UI
             let opacity_vertices = Self::generate_opacity_preset_vertices(opacity);
             if !opacity_vertices.is_empty() {
@@ -296,6 +302,11 @@ impl GlRenderer {
     /// Generate vertices for redo button UI
     fn generate_redo_button_vertices(can_redo: bool) -> Vec<f32> {
         geometry::generate_redo_button_vertices(can_redo)
+    }
+
+    /// Generate vertices for export button UI
+    fn generate_export_button_vertices() -> Vec<f32> {
+        geometry::generate_export_button_vertices()
     }
 
     /// Generate vertices for opacity preset buttons UI

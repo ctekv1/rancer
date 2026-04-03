@@ -23,7 +23,7 @@ use crate::window_backend::{MouseState as BackendMouseState, WindowBackend};
 fn force_window_repaint(window: &Window) {
     use raw_window_handle::HasWindowHandle;
     use raw_window_handle::RawWindowHandle;
-    
+
     if let Ok(handle) = window.window_handle() {
         match handle.as_raw() {
             RawWindowHandle::Win32(h) => {
@@ -194,7 +194,8 @@ impl ApplicationHandler for WindowApp {
             ));
             logger::info(&format!(
                 "Window physical size: {}x{} (with DPI scaling)",
-                window.inner_size().width, window.inner_size().height
+                window.inner_size().width,
+                window.inner_size().height
             ));
             logger::info(&format!("Window scale factor: {}", self.scale_factor));
             logger::info(&format!("Window title: {}", self.preferences.window.title));
@@ -207,8 +208,16 @@ impl ApplicationHandler for WindowApp {
             let config = RendererConfig::default();
 
             // Guard against zero-size window (can happen on some systems during resumed phase)
-            let render_width = if size.width > 0 { size.width } else { self.preferences.window.width };
-            let render_height = if size.height > 0 { size.height } else { self.preferences.window.height };
+            let render_width = if size.width > 0 {
+                size.width
+            } else {
+                self.preferences.window.width
+            };
+            let render_height = if size.height > 0 {
+                size.height
+            } else {
+                self.preferences.window.height
+            };
 
             if size.width == 0 || size.height == 0 {
                 logger::warn(&format!(
@@ -219,7 +228,11 @@ impl ApplicationHandler for WindowApp {
 
             // Use tokio runtime to initialize WGPU (async)
             let rt = tokio::runtime::Runtime::new().unwrap();
-            match rt.block_on(Renderer::new(config, window.clone(), (render_width, render_height))) {
+            match rt.block_on(Renderer::new(
+                config,
+                window.clone(),
+                (render_width, render_height),
+            )) {
                 Ok(mut renderer) => {
                     logger::info("✅ WGPU renderer initialized successfully!");
                     renderer.print_backend_status();
@@ -484,6 +497,10 @@ impl ApplicationHandler for WindowApp {
                                             window.request_redraw();
                                         }
                                     }
+                                    return;
+                                }
+                                ui::UiElement::Export => {
+                                    self.export_canvas_to_file();
                                     return;
                                 }
                                 ui::UiElement::Opacity(opacity) => {
@@ -919,8 +936,16 @@ mod tests {
 
         // Simulate the guard logic: if size is zero, use preferences
         let zero_size = (0u32, 0u32);
-        let render_width = if zero_size.0 > 0 { zero_size.0 } else { preferences.window.width };
-        let render_height = if zero_size.1 > 0 { zero_size.1 } else { preferences.window.height };
+        let render_width = if zero_size.0 > 0 {
+            zero_size.0
+        } else {
+            preferences.window.width
+        };
+        let render_height = if zero_size.1 > 0 {
+            zero_size.1
+        } else {
+            preferences.window.height
+        };
         assert_eq!(render_width, 1280);
         assert_eq!(render_height, 720);
     }
@@ -930,8 +955,16 @@ mod tests {
         // When window.inner_size() returns a valid size, it should be used
         let preferences = Preferences::default();
         let actual_size = (1920u32, 1080u32);
-        let render_width = if actual_size.0 > 0 { actual_size.0 } else { preferences.window.width };
-        let render_height = if actual_size.1 > 0 { actual_size.1 } else { preferences.window.height };
+        let render_width = if actual_size.0 > 0 {
+            actual_size.0
+        } else {
+            preferences.window.width
+        };
+        let render_height = if actual_size.1 > 0 {
+            actual_size.1
+        } else {
+            preferences.window.height
+        };
         assert_eq!(render_width, 1920);
         assert_eq!(render_height, 1080);
     }
@@ -941,8 +974,16 @@ mod tests {
         // Guard should work even if only one dimension is zero
         let preferences = Preferences::default();
         let partial_zero = (800u32, 0u32);
-        let render_width = if partial_zero.0 > 0 { partial_zero.0 } else { preferences.window.width };
-        let render_height = if partial_zero.1 > 0 { partial_zero.1 } else { preferences.window.height };
+        let render_width = if partial_zero.0 > 0 {
+            partial_zero.0
+        } else {
+            preferences.window.width
+        };
+        let render_height = if partial_zero.1 > 0 {
+            partial_zero.1
+        } else {
+            preferences.window.height
+        };
         assert_eq!(render_width, 800);
         assert_eq!(render_height, 720);
     }

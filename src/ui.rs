@@ -29,6 +29,8 @@ pub enum UiElement {
     Undo,
     /// Redo button clicked
     Redo,
+    /// Export canvas button clicked
+    Export,
     /// Opacity preset button clicked
     Opacity(f32),
     /// Not on any UI element — canvas area
@@ -120,6 +122,11 @@ pub fn hit_test(x: f32, y: f32, custom_colors: &[[u8; 3]]) -> UiElement {
         return UiElement::Redo;
     }
 
+    // Export button (y=155-185, x=170-200)
+    if (155.0..=185.0).contains(&y) && (170.0..=200.0).contains(&x) {
+        return UiElement::Export;
+    }
+
     // Opacity presets (y=190-215)
     if (190.0..=215.0).contains(&y) {
         let selector_x = 10.0;
@@ -145,10 +152,7 @@ pub fn slider_drag(
     _y: f32,
     active_slider: Option<SliderType>,
 ) -> Option<(SliderType, f32)> {
-    let slider = match active_slider {
-        Some(s) => s,
-        None => return None,
-    };
+    let slider = active_slider?;
 
     let slider_x = 10.0;
     let slider_width = 200.0;
@@ -258,6 +262,12 @@ mod tests {
     fn test_hit_test_redo_button() {
         let result = hit_test(145.0, 170.0, &[]);
         assert_eq!(result, UiElement::Redo);
+    }
+
+    #[test]
+    fn test_hit_test_export_button() {
+        let result = hit_test(185.0, 170.0, &[]);
+        assert_eq!(result, UiElement::Export);
     }
 
     #[test]

@@ -1,20 +1,24 @@
 # Rancer Roadmap
 
-## Tier 1 - Core Usability (v0.0.6 Target)
+## Completed (v0.0.6)
 
 - [x] Custom Color Picker - HSV picker with sliders and custom saved colors (FIFO palette)
 - [x] Brush Opacity Control - Slider or presets (25%, 50%, 75%, 100%)
 - [x] Keyboard Shortcuts - Eraser toggle (E), brush size (+/-)
 - [x] Undo/Redo UI - Visual buttons or status indicator
 - [x] Canvas Clear - Button or shortcut to clear canvas
+- [x] Export Canvas - PNG export button in UI + keyboard shortcut (S)
+- [x] Dead code cleanup - Removed ColorPalette, CanvasExport, unused functions (~200 lines)
+- [x] Dependency audit - Removed unused `futures`, trimmed `tokio` to `rt-multi-thread`
+- [x] CI pipeline - Test count corrected, Linux + Windows workflows
 
 ## Tier 2 - Professional Features (v0.0.7+)
 
+- [ ] Zoom & Pan - Mouse wheel zoom, space+drag pan
+- [ ] Brush Types - Round, square, spray, calligraphy
 - [ ] Layer System - Multiple layers, reorder, visibility toggle
 - [ ] Selection Tool - Rectangular selection with move/copy
 - [ ] Transform Tools - Scale, rotate, flip canvas/strokes
-- [ ] Brush Types - Round, square, spray, calligraphy
-- [ ] Zoom & Pan - Mouse wheel zoom, space+drag pan
 
 ## Tier 3 - File Management (v0.0.8+)
 
@@ -31,11 +35,13 @@
 - [ ] Filters/Effects - Blur, sharpen, color adjustments
 - [ ] Symmetry Drawing - Mirror/kaleidoscope modes
 
-## Linux MSAA Implementation (Parallel Track)
+## Technical Debt & Known Issues
 
-- [ ] Step 1: Configure GLArea for multisampling (window_gtk4.rs)
-- [ ] Step 2: Add msaa_samples config to GlRenderer struct
-- [ ] Step 3: Create multisample FBO setup method
-- [ ] Step 4: Modify render to use multisample FBO
-- [ ] Step 5: Handle window resize with FBO recreation
-- [ ] Step 6: Cleanup FBO resources in Drop
+- [ ] **MSAA not functional** - `sample_count` hardcoded to 1 in both renderers despite config being 4
+  - Windows: `Renderer::new()` ignores `config.msaa_samples`
+  - Linux: GLArea not configured for multisampling, no FBO setup in GlRenderer
+- [ ] **Windows high-DPI resize** - Black space/content shift on window resize (upstream wgpu issue)
+  - Workaround attempted: triple `request_redraw()` + `force_window_repaint()` in `window_winit.rs`
+  - See `docs/window-resize-issue.md` for full investigation
+- [ ] **Export UX** - Saves silently to Pictures directory with no file picker or confirmation toast
+  - Consider using `rfd` crate for native file dialog

@@ -144,14 +144,13 @@ mod tests {
     #[test]
     fn test_export_with_strokes() {
         let mut canvas = Canvas::new();
-        let palette = crate::canvas::ColorPalette::new();
 
-        let mut s1 = canvas.begin_stroke_with_palette(&palette, 5.0, 1.0);
+        let mut s1 = canvas.begin_stroke(crate::canvas::Color::BLACK, 5.0, 1.0);
         s1.add_point(crate::canvas::Point { x: 10.0, y: 10.0 });
         s1.add_point(crate::canvas::Point { x: 100.0, y: 100.0 });
         canvas.commit_stroke(s1).unwrap();
 
-        let mut s2 = canvas.begin_stroke_with_palette(&palette, 3.0, 0.5);
+        let mut s2 = canvas.begin_stroke(crate::canvas::Color::BLACK, 3.0, 0.5);
         s2.add_point(crate::canvas::Point { x: 50.0, y: 20.0 });
         s2.add_point(crate::canvas::Point { x: 200.0, y: 30.0 });
         canvas.commit_stroke(s2).unwrap();
@@ -174,9 +173,8 @@ mod tests {
     #[test]
     fn test_export_single_point_stroke() {
         let mut canvas = Canvas::new();
-        let palette = crate::canvas::ColorPalette::new();
 
-        let mut s1 = canvas.begin_stroke_with_palette(&palette, 5.0, 1.0);
+        let mut s1 = canvas.begin_stroke(crate::canvas::Color::BLACK, 5.0, 1.0);
         s1.add_point(crate::canvas::Point { x: 10.0, y: 10.0 });
         // Single point commits (not rejected by canvas)
         let result = canvas.commit_stroke(s1);

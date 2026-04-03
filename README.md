@@ -1,64 +1,41 @@
-# Rancer
+![act-logo](https://raw.githubusercontent.com/wiki/nektos/act/img/logo-150.png)
 
-![Rancer Demo](assets/demo.png)
+# Overview [![push](https://github.com/nektos/act/workflows/push/badge.svg?branch=master&event=push)](https://github.com/nektos/act/actions) [![Go Report Card](https://goreportcard.com/badge/github.com/nektos/act)](https://goreportcard.com/report/github.com/nektos/act) [![awesome-runners](https://img.shields.io/badge/listed%20on-awesome--runners-blue.svg)](https://github.com/jonico/awesome-runners)
 
-A digital art application built in Rust with cross-platform support.
+> "Think globally, `act` locally"
 
-**Version:** 0.0.6
-**License:** [GNU GPL-3.0](LICENSE)
+Run your [GitHub Actions](https://developer.github.com/actions/) locally! Why would you want to do this? Two reasons:
 
-## Features
+- **Fast Feedback** - Rather than having to commit/push every time you want to test out the changes you are making to your `.github/workflows/` files (or for any changes to embedded GitHub actions), you can use `act` to run the actions locally. The [environment variables](https://help.github.com/en/actions/configuring-and-managing-workflows/using-environment-variables#default-environment-variables) and [filesystem](https://help.github.com/en/actions/reference/virtual-environments-for-github-hosted-runners#filesystems-on-github-hosted-runners) are all configured to match what GitHub provides.
+- **Local Task Runner** - I love [make](<https://en.wikipedia.org/wiki/Make_(software)>). However, I also hate repeating myself. With `act`, you can use the GitHub Actions defined in your `.github/workflows/` to replace your `Makefile`!
 
-- Real-time GPU-accelerated drawing with WGPU 28.0
-- Stroke management with undo/redo
-- HSV color picker with custom saved colors palette (FIFO, max 10)
-- GTK4 window management (Wayland compatible)
-- Cross-platform: Linux, Windows, future WASM
-- User preferences system with TOML configuration files
-- Configurable window size, brush settings, and HSV values
-- Auto-saving preferences on settings changes
+> [!TIP]
+> **Now Manage and Run Act Directly From VS Code!**<br/>
+> Check out the [GitHub Local Actions](https://sanjulaganepola.github.io/github-local-actions-docs/) Visual Studio Code extension which allows you to leverage the power of `act` to run and test workflows locally without leaving your editor.
 
-## Build & Run
+# How Does It Work?
 
-```bash
-# Install GTK4 (Ubuntu/Debian)
-sudo apt install libgtk-4-dev
+When you run `act` it reads in your GitHub Actions from `.github/workflows/` and determines the set of actions that need to be run. It uses the Docker API to either pull or build the necessary images, as defined in your workflow files and finally determines the execution path based on the dependencies that were defined. Once it has the execution path, it then uses the Docker API to run containers for each action based on the images prepared earlier. The [environment variables](https://help.github.com/en/actions/configuring-and-managing-workflows/using-environment-variables#default-environment-variables) and [filesystem](https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#file-systems) are all configured to match what GitHub provides.
 
-# Build and run
-cargo build
-cargo run
-```
+Let's see it in action with a [sample repo](https://github.com/cplee/github-actions-demo)!
 
-## Usage
+![Demo](https://raw.githubusercontent.com/wiki/nektos/act/quickstart/act-quickstart-2.gif)
 
-- **Draw**: Left click and drag
-- **Colors**: Up/Down arrows to change
-- **Window**: 1280x720 "Rancer" window
-- **Brush Size**: Click boxes to change brush size
-- **Config File**: 
-  - Windows: `%APPDATA%\rancer\config.toml`
-  - Linux: `~/.config/rancer/config.toml`
+# Act User Guide
 
-## Tech Stack
+Please look at the [act user guide](https://nektosact.com) for more documentation.
 
-- Rust 1.94+
-- GTK4 (window/UI)
-- WGPU 28.0 (GPU rendering)
-- bytemuck (type casting)
-- dirs (platform-specific config directories)
-- serde (serialization/deserialization)
-- toml (configuration file format)
+# Support
 
-## Status
+Need help? Ask in [discussions](https://github.com/nektos/act/discussions)!
 
-✅ GTK4 migration complete
-✅ WGPU 28.0 integration
-✅ Real-time rendering
-✅ Mouse input handling
-✅ User preferences system (v0.0.6)
-✅ Clippy warnings fixed
-✅ Documentation updates
+# Contributing
 
-## License
+Want to contribute to act? Awesome! Check out the [contributing guidelines](CONTRIBUTING.md) to get involved.
 
-This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+## Manually building from source
+
+- Install Go tools 1.20+ - (<https://golang.org/doc/install>)
+- Clone this repo `git clone git@github.com:nektos/act.git`
+- Run unit tests with `make test`
+- Build and install: `make install`
