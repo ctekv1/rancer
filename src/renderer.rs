@@ -171,7 +171,7 @@ impl Renderer {
                 #[cfg(target_os = "windows")]
                 {
                     logger::error("No software fallback available on Windows");
-                    return Err(format!("WGPU initialization failed: {}. No fallback renderer is available on Windows.", e).into());
+                    Err(format!("WGPU initialization failed: {}. No fallback renderer is available on Windows.", e).into())
                 }
                 #[cfg(not(any(target_os = "linux", target_os = "windows")))]
                 {
