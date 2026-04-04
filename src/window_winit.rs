@@ -74,6 +74,7 @@ struct WinitRenderState {
     mouse_state: MouseState,
     mouse_position: Point,
     active_layer: usize,
+    brush_type: BrushType,
 }
 
 /// Window application state using winit
@@ -126,6 +127,7 @@ impl WindowApp {
                 mouse_state: MouseState::Idle,
                 mouse_position: Point { x: 0.0, y: 0.0 },
                 active_layer: 0,
+                brush_type: BrushType::Square,
             },
         }
     }
@@ -312,6 +314,13 @@ impl WindowApp {
                 self.preferences.brush.default_opacity = opacity;
                 let _ = crate::preferences::save(&self.preferences);
                 logger::info(&format!("Opacity: {}", opacity));
+            }
+            ui::UiElement::BrushType(brush_type) => {
+                self.render_state.brush_type = brush_type;
+                self.preferences.brush.default_type = format!("{:?}", brush_type);
+                let _ = crate::preferences::save(&self.preferences);
+                logger::info(&format!("Brush type: {:?}", brush_type));
+                self.request_redraw();
             }
             ui::UiElement::LayerRow(index) => {
                 if self.canvas.borrow_mut().set_active_layer(index).is_ok() {
@@ -758,6 +767,7 @@ impl ApplicationHandler for WindowApp {
                             brush_size: self.render_state.brush_size,
                             opacity: self.render_state.opacity,
                             is_eraser: self.render_state.is_eraser,
+                            brush_type: self.render_state.brush_type,
                         },
                         viewport: ViewportState {
                             zoom: self.render_state.zoom,
@@ -836,7 +846,7 @@ impl ApplicationHandler for WindowApp {
                                 color,
                                 self.render_state.brush_size,
                                 self.render_state.opacity,
-                                BrushType::default(),
+                                self.render_state.brush_type,
                             );
                             println!(
                                 "Created {}stroke with color RGB({}, {}, {}) and width {}",

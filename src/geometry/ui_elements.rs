@@ -469,6 +469,166 @@ pub fn generate_eraser_button_vertices(is_active: bool) -> Vec<f32> {
     vertices
 }
 
+/// Generate vertices for the brush type selector buttons
+/// 4 buttons at y=225: Square, Round, Spray, Calligraphy
+pub fn generate_brush_type_vertices(selected_type: crate::canvas::BrushType) -> Vec<f32> {
+    use crate::canvas::BrushType;
+
+    let mut vertices = Vec::new();
+
+    let selector_x = 10.0;
+    let selector_y = 225.0;
+    let button_size = 30.0;
+    let spacing = 10.0;
+    let border_width = 2.0;
+
+    let brush_types = [
+        BrushType::Square,
+        BrushType::Round,
+        BrushType::Spray,
+        BrushType::Calligraphy,
+    ];
+
+    for (i, brush_type) in brush_types.iter().enumerate() {
+        let x = selector_x + (button_size + spacing) * i as f32;
+
+        // Button background
+        vertices.extend(generate_rect(
+            x,
+            selector_y,
+            button_size,
+            button_size,
+            0.85,
+            0.85,
+            0.85,
+            1.0,
+        ));
+
+        match brush_type {
+            BrushType::Square => {
+                // Solid square icon
+                let icon_size = 14.0;
+                let ix = x + (button_size - icon_size) / 2.0;
+                let iy = selector_y + (button_size - icon_size) / 2.0;
+                vertices.extend(generate_rect(
+                    ix, iy, icon_size, icon_size, 0.0, 0.0, 0.0, 1.0,
+                ));
+            }
+            BrushType::Round => {
+                // Circle icon: ring of dots forming a circle outline
+                let center_x = x + button_size / 2.0;
+                let center_y = selector_y + button_size / 2.0;
+                let dot = 3.0;
+                let radius = 7.0;
+                let angles: [f32; 8] = [0.0, 0.785, 1.571, 2.356, 3.142, 3.927, 4.712, 5.498];
+                for angle in angles {
+                    let dx = angle.cos() * radius;
+                    let dy = angle.sin() * radius;
+                    vertices.extend(generate_rect(
+                        center_x + dx - dot / 2.0,
+                        center_y + dy - dot / 2.0,
+                        dot,
+                        dot,
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0,
+                    ));
+                }
+            }
+            BrushType::Spray => {
+                // Scattered dots — sparse and spread out
+                let center_x = x + button_size / 2.0;
+                let center_y = selector_y + button_size / 2.0;
+                let dot = 2.0;
+                let positions = [
+                    (-9.0, -6.0),
+                    (8.0, -8.0),
+                    (-7.0, 7.0),
+                    (10.0, 3.0),
+                    (-10.0, 1.0),
+                    (3.0, 9.0),
+                    (6.0, -1.0),
+                ];
+                for (dx, dy) in positions {
+                    vertices.extend(generate_rect(
+                        center_x + dx - dot / 2.0,
+                        center_y + dy - dot / 2.0,
+                        dot,
+                        dot,
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0,
+                    ));
+                }
+            }
+            BrushType::Calligraphy => {
+                // Diagonal rect at 45°
+                let center_x = x + button_size / 2.0;
+                let center_y = selector_y + button_size / 2.0;
+                vertices.extend(generate_rotated_rect(
+                    center_x - 7.0,
+                    center_y + 7.0,
+                    center_x + 7.0,
+                    center_y - 7.0,
+                    5.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                ));
+            }
+        }
+
+        // Blue selection border
+        if *brush_type == selected_type {
+            vertices.extend(generate_rect(
+                x - border_width,
+                selector_y - border_width,
+                button_size + border_width * 2.0,
+                border_width,
+                0.0,
+                0.5,
+                1.0,
+                1.0,
+            ));
+            vertices.extend(generate_rect(
+                x - border_width,
+                selector_y + button_size,
+                button_size + border_width * 2.0,
+                border_width,
+                0.0,
+                0.5,
+                1.0,
+                1.0,
+            ));
+            vertices.extend(generate_rect(
+                x - border_width,
+                selector_y - border_width,
+                border_width,
+                button_size + border_width * 2.0,
+                0.0,
+                0.5,
+                1.0,
+                1.0,
+            ));
+            vertices.extend(generate_rect(
+                x + button_size,
+                selector_y - border_width,
+                border_width,
+                button_size + border_width * 2.0,
+                0.0,
+                0.5,
+                1.0,
+                1.0,
+            ));
+        }
+    }
+
+    vertices
+}
+
 /// Generate vertices for the clear canvas button
 pub fn generate_clear_button_vertices() -> Vec<f32> {
     let mut vertices = Vec::new();

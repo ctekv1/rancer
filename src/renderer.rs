@@ -3,8 +3,8 @@
 //! Provides GPU-accelerated rendering for the canvas using wgpu.
 //! The renderer is stateless — all render data is passed via `RenderFrame`.
 
-use crate::canvas::{ActiveStroke, Canvas, Color, Stroke};
-use crate::geometry;
+use crate::canvas::{ActiveStroke, BrushType, Canvas, Color, Stroke};
+use crate::geometry::{self, DrawMode, StrokeMesh};
 use crate::logger;
 
 /// Parse hex color string to Color
@@ -49,6 +49,7 @@ pub struct UiRenderState<'a> {
     pub brush_size: f32,
     pub opacity: f32,
     pub is_eraser: bool,
+    pub brush_type: BrushType,
 }
 
 /// Viewport state for canvas transform
@@ -82,8 +83,10 @@ pub struct Renderer {
     surface: Option<wgpu::Surface<'static>>,
     /// WGPU surface configuration
     surface_config: Option<wgpu::SurfaceConfiguration>,
-    /// WGPU render pipeline for strokes
+    /// WGPU render pipeline for strokes (TriangleStrip)
     render_pipeline: Option<wgpu::RenderPipeline>,
+    /// WGPU render pipeline for spray/other triangle-list strokes
+    spray_render_pipeline: Option<wgpu::RenderPipeline>,
     /// WGPU render pipeline for UI elements
     ui_pipeline: Option<wgpu::RenderPipeline>,
     /// Window size
@@ -117,6 +120,7 @@ impl Renderer {
                 surface,
                 surface_config,
                 render_pipeline,
+                spray_render_pipeline,
                 ui_pipeline,
                 pipeline_layout,
                 shader,
@@ -135,6 +139,7 @@ impl Renderer {
                     surface: Some(surface),
                     surface_config: Some(surface_config),
                     render_pipeline: Some(render_pipeline),
+                    spray_render_pipeline: Some(spray_render_pipeline),
                     ui_pipeline: Some(ui_pipeline),
                     window_size,
                     pipeline_layout: Some(pipeline_layout),
@@ -158,6 +163,7 @@ impl Renderer {
                         surface: None,
                         surface_config: None,
                         render_pipeline: None,
+                        spray_render_pipeline: None,
                         ui_pipeline: None,
                         window_size,
                         pipeline_layout: None,
@@ -188,7 +194,11 @@ impl Renderer {
         pipeline_layout: &wgpu::PipelineLayout,
         surface_format: wgpu::TextureFormat,
         sample_count: u32,
-    ) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
+    ) -> (
+        wgpu::RenderPipeline,
+        wgpu::RenderPipeline,
+        wgpu::RenderPipeline,
+    ) {
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
             layout: Some(pipeline_layout),
@@ -246,6 +256,65 @@ impl Renderer {
             multiview_mask: None,
             cache: None,
         });
+
+        let spray_render_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Spray Render Pipeline"),
+                layout: Some(pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<[f32; 7]>() as wgpu::BufferAddress,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &[
+                            wgpu::VertexAttribute {
+                                offset: 0,
+                                shader_location: 0,
+                                format: wgpu::VertexFormat::Float32x2,
+                            },
+                            wgpu::VertexAttribute {
+                                offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
+                                shader_location: 1,
+                                format: wgpu::VertexFormat::Float32x4,
+                            },
+                            wgpu::VertexAttribute {
+                                offset: std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
+                                shader_location: 2,
+                                format: wgpu::VertexFormat::Float32,
+                            },
+                        ],
+                    }],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: sample_count,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview_mask: None,
+                cache: None,
+            });
 
         let ui_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("UI Pipeline"),
@@ -305,7 +374,7 @@ impl Renderer {
             cache: None,
         });
 
-        (render_pipeline, ui_pipeline)
+        (render_pipeline, spray_render_pipeline, ui_pipeline)
     }
 
     /// Initialize WGPU device, queue, surface, and pipeline
@@ -319,6 +388,7 @@ impl Renderer {
             wgpu::Queue,
             wgpu::Surface<'static>,
             wgpu::SurfaceConfiguration,
+            wgpu::RenderPipeline,
             wgpu::RenderPipeline,
             wgpu::RenderPipeline,
             wgpu::PipelineLayout,
@@ -426,7 +496,7 @@ impl Renderer {
             }
         ));
 
-        let (render_pipeline, ui_pipeline) = Self::create_pipelines(
+        let (render_pipeline, spray_render_pipeline, ui_pipeline) = Self::create_pipelines(
             &device,
             &shader,
             &pipeline_layout,
@@ -461,6 +531,7 @@ impl Renderer {
             surface,
             surface_config,
             render_pipeline,
+            spray_render_pipeline,
             ui_pipeline,
             pipeline_layout,
             shader,
@@ -492,7 +563,7 @@ impl Renderer {
             if let (Some(device), Some(pipeline_layout), Some(shader)) =
                 (&self.device, &self.pipeline_layout, &self.shader)
             {
-                let (render_pipeline, ui_pipeline) = Self::create_pipelines(
+                let (render_pipeline, spray_render_pipeline, ui_pipeline) = Self::create_pipelines(
                     device,
                     shader,
                     pipeline_layout,
@@ -500,6 +571,7 @@ impl Renderer {
                     self.sample_count,
                 );
                 self.render_pipeline = Some(render_pipeline);
+                self.spray_render_pipeline = Some(spray_render_pipeline);
                 self.ui_pipeline = Some(ui_pipeline);
             }
 
@@ -662,11 +734,13 @@ impl Renderer {
             render_pass.set_pipeline(pipeline);
             render_pass.set_bind_group(0, &bind_group, &[]);
 
-            // Combine all stroke vertices into a single buffer,
-            // but draw each stroke separately to avoid connecting them.
+            // Combine all stroke vertices into buffers, split by draw mode.
             // Active stroke is inserted at the active layer position.
-            let mut all_stroke_vertices = Vec::new();
-            let mut stroke_ranges = Vec::new();
+            let mut strip_vertices: Vec<[f32; 7]> = Vec::new();
+            let mut strip_ranges: Vec<std::ops::Range<u32>> = Vec::new();
+            let mut tri_vertices: Vec<[f32; 7]> = Vec::new();
+            let mut tri_ranges: Vec<std::ops::Range<u32>> = Vec::new();
+
             let active_layer_idx = frame.canvas.active_layer();
             let layers = frame.canvas.layers();
 
@@ -676,10 +750,14 @@ impl Renderer {
                 }
                 for stroke in &layer.strokes {
                     if stroke.points.len() >= 2 {
-                        let start = all_stroke_vertices.len() as u32;
-                        all_stroke_vertices.extend(stroke_to_vertices_7(stroke, layer.opacity));
-                        let end = all_stroke_vertices.len() as u32;
-                        stroke_ranges.push(start..end);
+                        let mesh = stroke_to_mesh_7(stroke, layer.opacity);
+                        collect_mesh(
+                            &mesh,
+                            &mut strip_vertices,
+                            &mut strip_ranges,
+                            &mut tri_vertices,
+                            &mut tri_ranges,
+                        );
                     }
                 }
                 // Insert active stroke at the active layer position
@@ -687,23 +765,48 @@ impl Renderer {
                     if let Some(active_stroke) = frame.active_stroke
                         && active_stroke.points().len() >= 2
                     {
-                        let start = all_stroke_vertices.len() as u32;
-                        all_stroke_vertices
-                            .extend(active_stroke_to_vertices_7(active_stroke, layer.opacity));
-                        let end = all_stroke_vertices.len() as u32;
-                        stroke_ranges.push(start..end);
+                        let mesh = active_stroke_to_mesh_7(active_stroke, layer.opacity);
+                        collect_mesh(
+                            &mesh,
+                            &mut strip_vertices,
+                            &mut strip_ranges,
+                            &mut tri_vertices,
+                            &mut tri_ranges,
+                        );
                     }
                 }
             }
-            if !all_stroke_vertices.is_empty() {
+
+            // Draw triangle strip strokes
+            if !strip_vertices.is_empty() {
                 let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Combined Stroke Vertex Buffer"),
-                    contents: bytemuck::cast_slice(&all_stroke_vertices),
+                    label: Some("Combined Stroke Vertex Buffer (TriangleStrip)"),
+                    contents: bytemuck::cast_slice(&strip_vertices),
                     usage: wgpu::BufferUsages::VERTEX,
                 });
+                render_pass.set_pipeline(pipeline);
+                render_pass.set_bind_group(0, &bind_group, &[]);
                 render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                for range in stroke_ranges {
-                    render_pass.draw(range, 0..1);
+                for range in &strip_ranges {
+                    render_pass.draw(range.clone(), 0..1);
+                }
+            }
+
+            // Draw triangle list strokes (spray, etc.)
+            if !tri_vertices.is_empty() {
+                if let Some(spray_pipeline) = &self.spray_render_pipeline {
+                    let vertex_buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("Combined Stroke Vertex Buffer (TriangleList)"),
+                            contents: bytemuck::cast_slice(&tri_vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    render_pass.set_pipeline(spray_pipeline);
+                    render_pass.set_bind_group(0, &bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                    for range in &tri_ranges {
+                        render_pass.draw(range.clone(), 0..1);
+                    }
                 }
             }
 
@@ -761,6 +864,9 @@ impl Renderer {
                 ));
                 all_ui_vertices.extend(flat_to_vertices_7(
                     &geometry::generate_opacity_preset_vertices(frame.ui.opacity),
+                ));
+                all_ui_vertices.extend(flat_to_vertices_7(
+                    &geometry::generate_brush_type_vertices(frame.ui.brush_type),
                 ));
 
                 let layers: Vec<(String, bool, f32, bool)> = frame
@@ -844,45 +950,58 @@ fn flat_to_vertices_7(flat: &[f32]) -> Vec<[f32; 7]> {
         .collect()
 }
 
-/// Convert stroke to WGPU vertex format with layer opacity
-fn stroke_to_vertices_7(stroke: &Stroke, layer_opacity: f32) -> Vec<[f32; 7]> {
-    let flat = geometry::generate_stroke_vertices_with_opacity(stroke, layer_opacity);
-    flat.chunks(6)
+/// Convert a stroke mesh to WGPU vertex format with layer opacity,
+/// returning the vertices and the draw mode.
+fn mesh_to_vertices_7(mesh: &StrokeMesh, line_width: f32) -> Vec<[f32; 7]> {
+    mesh.vertices
+        .chunks(6)
         .map(|chunk| {
             [
-                chunk[0],
-                chunk[1],
-                chunk[2],
-                chunk[3],
-                chunk[4],
-                chunk[5],
-                stroke.width,
+                chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], line_width,
             ]
         })
         .collect()
 }
 
-/// Convert active stroke to WGPU vertex format with layer opacity
-fn active_stroke_to_vertices_7(active: &ActiveStroke, layer_opacity: f32) -> Vec<[f32; 7]> {
-    let flat = geometry::generate_active_stroke_vertices_with_opacity(active, layer_opacity);
-    flat.chunks(6)
-        .map(|chunk| {
-            [
-                chunk[0],
-                chunk[1],
-                chunk[2],
-                chunk[3],
-                chunk[4],
-                chunk[5],
-                active.width(),
-            ]
-        })
-        .collect()
+/// Convert stroke to WGPU mesh format with layer opacity
+fn stroke_to_mesh_7(stroke: &Stroke, layer_opacity: f32) -> StrokeMesh {
+    geometry::generate_stroke_vertices_with_opacity(stroke, layer_opacity)
+}
+
+/// Convert active stroke to WGPU mesh format with layer opacity
+fn active_stroke_to_mesh_7(active: &ActiveStroke, layer_opacity: f32) -> StrokeMesh {
+    geometry::generate_active_stroke_vertices_with_opacity(active, layer_opacity)
+}
+
+/// Collect a mesh into the appropriate buffer (TriangleStrip or TriangleList)
+fn collect_mesh(
+    mesh: &StrokeMesh,
+    strip_vertices: &mut Vec<[f32; 7]>,
+    strip_ranges: &mut Vec<std::ops::Range<u32>>,
+    tri_vertices: &mut Vec<[f32; 7]>,
+    tri_ranges: &mut Vec<std::ops::Range<u32>>,
+) {
+    let line_width = mesh.vertices.get(6).copied().unwrap_or(0.0);
+    let converted = mesh_to_vertices_7(mesh, line_width);
+    let count = converted.len() as u32;
+    match mesh.mode {
+        DrawMode::TriangleStrip => {
+            let start = strip_vertices.len() as u32;
+            strip_vertices.extend(converted);
+            strip_ranges.push(start..start + count);
+        }
+        DrawMode::Triangles => {
+            let start = tri_vertices.len() as u32;
+            tri_vertices.extend(converted);
+            tri_ranges.push(start..start + count);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canvas::BrushType;
 
     #[test]
     fn test_renderer_config_default() {
@@ -911,6 +1030,7 @@ mod tests {
             color: Color::BLACK,
             width: 2.0,
             opacity: 1.0,
+            brush_type: BrushType::default(),
         };
         let stroke2 = Stroke {
             points: vec![Point { x: 100.0, y: 100.0 }, Point { x: 110.0, y: 110.0 }],
@@ -922,56 +1042,89 @@ mod tests {
             },
             width: 2.0,
             opacity: 1.0,
+            brush_type: BrushType::default(),
         };
         canvas.add_stroke_to_layer(stroke1, 0);
         canvas.add_stroke_to_layer(stroke2, 0);
 
-        let mut all_vertices: Vec<[f32; 7]> = Vec::new();
-        let mut stroke_ranges: Vec<std::ops::Range<u32>> = Vec::new();
+        let mut strip_vertices: Vec<[f32; 7]> = Vec::new();
+        let mut strip_ranges: Vec<std::ops::Range<u32>> = Vec::new();
+        let mut tri_vertices: Vec<[f32; 7]> = Vec::new();
+        let mut tri_ranges: Vec<std::ops::Range<u32>> = Vec::new();
         for (stroke, layer_opacity) in canvas.all_strokes() {
             if stroke.points.len() >= 2 {
-                let start = all_vertices.len() as u32;
-                let verts =
+                let mesh =
                     crate::geometry::generate_stroke_vertices_with_opacity(stroke, layer_opacity);
                 let line_width = stroke.width;
-                for chunk in verts.chunks(6) {
-                    all_vertices.push([
-                        chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], line_width,
-                    ]);
+                let converted = mesh
+                    .vertices
+                    .chunks(6)
+                    .map(|chunk| {
+                        [
+                            chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], line_width,
+                        ]
+                    })
+                    .collect::<Vec<_>>();
+                let count = converted.len() as u32;
+                match mesh.mode {
+                    DrawMode::TriangleStrip => {
+                        let start = strip_vertices.len() as u32;
+                        strip_vertices.extend(converted);
+                        strip_ranges.push(start..start + count);
+                    }
+                    DrawMode::Triangles => {
+                        let start = tri_vertices.len() as u32;
+                        tri_vertices.extend(converted);
+                        tri_ranges.push(start..start + count);
+                    }
                 }
-                let end = all_vertices.len() as u32;
-                stroke_ranges.push(start..end);
             }
         }
 
-        assert_eq!(stroke_ranges.len(), 2);
-        assert!(stroke_ranges[0].end <= stroke_ranges[1].start);
-        let total_from_ranges: u32 = stroke_ranges.iter().map(|r| r.end - r.start).sum();
-        assert_eq!(total_from_ranges, all_vertices.len() as u32);
+        assert_eq!(strip_ranges.len(), 2);
+        assert!(strip_ranges[0].end <= strip_ranges[1].start);
+        let total_from_ranges: u32 = strip_ranges.iter().map(|r| r.end - r.start).sum();
+        assert_eq!(total_from_ranges, strip_vertices.len() as u32);
     }
 
     #[test]
     fn test_combined_buffer_empty_canvas() {
         let canvas = Canvas::new();
-        let mut all_vertices: Vec<[f32; 7]> = Vec::new();
-        let mut stroke_ranges: Vec<std::ops::Range<u32>> = Vec::new();
+        let mut strip_vertices: Vec<[f32; 7]> = Vec::new();
+        let mut strip_ranges: Vec<std::ops::Range<u32>> = Vec::new();
+        let mut tri_vertices: Vec<[f32; 7]> = Vec::new();
+        let mut tri_ranges: Vec<std::ops::Range<u32>> = Vec::new();
         for (stroke, layer_opacity) in canvas.all_strokes() {
             if stroke.points.len() >= 2 {
-                let start = all_vertices.len() as u32;
-                let verts =
+                let mesh =
                     crate::geometry::generate_stroke_vertices_with_opacity(stroke, layer_opacity);
                 let line_width = stroke.width;
-                for chunk in verts.chunks(6) {
-                    all_vertices.push([
-                        chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], line_width,
-                    ]);
+                let converted = mesh
+                    .vertices
+                    .chunks(6)
+                    .map(|chunk| {
+                        [
+                            chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], line_width,
+                        ]
+                    })
+                    .collect::<Vec<_>>();
+                let count = converted.len() as u32;
+                match mesh.mode {
+                    DrawMode::TriangleStrip => {
+                        let start = strip_vertices.len() as u32;
+                        strip_vertices.extend(converted);
+                        strip_ranges.push(start..start + count);
+                    }
+                    DrawMode::Triangles => {
+                        let start = tri_vertices.len() as u32;
+                        tri_vertices.extend(converted);
+                        tri_ranges.push(start..start + count);
+                    }
                 }
-                let end = all_vertices.len() as u32;
-                stroke_ranges.push(start..end);
             }
         }
-        assert!(stroke_ranges.is_empty());
-        assert!(all_vertices.is_empty());
+        assert!(strip_ranges.is_empty());
+        assert!(strip_vertices.is_empty());
     }
 
     #[test]
@@ -984,6 +1137,7 @@ mod tests {
             color: Color::BLACK,
             width: 2.0,
             opacity: 1.0,
+            brush_type: BrushType::default(),
         };
         canvas.add_stroke_to_layer(single_point, 0);
 

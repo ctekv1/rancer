@@ -1,4 +1,26 @@
-## [0.0.7] - 2026-04-03
+## [0.0.7] - 2026-04-04
+
+### Added
+- **Brush types**: Square, Round (soft-edged), Spray (scattered dots), Calligraphy (45° broad-nib)
+- **Brush type UI**: 4 icon buttons with selection border at y=225
+- **Brush type hit testing**: Click to switch brush types, saves preference to TOML
+- **StrokeMesh abstraction**: `StrokeMesh` struct with `DrawMode` (TriangleStrip / Triangles) for flexible brush geometry
+- **WGPU spray pipeline**: Separate TriangleList render pipeline for spray brush (scattered quads)
+- **178 unit tests** (+10 from previous count) including brush type generation and hit testing
+
+### Changed
+- **Added `brush_type` field to `Stroke` struct** — committed strokes retain their brush type for correct re-rendering
+- **Refactored `geometry/stroke.rs`**: BrushType dispatcher routes to 4 generators with configurable constants (`ROUND_SEGMENTS`, `SPRAY_DOTS_PER_SIZE`, `SPRAY_DOT_SIZE`, `CALLIGRAPHY_ANGLE_DEGREES`)
+- **Refactored `renderer.rs`**: Dual pipeline (TriangleStrip + TriangleList), split stroke buffers by draw mode
+- **Refactored `opengl_renderer.rs`**: Uses `StrokeMesh.mode` to select `glow::TRIANGLE_STRIP` or `glow::TRIANGLES`
+- **Refactored `export.rs`**: Handles both TriangleStrip and Triangles draw modes in rasterization
+- **Round brush**: Replaced dotted-line approach with soft-edged 4-vertex ribbon (inner/outer alpha gradient)
+- **Added `default_type` field to `BrushPreferences`** (saves on click, not loaded on startup yet)
+
+### Fixed
+- **GTK4 eraser hotkey crash**: Fixed double `RefCell` borrow panic on 'E' key press
+
+## [0.0.6] - 2026-03-30
 
 ### Added
 - **Layer system**: Full layer support — multiple layers (up to 20), visibility toggle, opacity, lock, reorder, add/delete

@@ -148,6 +148,8 @@ pub struct Stroke {
     pub width: f32,
     /// Opacity of the stroke (0.0 to 1.0)
     pub opacity: f32,
+    /// Type of brush used for this stroke
+    pub brush_type: BrushType,
 }
 
 /// Maximum number of layers allowed
@@ -560,6 +562,7 @@ impl ActiveStroke {
                 color: self.color,
                 width: self.width,
                 opacity: self.opacity,
+                brush_type: self.brush_type,
             })
         }
     }
@@ -567,7 +570,13 @@ impl ActiveStroke {
 
 impl Canvas {
     /// Begin a new active stroke with the specified properties
-    pub fn begin_stroke(&mut self, color: Color, width: f32, opacity: f32, brush_type: BrushType) -> ActiveStroke {
+    pub fn begin_stroke(
+        &mut self,
+        color: Color,
+        width: f32,
+        opacity: f32,
+        brush_type: BrushType,
+    ) -> ActiveStroke {
         ActiveStroke::new(color, width, opacity, brush_type)
     }
 
@@ -626,6 +635,7 @@ mod tests {
             color: Color::BLACK,
             width: 2.0,
             opacity: 1.0,
+            brush_type: BrushType::default(),
         };
 
         canvas.add_stroke_to_layer(stroke, 0);
@@ -917,6 +927,7 @@ mod tests {
             color: RED,
             width: 5.0,
             opacity: 1.0,
+            brush_type: BrushType::default(),
         };
         canvas.add_stroke_to_layer(stroke, 0);
         assert_eq!(canvas.all_strokes().len(), 1);
@@ -1159,6 +1170,7 @@ mod tests {
             color: Color::BLACK,
             width: 2.0,
             opacity: 1.0,
+            brush_type: BrushType::default(),
         };
         canvas.add_stroke_to_layer(stroke, 0);
         assert_eq!(canvas.layers()[0].strokes.len(), 1);
@@ -1174,6 +1186,7 @@ mod tests {
             color: Color::BLACK,
             width: 2.0,
             opacity: 1.0,
+            brush_type: BrushType::default(),
         };
         canvas.add_stroke_to_layer(stroke1, 0);
         canvas.add_layer(None).unwrap();
@@ -1182,6 +1195,7 @@ mod tests {
             color: Color::BLACK,
             width: 2.0,
             opacity: 1.0,
+            brush_type: BrushType::default(),
         };
         canvas.add_stroke_to_layer(stroke2, 1);
         assert_eq!(canvas.all_strokes().len(), 2);
@@ -1197,6 +1211,7 @@ mod tests {
             color: Color::BLACK,
             width: 2.0,
             opacity: 1.0,
+            brush_type: BrushType::default(),
         };
         canvas.add_stroke_to_layer(stroke, 0);
         canvas.set_layer_opacity(0, 0.5).unwrap();
@@ -1248,6 +1263,7 @@ mod tests {
             color: Color::BLACK,
             width: 2.0,
             opacity: 1.0,
+            brush_type: BrushType::default(),
         };
         canvas.add_stroke_to_layer(stroke1, 0);
         let stroke2 = Stroke {
@@ -1255,6 +1271,7 @@ mod tests {
             color: Color::BLACK,
             width: 2.0,
             opacity: 1.0,
+            brush_type: BrushType::default(),
         };
         canvas.add_stroke_to_layer(stroke2, 1);
         assert_eq!(canvas.all_strokes().len(), 2);

@@ -7,8 +7,8 @@
 use glow::HasContext;
 use std::rc::Rc;
 
-use crate::canvas::{ActiveStroke, Canvas};
-use crate::geometry;
+use crate::canvas::{ActiveStroke, BrushType, Canvas};
+use crate::geometry::{self, DrawMode};
 
 const VERTEX_SHADER_SOURCE: &str = r#"
     attribute vec2 position;
@@ -43,6 +43,7 @@ pub struct GlUiState {
     pub brush_size: f32,
     pub opacity: f32,
     pub is_eraser: bool,
+    pub brush_type: BrushType,
 }
 
 /// Viewport state for canvas transform
@@ -210,22 +211,29 @@ impl GlRenderer {
                 }
                 for stroke in &layer.strokes {
                     if stroke.points.len() >= 2 {
-                        let vertices =
+                        let mesh =
                             geometry::generate_stroke_vertices_with_opacity(stroke, layer.opacity);
-                        if !vertices.is_empty() {
-                            self.upload_and_draw(&vertices, glow::TRIANGLE_STRIP);
+                        if !mesh.is_empty() {
+                            let mode = match mesh.mode {
+                                DrawMode::TriangleStrip => glow::TRIANGLE_STRIP,
+                                DrawMode::Triangles => glow::TRIANGLES,
+                            };
+                            self.upload_and_draw(&mesh.vertices, mode);
                         }
                     }
                 }
-                // Draw active stroke at the active layer position
                 if layer_idx == active_layer_idx {
                     if let Some(active) = frame.active_stroke {
-                        let vertices = geometry::generate_active_stroke_vertices_with_opacity(
+                        let mesh = geometry::generate_active_stroke_vertices_with_opacity(
                             active,
                             layer.opacity,
                         );
-                        if !vertices.is_empty() {
-                            self.upload_and_draw(&vertices, glow::TRIANGLE_STRIP);
+                        if !mesh.is_empty() {
+                            let mode = match mesh.mode {
+                                DrawMode::TriangleStrip => glow::TRIANGLE_STRIP,
+                                DrawMode::Triangles => glow::TRIANGLES,
+                            };
+                            self.upload_and_draw(&mesh.vertices, mode);
                         }
                     }
                 }
@@ -263,6 +271,7 @@ impl GlRenderer {
             all_ui_vertices.extend(geometry::generate_zoom_in_button_vertices());
             all_ui_vertices.extend(geometry::generate_zoom_out_button_vertices());
             all_ui_vertices.extend(geometry::generate_opacity_preset_vertices(frame.ui.opacity));
+            all_ui_vertices.extend(geometry::generate_brush_type_vertices(frame.ui.brush_type));
 
             let layer_data: Vec<(String, bool, f32, bool)> = frame
                 .canvas

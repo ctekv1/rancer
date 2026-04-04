@@ -41,6 +41,7 @@ struct GlRenderState {
     slider_drag: Option<SliderType>,
     mouse_state: MouseState,
     mouse_position: Point,
+    brush_type: BrushType,
 }
 
 /// Represents the current state of mouse interaction
@@ -95,6 +96,8 @@ pub struct WindowApp {
     last_mouse_position: Point,
     /// Index of the active layer
     active_layer: usize,
+    /// Current brush type
+    brush_type: BrushType,
 }
 
 impl WindowApp {
@@ -129,6 +132,7 @@ impl WindowApp {
             is_panning: false,
             last_mouse_position: Point { x: 0.0, y: 0.0 },
             active_layer: 0,
+            brush_type: BrushType::Square,
         }
     }
 
@@ -175,6 +179,7 @@ impl WindowBackend for WindowApp {
             slider_drag: None,
             mouse_state: MouseState::Idle,
             mouse_position: Point { x: 0.0, y: 0.0 },
+            brush_type: self.brush_type,
         }));
 
         self.app.connect_activate({
@@ -342,11 +347,13 @@ impl WindowBackend for WindowApp {
                         gtk4::gdk::Key::e | gtk4::gdk::Key::E => {
                             let is_drawing = active_stroke_kb.borrow().is_some();
                             if !is_drawing {
-                                render_state_kb.borrow_mut().is_eraser =
-                                    !render_state_kb.borrow().is_eraser;
+                                let mut state = render_state_kb.borrow_mut();
+                                state.is_eraser = !state.is_eraser;
+                                let is_on = state.is_eraser;
+                                drop(state);
                                 logger::info(&format!(
                                     "Eraser mode: {}",
-                                    if render_state_kb.borrow().is_eraser { "ON" } else { "OFF" }
+                                    if is_on { "ON" } else { "OFF" }
                                 ));
                                 gl_area_kb.queue_render();
                             }
@@ -474,6 +481,7 @@ impl WindowBackend for WindowApp {
                                 brush_size: state.brush_size,
                                 opacity: state.opacity,
                                 is_eraser: state.is_eraser,
+                                brush_type: state.brush_type,
                             },
                             viewport: GlViewportState {
                                 zoom: state.zoom,
@@ -690,6 +698,16 @@ fn setup_mouse_events(
                 }
                 return;
             }
+            ui::UiElement::BrushType(brush_type) => {
+                let mut state = render_state_click.borrow_mut();
+                state.brush_type = brush_type;
+                if let Some(widget) = gesture.widget()
+                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                {
+                    gl_area.queue_render();
+                }
+                return;
+            }
             ui::UiElement::Clear => {
                 canvas_click.borrow_mut().clear();
                 logger::info("Canvas cleared");
@@ -886,10 +904,16 @@ fn setup_mouse_events(
         };
         let current_brush_size = state.brush_size;
         let current_opacity = state.opacity;
+        let current_brush_type = state.brush_type;
         drop(state);
 
         let mut canvas = canvas_click.borrow_mut();
-        let active_stroke = canvas.begin_stroke(color, current_brush_size, current_opacity, BrushType::default());
+        let active_stroke = canvas.begin_stroke(
+            color,
+            current_brush_size,
+            current_opacity,
+            current_brush_type,
+        );
         println!(
             "Created {}stroke with color RGB({}, {}, {}) and width {}",
             if is_eraser { "eraser " } else { "" },

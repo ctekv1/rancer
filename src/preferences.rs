@@ -43,6 +43,7 @@ pub struct CanvasPreferences {
 pub struct BrushPreferences {
     pub default_size: f32,
     pub default_opacity: f32,
+    pub default_type: String,
     pub sizes: Vec<f32>,
 }
 
@@ -79,6 +80,7 @@ impl Default for Preferences {
             brush: BrushPreferences {
                 default_size: 3.0,
                 default_opacity: 1.0,
+                default_type: "Square".to_string(),
                 sizes: vec![3.0, 5.0, 10.0, 25.0, 50.0],
             },
             renderer: RendererPreferences {

@@ -4,7 +4,7 @@
 //! eliminating duplication between winit and GTK4 backends.
 //! All coordinate constants match the vertex positions in geometry.rs.
 
-use crate::canvas::Color;
+use crate::canvas::{BrushType, Color};
 
 /// UI element that was hit by a mouse click
 #[derive(Debug, Clone, PartialEq)]
@@ -37,6 +37,8 @@ pub enum UiElement {
     ZoomOut,
     /// Opacity preset button clicked
     Opacity(f32),
+    /// Brush type button clicked
+    BrushType(BrushType),
     /// Layer row clicked (select layer)
     LayerRow(usize),
     /// Layer visibility toggle clicked
@@ -58,6 +60,14 @@ const BRUSH_SIZES: [f32; 5] = [3.0, 5.0, 10.0, 25.0, 50.0];
 
 /// Opacity preset values (must match canvas::OPACITY_PRESETS and geometry.rs)
 const OPACITY_PRESETS: [f32; 4] = [0.25, 0.5, 0.75, 1.0];
+
+/// Brush types (must match geometry/ui_elements.rs order)
+const BRUSH_TYPES: [BrushType; 4] = [
+    BrushType::Square,
+    BrushType::Round,
+    BrushType::Spray,
+    BrushType::Calligraphy,
+];
 
 /// Perform hit testing at the given coordinates
 ///
@@ -170,6 +180,20 @@ pub fn hit_test(
             let bx = selector_x + (button_width + spacing) * i as f32;
             if x >= bx && x <= bx + button_width {
                 return UiElement::Opacity(opacity);
+            }
+        }
+    }
+
+    // Brush type buttons (y=225-255)
+    if (225.0..=255.0).contains(&y) {
+        let selector_x = 10.0;
+        let button_size = 30.0;
+        let spacing = 10.0;
+
+        for (i, &brush_type) in BRUSH_TYPES.iter().enumerate() {
+            let bx = selector_x + (button_size + spacing) * i as f32;
+            if x >= bx && x <= bx + button_size {
+                return UiElement::BrushType(brush_type);
             }
         }
     }
@@ -379,6 +403,30 @@ mod tests {
             UiElement::Opacity(val) => assert!((val - 0.25).abs() < 0.01),
             _ => panic!("Expected Opacity, got {:?}", result),
         }
+    }
+
+    #[test]
+    fn test_hit_test_brush_type_square() {
+        let result = hit_test(25.0, 240.0, &[], 0, 0, 1280.0);
+        assert_eq!(result, UiElement::BrushType(BrushType::Square));
+    }
+
+    #[test]
+    fn test_hit_test_brush_type_round() {
+        let result = hit_test(65.0, 240.0, &[], 0, 0, 1280.0);
+        assert_eq!(result, UiElement::BrushType(BrushType::Round));
+    }
+
+    #[test]
+    fn test_hit_test_brush_type_spray() {
+        let result = hit_test(105.0, 240.0, &[], 0, 0, 1280.0);
+        assert_eq!(result, UiElement::BrushType(BrushType::Spray));
+    }
+
+    #[test]
+    fn test_hit_test_brush_type_calligraphy() {
+        let result = hit_test(145.0, 240.0, &[], 0, 0, 1280.0);
+        assert_eq!(result, UiElement::BrushType(BrushType::Calligraphy));
     }
 
     #[test]

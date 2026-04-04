@@ -9,7 +9,7 @@
 //! - Padding: 20px around the stroke bounding box
 
 use crate::canvas::{Canvas, Stroke};
-use crate::geometry;
+use crate::geometry::{self, DrawMode};
 use crate::logger;
 use image::{ImageBuffer, Rgba};
 use std::path::Path;
@@ -106,6 +106,7 @@ fn render_canvas_to_image(
     for (stroke, layer_opacity) in canvas.all_strokes() {
         let adjusted_stroke = Stroke {
             opacity: stroke.opacity * layer_opacity,
+            brush_type: stroke.brush_type,
             ..stroke.clone()
         };
         render_stroke_to_image(&mut image, &adjusted_stroke, offset_x, offset_y)?;
@@ -121,9 +122,9 @@ fn render_stroke_to_image(
     offset_x: f32,
     offset_y: f32,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let vertices = geometry::generate_stroke_vertices(stroke);
+    let mesh = geometry::generate_stroke_vertices_with_opacity(stroke, stroke.opacity);
 
-    if vertices.len() < 18 {
+    if mesh.vertices.len() < 18 {
         return Ok(());
     }
 
@@ -134,16 +135,47 @@ fn render_stroke_to_image(
         (stroke.opacity * 255.0) as u8,
     ]);
 
-    for i in (0..vertices.len() - 12).step_by(12) {
-        let v0 = [vertices[i] - offset_x, vertices[i + 1] - offset_y];
-        let v1 = [vertices[i + 6] - offset_x, vertices[i + 7] - offset_y];
-        let v2 = [vertices[i + 12] - offset_x, vertices[i + 13] - offset_y];
+    match mesh.mode {
+        DrawMode::TriangleStrip => {
+            for i in (0..mesh.vertices.len() - 12).step_by(12) {
+                let v0 = [mesh.vertices[i] - offset_x, mesh.vertices[i + 1] - offset_y];
+                let v1 = [
+                    mesh.vertices[i + 6] - offset_x,
+                    mesh.vertices[i + 7] - offset_y,
+                ];
+                let v2 = [
+                    mesh.vertices[i + 12] - offset_x,
+                    mesh.vertices[i + 13] - offset_y,
+                ];
 
-        render_triangle(image, &v0, &v1, &v2, color);
+                render_triangle(image, &v0, &v1, &v2, color);
 
-        if i + 18 <= vertices.len() {
-            let v3 = [vertices[i + 18] - offset_x, vertices[i + 19] - offset_y];
-            render_triangle(image, &v1, &v2, &v3, color);
+                if i + 18 <= mesh.vertices.len() {
+                    let v3 = [
+                        mesh.vertices[i + 18] - offset_x,
+                        mesh.vertices[i + 19] - offset_y,
+                    ];
+                    render_triangle(image, &v1, &v2, &v3, color);
+                }
+            }
+        }
+        DrawMode::Triangles => {
+            for i in (0..mesh.vertices.len()).step_by(18) {
+                if i + 18 > mesh.vertices.len() {
+                    break;
+                }
+                let v0 = [mesh.vertices[i] - offset_x, mesh.vertices[i + 1] - offset_y];
+                let v1 = [
+                    mesh.vertices[i + 6] - offset_x,
+                    mesh.vertices[i + 7] - offset_y,
+                ];
+                let v2 = [
+                    mesh.vertices[i + 12] - offset_x,
+                    mesh.vertices[i + 13] - offset_y,
+                ];
+
+                render_triangle(image, &v0, &v1, &v2, color);
+            }
         }
     }
 
