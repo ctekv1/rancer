@@ -1,10 +1,9 @@
 //! WGPU rendering module for Rancer
 //!
 //! Provides GPU-accelerated rendering for the canvas using wgpu.
-//! This module handles the rendering pipeline, shaders, and drawing operations.
-//! Falls back to cairo rendering if WGPU is not available.
+//! The renderer is stateless — all render data is passed via `RenderFrame`.
 
-use crate::canvas::{Canvas, Color};
+use crate::canvas::{ActiveStroke, Canvas, Color, Stroke};
 use crate::geometry;
 use crate::logger;
 
@@ -26,7 +25,7 @@ impl Default for RendererConfig {
     fn default() -> Self {
         Self {
             clear_color: Color::WHITE,
-            msaa_samples: 4, // Enable 4x MSAA for smoother rendering
+            msaa_samples: 4,
         }
     }
 }
@@ -40,26 +39,37 @@ pub enum RenderBackend {
     Cairo,
 }
 
+/// UI state needed for rendering a frame
+pub struct UiRenderState<'a> {
+    pub hue: f32,
+    pub saturation: f32,
+    pub value: f32,
+    pub custom_colors: &'a [[u8; 3]],
+    pub selected_custom_index: i32,
+    pub brush_size: f32,
+    pub opacity: f32,
+    pub is_eraser: bool,
+}
+
+/// Viewport state for canvas transform
+pub struct ViewportState {
+    pub zoom: f32,
+    pub pan_offset: (f32, f32),
+}
+
+/// All data needed to render a single frame.
+///
+/// This is the single source of truth for render data.
+/// The `Renderer` holds no application state — it only owns WGPU internals.
+pub struct RenderFrame<'a> {
+    pub canvas: &'a Canvas,
+    pub active_stroke: Option<&'a ActiveStroke>,
+    pub ui: UiRenderState<'a>,
+    pub viewport: ViewportState,
+}
+
 /// WGPU-based renderer for the canvas
 pub struct Renderer {
-    /// Current canvas to render
-    canvas: Canvas,
-    /// HSV color values (Hue, Saturation, Value)
-    hue: f32,
-    saturation: f32,
-    value: f32,
-    /// Custom saved colors
-    custom_colors: Vec<[u8; 3]>,
-    /// Selected custom color index (-1 if none)
-    selected_custom_index: i32,
-    /// Active stroke being drawn (if any)
-    active_stroke: Option<crate::canvas::ActiveStroke>,
-    /// Current brush size for UI
-    brush_size: f32,
-    /// Current brush opacity
-    opacity: f32,
-    /// Eraser mode active
-    is_eraser: bool,
     /// Configuration
     pub config: RendererConfig,
     /// Active rendering backend
@@ -78,10 +88,6 @@ pub struct Renderer {
     ui_pipeline: Option<wgpu::RenderPipeline>,
     /// Window size
     window_size: (u32, u32),
-    /// Viewport zoom level (1.0 = 100%)
-    zoom: f32,
-    /// Viewport pan offset (in canvas coordinates)
-    pan_offset: (f32, f32),
     /// Pipeline layout for recreation
     pipeline_layout: Option<wgpu::PipelineLayout>,
     /// Shader module for recreation
@@ -100,7 +106,6 @@ impl Renderer {
         logger::info("=== RENDERER INITIALIZATION START ===");
         logger::info("Attempting WGPU initialization...");
 
-        // Try to initialize WGPU
         match Self::init_wgpu(&window, window_size, &config).await {
             Ok((
                 device,
@@ -117,16 +122,6 @@ impl Renderer {
                 logger::info(&format!("   - Device: {:?}", device));
                 logger::info(&format!("   - Surface format: {:?}", surface_config.format));
                 Ok(Self {
-                    canvas: Canvas::new(),
-                    hue: 0.0,
-                    saturation: 100.0,
-                    value: 100.0,
-                    custom_colors: Vec::new(),
-                    selected_custom_index: -1,
-                    active_stroke: None,
-                    brush_size: 3.0,
-                    opacity: 1.0,
-                    is_eraser: false,
                     config,
                     backend: RenderBackend::Wgpu,
                     device: Some(device),
@@ -136,8 +131,6 @@ impl Renderer {
                     render_pipeline: Some(render_pipeline),
                     ui_pipeline: Some(ui_pipeline),
                     window_size,
-                    zoom: 1.0,
-                    pan_offset: (0.0, 0.0),
                     pipeline_layout: Some(pipeline_layout),
                     shader: Some(shader),
                     window: Some(window),
@@ -150,16 +143,6 @@ impl Renderer {
                     logger::warn("Falling back to Cairo software rendering (Linux)");
                     logger::info("   - Backend: Cairo (CPU)");
                     Ok(Self {
-                        canvas: Canvas::new(),
-                        hue: 0.0,
-                        saturation: 100.0,
-                        value: 100.0,
-                        custom_colors: Vec::new(),
-                        selected_custom_index: -1,
-                        active_stroke: None,
-                        brush_size: 3.0,
-                        opacity: 1.0,
-                        is_eraser: false,
                         config,
                         backend: RenderBackend::Cairo,
                         device: None,
@@ -169,8 +152,6 @@ impl Renderer {
                         render_pipeline: None,
                         ui_pipeline: None,
                         window_size,
-                        zoom: 1.0,
-                        pan_offset: (0.0, 0.0),
                         pipeline_layout: None,
                         shader: None,
                         window: Some(window),
@@ -198,7 +179,6 @@ impl Renderer {
         surface_format: wgpu::TextureFormat,
         sample_count: u32,
     ) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
-        // Create render pipeline
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
             layout: Some(pipeline_layout),
@@ -257,7 +237,6 @@ impl Renderer {
             cache: None,
         });
 
-        // Create UI pipeline for rendering rectangles
         let ui_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("UI Pipeline"),
             layout: Some(pipeline_layout),
@@ -337,18 +316,14 @@ impl Renderer {
         ),
         Box<dyn std::error::Error>,
     > {
-        // Create WGPU instance
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             ..Default::default()
         });
 
-        // Create surface from window
-        // SAFETY: The surface is valid for the lifetime of the window, which is managed by GTK4
         #[allow(clippy::missing_transmute_annotations)]
         let surface = unsafe { std::mem::transmute(instance.create_surface(window)?) };
 
-        // Request adapter
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
@@ -359,7 +334,6 @@ impl Renderer {
 
         logger::info(&format!("Selected adapter: {:?}", adapter.get_info()));
 
-        // Request device and queue
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 required_features: wgpu::Features::empty(),
@@ -371,13 +345,10 @@ impl Renderer {
             })
             .await?;
 
-        // Get device limits to clamp surface size
         let device_limits = device.limits();
         let max_texture_size = device_limits.max_texture_dimension_2d;
         logger::info(&format!("Max texture dimension: {}", max_texture_size));
 
-        // Clamp window size to GPU limits, ensuring non-zero dimensions
-        // wgpu requires both width and height to be non-zero for surface configuration
         let surface_width = window_size.0.max(1).min(max_texture_size);
         let surface_height = window_size.1.max(1).min(max_texture_size);
         if surface_width != window_size.0 || surface_height != window_size.1 {
@@ -387,7 +358,6 @@ impl Renderer {
             ));
         }
 
-        // Configure surface
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps
             .formats
@@ -408,13 +378,11 @@ impl Renderer {
         };
         surface.configure(&device, &surface_config);
 
-        // Load shader
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Render Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/render.wgsl").into()),
         });
 
-        // Create bind group layout for uniforms
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Uniform Bind Group Layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -429,23 +397,18 @@ impl Renderer {
             }],
         });
 
-        // Create pipeline layout
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
             bind_group_layouts: &[&bind_group_layout],
             immediate_size: 0,
         });
 
-        // For swapchain rendering, use sample_count=1 (MSAA with swapchains requires
-        // creating intermediate render targets, which is more complex)
-        // The config.msaa_samples value is stored but not used for pipeline creation
         let sample_count = 1;
         logger::info(&format!(
             "Using MSAA sample count: {} (swapchain rendering)",
             sample_count
         ));
 
-        // Create pipelines with the determined sample count
         let (render_pipeline, ui_pipeline) = Self::create_pipelines(
             &device,
             &shader,
@@ -486,7 +449,6 @@ impl Renderer {
             let surface_format = new_config.format;
             self.surface_config = Some(new_config);
 
-            // Recreate pipelines on resize (sample_count=1 for swapchain rendering)
             if let (Some(device), Some(pipeline_layout), Some(shader)) =
                 (&self.device, &self.pipeline_layout, &self.shader)
             {
@@ -498,112 +460,22 @@ impl Renderer {
         }
     }
 
-    /// Set the canvas to render
-    pub fn set_canvas(&mut self, canvas: Canvas) {
-        self.canvas = canvas;
-    }
-
-    /// Set the active stroke being drawn
-    pub fn set_active_stroke(&mut self, active_stroke: Option<crate::canvas::ActiveStroke>) {
-        self.active_stroke = active_stroke;
-    }
-
-    /// Set the current brush size for UI
-    pub fn set_brush_size(&mut self, brush_size: f32) {
-        self.brush_size = brush_size;
-    }
-
-    /// Set the eraser mode
-    pub fn set_eraser(&mut self, is_eraser: bool) {
-        self.is_eraser = is_eraser;
-    }
-
-    /// Set the brush opacity
-    pub fn set_opacity(&mut self, opacity: f32) {
-        self.opacity = opacity;
-    }
-
-    /// Set HSV values
-    pub fn set_hsv(&mut self, h: f32, s: f32, v: f32) {
-        self.hue = h.clamp(0.0, 360.0);
-        self.saturation = s.clamp(0.0, 100.0);
-        self.value = v.clamp(0.0, 100.0);
-        self.selected_custom_index = -1; // Deselect custom color
-    }
-
-    /// Get current HSV values
-    pub fn get_hsv(&self) -> (f32, f32, f32) {
-        (self.hue, self.saturation, self.value)
-    }
-
-    /// Get current color as Color struct
-    pub fn current_color(&self) -> crate::canvas::Color {
-        crate::canvas::hsv_to_rgb(self.hue, self.saturation, self.value)
-    }
-
-    /// Set custom colors
-    pub fn set_custom_colors(&mut self, colors: Vec<[u8; 3]>) {
-        self.custom_colors = colors;
-    }
-
-    /// Get custom colors
-    pub fn get_custom_colors(&self) -> &[[u8; 3]] {
-        &self.custom_colors
-    }
-
-    /// Set selected custom color index
-    pub fn set_selected_custom_index(&mut self, index: i32) {
-        self.selected_custom_index = index;
-        if index >= 0 && (index as usize) < self.custom_colors.len() {
-            let color = self.custom_colors[index as usize];
-            let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
-                r: color[0],
-                g: color[1],
-                b: color[2],
-                a: 255,
-            });
-            self.hue = hsv.h;
-            self.saturation = hsv.s;
-            self.value = hsv.v;
-        }
-    }
-
-    /// Get selected custom color index
-    pub fn get_selected_custom_index(&self) -> i32 {
-        self.selected_custom_index
-    }
-
-    /// Add a custom color
-    pub fn add_custom_color(&mut self, color: crate::canvas::Color) {
-        self.custom_colors.push([color.r, color.g, color.b]);
-        // Keep max 10 colors
-        if self.custom_colors.len() > 10 {
-            self.custom_colors.remove(0);
-        }
-    }
-
-    /// Get a mutable reference to the canvas
-    pub fn canvas_mut(&mut self) -> &mut Canvas {
-        &mut self.canvas
-    }
-
-    /// Render the current frame
-    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    /// Render the current frame using data from `frame`
+    pub fn render(&mut self, frame: &RenderFrame) -> Result<(), wgpu::SurfaceError> {
         match self.backend {
             RenderBackend::Wgpu => {
                 logger::debug("[RENDER] Using WGPU backend (GPU-accelerated)");
-                self.render_wgpu()
+                self.render_wgpu(frame)
             }
             RenderBackend::Cairo => {
                 logger::debug("[RENDER] Using Cairo backend (CPU software rendering)");
-                // Cairo rendering is handled by GTK4 draw callback
                 Ok(())
             }
         }
     }
 
     /// Render using WGPU
-    fn render_wgpu(&mut self) -> Result<(), wgpu::SurfaceError> {
+    fn render_wgpu(&mut self, frame: &RenderFrame) -> Result<(), wgpu::SurfaceError> {
         use wgpu::util::DeviceExt;
 
         let (surface, device, queue, pipeline) = match (
@@ -616,8 +488,6 @@ impl Renderer {
             _ => return Err(wgpu::SurfaceError::Lost),
         };
 
-        // Ensure surface is configured with current window size before rendering
-        // Clamp to GPU limits to prevent invalid configurations
         if let Some(config) = &self.surface_config {
             let max_texture_size = device.limits().max_texture_dimension_2d;
             let clamped_width = self.window_size.0.min(max_texture_size);
@@ -632,10 +502,8 @@ impl Renderer {
             }
         }
 
-        // Get the next texture to render to
         let output = surface.get_current_texture()?;
 
-        // Check if surface is suboptimal and needs reconfiguration
         if output.suboptimal {
             logger::debug("Surface suboptimal, reconfiguring");
             if let Some(config) = &self.surface_config {
@@ -647,17 +515,15 @@ impl Renderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Use actual texture dimensions to ensure consistency with viewport
         let texture_width = output.texture.width() as f32;
         let texture_height = output.texture.height() as f32;
-        
-        // Uniform buffer: [texture_width, texture_height, zoom, pan_offset_x, pan_offset_y]
+
         let uniform_data = [
             texture_width,
             texture_height,
-            self.zoom,
-            self.pan_offset.0,
-            self.pan_offset.1,
+            frame.viewport.zoom,
+            frame.viewport.pan_offset.0,
+            frame.viewport.pan_offset.1,
         ];
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Uniform Buffer"),
@@ -665,7 +531,6 @@ impl Renderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        // Create bind group
         let bind_group_layout = pipeline.get_bind_group_layout(0);
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Uniform Bind Group"),
@@ -727,20 +592,24 @@ impl Renderer {
             // but draw each stroke separately to avoid connecting them
             let mut all_stroke_vertices = Vec::new();
             let mut stroke_ranges = Vec::new();
-            for (stroke, layer_opacity) in self.canvas.all_strokes() {
+            for (stroke, layer_opacity) in frame.canvas.all_strokes() {
                 if stroke.points.len() >= 2 {
                     let start = all_stroke_vertices.len() as u32;
-                    all_stroke_vertices.extend(self.generate_stroke_vertices_with_layer_opacity(stroke, layer_opacity));
+                    all_stroke_vertices.extend(
+                        stroke_to_vertices_7(stroke, layer_opacity),
+                    );
                     let end = all_stroke_vertices.len() as u32;
                     stroke_ranges.push(start..end);
                 }
             }
-            if let Some(active_stroke) = &self.active_stroke
+            if let Some(active_stroke) = frame.active_stroke
                 && active_stroke.points().len() >= 2
             {
-                let layer_opacity = self.canvas.layers()[self.canvas.active_layer()].opacity;
+                let layer_opacity = frame.canvas.layers()[frame.canvas.active_layer()].opacity;
                 let start = all_stroke_vertices.len() as u32;
-                all_stroke_vertices.extend(self.generate_active_stroke_vertices_with_layer_opacity(active_stroke, layer_opacity));
+                all_stroke_vertices.extend(
+                    active_stroke_to_vertices_7(active_stroke, layer_opacity),
+                );
                 let end = all_stroke_vertices.len() as u32;
                 stroke_ranges.push(start..end);
             }
@@ -757,13 +626,7 @@ impl Renderer {
             }
 
             // Reset zoom to 1.0 and pan to (0,0) for UI (UI stays fixed on screen)
-            let ui_uniform_data = [
-                uniform_data[0],
-                uniform_data[1],
-                1.0,
-                0.0,
-                0.0,
-            ];
+            let ui_uniform_data = [uniform_data[0], uniform_data[1], 1.0, 0.0, 0.0];
             let ui_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("UI Uniform Buffer"),
                 contents: bytemuck::cast_slice(&ui_uniform_data),
@@ -778,26 +641,49 @@ impl Renderer {
                 }],
             });
 
-            // Draw all UI elements in a single combined buffer
             if let Some(ui_pipeline) = &self.ui_pipeline {
                 let mut all_ui_vertices: Vec<[f32; 7]> = Vec::new();
 
-                all_ui_vertices.extend(self.generate_hsv_sliders(
-                    self.hue,
-                    self.saturation,
-                    self.value,
-                ));
-                all_ui_vertices.extend(self.generate_custom_palette_vertices());
-                all_ui_vertices.extend(self.generate_brush_size_vertices(self.brush_size));
-                all_ui_vertices.extend(self.generate_eraser_button_vertices(self.is_eraser));
-                all_ui_vertices.extend(self.generate_clear_button_vertices());
-                all_ui_vertices.extend(self.generate_undo_button_vertices());
-                all_ui_vertices.extend(self.generate_redo_button_vertices());
-                all_ui_vertices.extend(self.generate_export_button_vertices());
-                all_ui_vertices.extend(self.generate_zoom_in_button_vertices());
-                all_ui_vertices.extend(self.generate_zoom_out_button_vertices());
-                all_ui_vertices.extend(self.generate_opacity_preset_vertices());
-                all_ui_vertices.extend(self.generate_layer_panel_vertices());
+                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_hsv_sliders(
+                    frame.ui.hue,
+                    frame.ui.saturation,
+                    frame.ui.value,
+                )));
+                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_custom_palette(
+                    frame.ui.custom_colors,
+                    frame.ui.selected_custom_index as usize,
+                )));
+                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_brush_size_vertices(
+                    frame.ui.brush_size,
+                )));
+                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_eraser_button_vertices(
+                    frame.ui.is_eraser,
+                )));
+                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_clear_button_vertices()));
+                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_undo_button_vertices(
+                    frame.canvas.can_undo(),
+                )));
+                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_redo_button_vertices(
+                    frame.canvas.can_redo(),
+                )));
+                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_export_button_vertices()));
+                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_zoom_in_button_vertices()));
+                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_zoom_out_button_vertices()));
+                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_opacity_preset_vertices(
+                    frame.ui.opacity,
+                )));
+
+                let layers: Vec<(String, bool, f32, bool)> = frame
+                    .canvas
+                    .layers()
+                    .iter()
+                    .map(|l| (l.name.clone(), l.visible, l.opacity, l.locked))
+                    .collect();
+                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_layer_panel_vertices(
+                    &layers,
+                    frame.canvas.active_layer(),
+                    self.window_size.0 as f32,
+                )));
 
                 if !all_ui_vertices.is_empty() {
                     let ui_vertex_buffer =
@@ -816,7 +702,6 @@ impl Renderer {
 
         queue.submit(std::iter::once(encoder.finish()));
 
-        // Notify window before presenting to help compositor update window regions
         if let Some(ref window) = self.window {
             window.pre_present_notify();
         }
@@ -826,133 +711,7 @@ impl Renderer {
         Ok(())
     }
 
-    /// Generate vertices for a single stroke with layer opacity
-    fn generate_stroke_vertices_with_layer_opacity(&self, stroke: &crate::canvas::Stroke, layer_opacity: f32) -> Vec<[f32; 7]> {
-        let flat = geometry::generate_stroke_vertices_with_opacity(stroke, layer_opacity);
-        to_vertices_7(&flat, stroke.width)
-    }
-
-    /// Generate vertices for an active stroke with layer opacity applied
-    fn generate_active_stroke_vertices_with_layer_opacity(
-        &self,
-        active_stroke: &crate::canvas::ActiveStroke,
-        layer_opacity: f32,
-    ) -> Vec<[f32; 7]> {
-        let flat = geometry::generate_active_stroke_vertices_with_opacity(active_stroke, layer_opacity);
-        to_vertices_7(&flat, active_stroke.width())
-    }
-
-    /// Generate vertices for HSV sliders
-    fn generate_hsv_sliders(&self, h: f32, s: f32, v: f32) -> Vec<[f32; 7]> {
-        let flat = geometry::generate_hsv_sliders(h, s, v);
-        to_vertices_7(&flat, 0.0)
-    }
-
-    /// Generate vertices for custom palette
-    fn generate_custom_palette_vertices(&self) -> Vec<[f32; 7]> {
-        let flat = geometry::generate_custom_palette(
-            &self.custom_colors,
-            self.selected_custom_index as usize,
-        );
-        to_vertices_7(&flat, 0.0)
-    }
-
-    /// Generate vertices for brush size selector
-    fn generate_brush_size_vertices(&self, selected_size: f32) -> Vec<[f32; 7]> {
-        let flat = geometry::generate_brush_size_vertices(selected_size);
-        to_vertices_7(&flat, 0.0)
-    }
-
-    /// Generate vertices for eraser button
-    fn generate_eraser_button_vertices(&self, is_active: bool) -> Vec<[f32; 7]> {
-        let flat = geometry::generate_eraser_button_vertices(is_active);
-        to_vertices_7(&flat, 0.0)
-    }
-
-    /// Generate vertices for clear canvas button
-    fn generate_clear_button_vertices(&self) -> Vec<[f32; 7]> {
-        let flat = geometry::generate_clear_button_vertices();
-        to_vertices_7(&flat, 0.0)
-    }
-
-    /// Generate vertices for undo button
-    fn generate_undo_button_vertices(&self) -> Vec<[f32; 7]> {
-        let can_undo = self.canvas.can_undo();
-        let flat = geometry::generate_undo_button_vertices(can_undo);
-        to_vertices_7(&flat, 0.0)
-    }
-
-    /// Generate vertices for redo button
-    fn generate_redo_button_vertices(&self) -> Vec<[f32; 7]> {
-        let can_redo = self.canvas.can_redo();
-        let flat = geometry::generate_redo_button_vertices(can_redo);
-        to_vertices_7(&flat, 0.0)
-    }
-
-    /// Generate vertices for export button
-    fn generate_export_button_vertices(&self) -> Vec<[f32; 7]> {
-        let flat = geometry::generate_export_button_vertices();
-        to_vertices_7(&flat, 0.0)
-    }
-
-    /// Generate vertices for zoom in button
-    fn generate_zoom_in_button_vertices(&self) -> Vec<[f32; 7]> {
-        let flat = geometry::generate_zoom_in_button_vertices();
-        to_vertices_7(&flat, 0.0)
-    }
-
-    /// Generate vertices for zoom out button
-    fn generate_zoom_out_button_vertices(&self) -> Vec<[f32; 7]> {
-        let flat = geometry::generate_zoom_out_button_vertices();
-        to_vertices_7(&flat, 0.0)
-    }
-
-    /// Generate vertices for opacity preset buttons
-    fn generate_opacity_preset_vertices(&self) -> Vec<[f32; 7]> {
-        let flat = geometry::generate_opacity_preset_vertices(self.opacity);
-        to_vertices_7(&flat, 0.0)
-    }
-
-    /// Generate vertices for the layer panel UI
-    fn generate_layer_panel_vertices(&self) -> Vec<[f32; 7]> {
-        let layers: Vec<(String, bool, f32, bool)> = self.canvas.layers().iter()
-            .map(|l| (l.name.clone(), l.visible, l.opacity, l.locked))
-            .collect();
-        let flat = geometry::generate_layer_panel_vertices(&layers, self.canvas.active_layer(), self.window_size.0 as f32);
-        to_vertices_7(&flat, 0.0)
-    }
-
-    /// Get the current canvas
-    pub fn canvas(&self) -> &Canvas {
-        &self.canvas
-    }
-
-    /// Set zoom level (1.0 = 100%)
-    pub fn set_zoom(&mut self, zoom: f32) {
-        self.zoom = zoom;
-    }
-
-    /// Get current zoom level
-    pub fn zoom(&self) -> f32 {
-        self.zoom
-    }
-
-    /// Set pan offset (in canvas coordinates)
-    pub fn set_pan(&mut self, offset: (f32, f32)) {
-        self.pan_offset = offset;
-    }
-
-    /// Get current pan offset
-    pub fn pan_offset(&self) -> (f32, f32) {
-        self.pan_offset
-    }
-
-    /// Check if WGPU backend is being used
-    pub fn is_wgpu(&self) -> bool {
-        self.backend == RenderBackend::Wgpu
-    }
-
-    /// Get the active backend
+    /// Get the current backend
     pub fn backend(&self) -> RenderBackend {
         self.backend
     }
@@ -979,13 +738,25 @@ impl Renderer {
 }
 
 /// Convert flat vertex data (6 floats/vertex) to WGPU format (7 floats/vertex with line_width)
-fn to_vertices_7(flat: &[f32], line_width: f32) -> Vec<[f32; 7]> {
+fn flat_to_vertices_7(flat: &[f32]) -> Vec<[f32; 7]> {
     flat.chunks(6)
-        .map(|chunk| {
-            [
-                chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], line_width,
-            ]
-        })
+        .map(|chunk| [chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], 0.0])
+        .collect()
+}
+
+/// Convert stroke to WGPU vertex format with layer opacity
+fn stroke_to_vertices_7(stroke: &Stroke, layer_opacity: f32) -> Vec<[f32; 7]> {
+    let flat = geometry::generate_stroke_vertices_with_opacity(stroke, layer_opacity);
+    flat.chunks(6)
+        .map(|chunk| [chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], stroke.width])
+        .collect()
+}
+
+/// Convert active stroke to WGPU vertex format with layer opacity
+fn active_stroke_to_vertices_7(active: &ActiveStroke, layer_opacity: f32) -> Vec<[f32; 7]> {
+    let flat = geometry::generate_active_stroke_vertices_with_opacity(active, layer_opacity);
+    flat.chunks(6)
+        .map(|chunk| [chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], active.width()])
         .collect()
 }
 
@@ -1012,8 +783,6 @@ mod tests {
 
     #[test]
     fn test_combined_stroke_buffer_tracks_ranges() {
-        // Verify that the combined vertex buffer approach correctly
-        // tracks separate ranges per stroke to avoid connecting them
         use crate::canvas::{Canvas, Point, Stroke};
 
         let mut canvas = Canvas::new();
@@ -1025,25 +794,18 @@ mod tests {
         };
         let stroke2 = Stroke {
             points: vec![Point { x: 100.0, y: 100.0 }, Point { x: 110.0, y: 110.0 }],
-            color: Color {
-                r: 255,
-                g: 0,
-                b: 0,
-                a: 255,
-            },
+            color: Color { r: 255, g: 0, b: 0, a: 255 },
             width: 2.0,
             opacity: 1.0,
         };
         canvas.add_stroke_to_layer(stroke1, 0);
         canvas.add_stroke_to_layer(stroke2, 0);
 
-        // Simulate the combined buffer logic from render_wgpu
         let mut all_vertices: Vec<[f32; 7]> = Vec::new();
         let mut stroke_ranges: Vec<std::ops::Range<u32>> = Vec::new();
         for (stroke, layer_opacity) in canvas.all_strokes() {
             if stroke.points.len() >= 2 {
                 let start = all_vertices.len() as u32;
-                // Each 2-point stroke generates 4 vertices (triangle strip)
                 let verts = crate::geometry::generate_stroke_vertices_with_opacity(stroke, layer_opacity);
                 let line_width = stroke.width;
                 for chunk in verts.chunks(6) {
@@ -1056,18 +818,14 @@ mod tests {
             }
         }
 
-        // Should have exactly 2 ranges for 2 strokes
         assert_eq!(stroke_ranges.len(), 2);
-        // Ranges should not overlap
         assert!(stroke_ranges[0].end <= stroke_ranges[1].start);
-        // Total vertices should equal sum of all ranges
         let total_from_ranges: u32 = stroke_ranges.iter().map(|r| r.end - r.start).sum();
         assert_eq!(total_from_ranges, all_vertices.len() as u32);
     }
 
     #[test]
     fn test_combined_buffer_empty_canvas() {
-        // Verify that an empty canvas produces no vertex ranges
         let canvas = Canvas::new();
         let mut all_vertices: Vec<[f32; 7]> = Vec::new();
         let mut stroke_ranges: Vec<std::ops::Range<u32>> = Vec::new();
@@ -1091,7 +849,6 @@ mod tests {
 
     #[test]
     fn test_single_point_stroke_excluded() {
-        // Single-point strokes should be excluded (need at least 2 points)
         use crate::canvas::{Canvas, Point, Stroke};
 
         let mut canvas = Canvas::new();

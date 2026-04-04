@@ -407,7 +407,8 @@ impl Canvas {
     /// Redo the last undone stroke
     pub fn redo(&mut self) {
         if let Some((layer_index, stroke)) = self.undo_stack.pop()
-            && layer_index < self.layers.len() {
+            && layer_index < self.layers.len()
+        {
             self.layers[layer_index].strokes.push(stroke);
         }
     }
@@ -958,7 +959,6 @@ mod tests {
         assert_eq!(canvas.all_strokes().len(), 3);
     }
 
-    #[test]
     #[test]
     fn test_active_stroke_with_opacity() {
         let mut canvas = Canvas::new();

@@ -10,7 +10,8 @@ use gtk4::gdk::ModifierType;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Application, ApplicationWindow, EventControllerKey, EventControllerMotion, EventControllerScroll, GLArea, GestureClick,
+    Application, ApplicationWindow, EventControllerKey, EventControllerMotion,
+    EventControllerScroll, GLArea, GestureClick,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -134,7 +135,10 @@ impl WindowApp {
     fn screen_to_canvas(&self, screen_x: f32, screen_y: f32) -> Point {
         let canvas_x = screen_x / self.zoom + self.pan_offset.0;
         let canvas_y = screen_y / self.zoom + self.pan_offset.1;
-        Point { x: canvas_x, y: canvas_y }
+        Point {
+            x: canvas_x,
+            y: canvas_y,
+        }
     }
 }
 
@@ -247,7 +251,7 @@ impl WindowBackend for WindowApp {
                 if key == gtk4::gdk::Key::space {
                     *is_panning_kb.borrow_mut() = true;
                 }
-                
+
                 match key {
                     gtk4::gdk::Key::s | gtk4::gdk::Key::S => {
                         // Export canvas to PNG
@@ -437,7 +441,8 @@ impl WindowBackend for WindowApp {
             let pan_scroll = pan_offset_shared.clone();
             let gl_area_scroll = gl_area.clone();
             let mouse_pos_for_scroll = mouse_position_rc.clone();
-            let scroll_controller = EventControllerScroll::new(gtk4::EventControllerScrollFlags::VERTICAL);
+            let scroll_controller =
+                EventControllerScroll::new(gtk4::EventControllerScrollFlags::VERTICAL);
             scroll_controller.connect_scroll(move |_controller, _dx, dy| {
                 let old_zoom = *zoom_scroll.borrow();
                 let zoom_factor = 1.25;
@@ -450,7 +455,7 @@ impl WindowBackend for WindowApp {
                 } else {
                     old_zoom
                 };
-                
+
                 if (new_zoom - old_zoom).abs() > 0.001 {
                     // Zoom toward mouse position:
                     // 1. Calculate where mouse is in canvas coordinates before zoom
@@ -458,14 +463,14 @@ impl WindowBackend for WindowApp {
                     let mouse_pos = *mouse_pos_for_scroll.borrow();
                     let mouse_canvas_x = mouse_pos.x / old_zoom + old_pan.0;
                     let mouse_canvas_y = mouse_pos.y / old_zoom + old_pan.1;
-                    
+
                     // 2. Calculate new pan so that same canvas point is under mouse after zoom
                     let new_pan_x = mouse_canvas_x - mouse_pos.x / new_zoom;
                     let new_pan_y = mouse_canvas_y - mouse_pos.y / new_zoom;
-                    
+
                     *zoom_scroll.borrow_mut() = new_zoom;
                     *pan_scroll.borrow_mut() = (new_pan_x, new_pan_y);
-                    
+
                     gl_area_scroll.queue_render();
                 }
                 glib::Propagation::Stop
@@ -525,7 +530,7 @@ impl WindowBackend for WindowApp {
                     let current_pan = *pan_offset_shared.borrow();
                     renderer.set_zoom(current_zoom);
                     renderer.set_pan(current_pan);
-                    
+
                     let canvas = canvas_clone.borrow();
                     let active_stroke = active_stroke_clone.borrow();
                     let current_brush_size = *brush_for_render.borrow();
@@ -692,7 +697,14 @@ fn setup_mouse_events(
         } else {
             1280.0
         };
-        let hit = ui::hit_test(x as f32, y as f32, &custom_colors_snapshot, layer_count, active_layer, window_width);
+        let hit = ui::hit_test(
+            x as f32,
+            y as f32,
+            &custom_colors_snapshot,
+            layer_count,
+            active_layer,
+            window_width,
+        );
 
         match hit {
             ui::UiElement::HueSlider(value) => {
@@ -1036,7 +1048,10 @@ fn setup_mouse_events(
         let canvas_x = point.x / zoom + pan.0;
         let canvas_y = point.y / zoom + pan.1;
         if let Some(active_stroke) = &mut *active_stroke_clone.borrow_mut() {
-            active_stroke.add_point(Point { x: canvas_x, y: canvas_y });
+            active_stroke.add_point(Point {
+                x: canvas_x,
+                y: canvas_y,
+            });
             println!(
                 "Added first point to active stroke: ({}, {})",
                 point.x, point.y
@@ -1131,7 +1146,10 @@ fn setup_mouse_events(
             let pan = *pan_offset_motion.borrow();
             let canvas_x = point.x / zoom + pan.0;
             let canvas_y = point.y / zoom + pan.1;
-            active_stroke.add_point(Point { x: canvas_x, y: canvas_y });
+            active_stroke.add_point(Point {
+                x: canvas_x,
+                y: canvas_y,
+            });
             println!(
                 "Active stroke now has {} points",
                 active_stroke.points().len()

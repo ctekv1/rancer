@@ -15,7 +15,7 @@ use winit::window::{Window, WindowId};
 use crate::canvas::{ActiveStroke, Canvas, Point};
 use crate::logger;
 use crate::preferences::Preferences;
-use crate::renderer::{Renderer, RendererConfig};
+use crate::renderer::{Renderer, RendererConfig, RenderFrame, UiRenderState, ViewportState};
 use crate::ui::{self, SliderType};
 use crate::window_backend::{MouseState as BackendMouseState, WindowBackend};
 
@@ -147,7 +147,10 @@ impl WindowApp {
     fn screen_to_canvas(&self, screen_x: f32, screen_y: f32) -> Point {
         let canvas_x = screen_x / self.zoom + self.pan_offset.0;
         let canvas_y = screen_y / self.zoom + self.pan_offset.1;
-        Point { x: canvas_x, y: canvas_y }
+        Point {
+            x: canvas_x,
+            y: canvas_y,
+        }
     }
 
     /// Export canvas to PNG file
@@ -253,12 +256,9 @@ impl ApplicationHandler for WindowApp {
                 window.clone(),
                 (render_width, render_height),
             )) {
-                Ok(mut renderer) => {
+                Ok(renderer) => {
                     logger::info("✅ WGPU renderer initialized successfully!");
                     renderer.print_backend_status();
-                    renderer.set_opacity(self.opacity);
-                    renderer.set_hsv(self.hue, self.saturation, self.value);
-                    renderer.set_custom_colors(self.custom_colors.clone());
                     self.renderer = Some(renderer);
                 }
                 Err(e) => {
@@ -290,7 +290,7 @@ impl ApplicationHandler for WindowApp {
                 // Handle zoom with mouse wheel
                 let zoom_factor = 1.25;
                 let old_zoom = self.zoom;
-                
+
                 let new_zoom = match delta {
                     winit::event::MouseScrollDelta::LineDelta(_, dy) => {
                         if dy > 0.0 {
@@ -313,25 +313,20 @@ impl ApplicationHandler for WindowApp {
                         }
                     }
                 };
-                
+
                 if (new_zoom - old_zoom).abs() > 0.001 {
                     // Zoom toward mouse position:
                     // 1. Calculate where mouse is in canvas coordinates before zoom
                     let mouse_canvas_x = self.mouse_position.x / old_zoom + self.pan_offset.0;
                     let mouse_canvas_y = self.mouse_position.y / old_zoom + self.pan_offset.1;
-                    
+
                     // 2. Calculate new pan so that same canvas point is under mouse after zoom
                     let new_pan_x = mouse_canvas_x - self.mouse_position.x / new_zoom;
                     let new_pan_y = mouse_canvas_y - self.mouse_position.y / new_zoom;
-                    
+
                     self.zoom = new_zoom;
                     self.pan_offset = (new_pan_x, new_pan_y);
-                    
-                    // Update renderer
-                    if let Some(renderer) = &mut self.renderer {
-                        renderer.set_zoom(new_zoom);
-                        renderer.set_pan(self.pan_offset);
-                    }
+
                     if let Some(window) = &self.window {
                         window.request_redraw();
                     }
@@ -386,14 +381,29 @@ impl ApplicationHandler for WindowApp {
             WindowEvent::RedrawRequested => {
                 // Render the frame
                 if let Some(renderer) = &mut self.renderer {
-                    // Update canvas in renderer
-                    renderer.set_canvas(self.canvas.borrow().clone());
+                    let canvas = self.canvas.borrow();
+                    let active_stroke = self.active_stroke.borrow();
 
-                    // Update active stroke in renderer
-                    let active_stroke = self.active_stroke.borrow().clone();
-                    renderer.set_active_stroke(active_stroke);
+                    let frame = RenderFrame {
+                        canvas: &canvas,
+                        active_stroke: active_stroke.as_ref(),
+                        ui: UiRenderState {
+                            hue: self.hue,
+                            saturation: self.saturation,
+                            value: self.value,
+                            custom_colors: &self.custom_colors,
+                            selected_custom_index: self.selected_custom_index,
+                            brush_size: self.brush_size,
+                            opacity: self.opacity,
+                            is_eraser: self.is_eraser,
+                        },
+                        viewport: ViewportState {
+                            zoom: self.zoom,
+                            pan_offset: self.pan_offset,
+                        },
+                    };
 
-                    match renderer.render() {
+                    match renderer.render(&frame) {
                         Ok(_) => {}
                         Err(wgpu::SurfaceError::Lost) => {
                             let size = self.window.as_ref().unwrap().inner_size();
@@ -425,12 +435,23 @@ impl ApplicationHandler for WindowApp {
                             // Check if click is on UI elements
                             let x = self.mouse_position.x;
                             let y = self.mouse_position.y;
-                            let window_width = self.window.as_ref().map(|w| w.inner_size().width as f32).unwrap_or(1280.0);
+                            let window_width = self
+                                .window
+                                .as_ref()
+                                .map(|w| w.inner_size().width as f32)
+                                .unwrap_or(1280.0);
                             let canvas = self.canvas.borrow();
                             let layer_count = canvas.layer_count();
                             let active_layer = canvas.active_layer();
                             drop(canvas);
-                            let hit = ui::hit_test(x, y, &self.custom_colors, layer_count, active_layer, window_width);
+                            let hit = ui::hit_test(
+                                x,
+                                y,
+                                &self.custom_colors,
+                                layer_count,
+                                active_layer,
+                                window_width,
+                            );
 
                             match hit {
                                 ui::UiElement::HueSlider(value) => {
@@ -438,9 +459,6 @@ impl ApplicationHandler for WindowApp {
                                     self.selected_custom_index = -1;
                                     self.slider_drag = Some(SliderType::Hue);
                                     self.update_hsv_preferences();
-                                    if let Some(renderer) = &mut self.renderer {
-                                        renderer.set_hsv(self.hue, self.saturation, self.value);
-                                    }
                                     if let Some(window) = &self.window {
                                         window.request_redraw();
                                     }
@@ -451,9 +469,6 @@ impl ApplicationHandler for WindowApp {
                                     self.selected_custom_index = -1;
                                     self.slider_drag = Some(SliderType::Saturation);
                                     self.update_hsv_preferences();
-                                    if let Some(renderer) = &mut self.renderer {
-                                        renderer.set_hsv(self.hue, self.saturation, self.value);
-                                    }
                                     if let Some(window) = &self.window {
                                         window.request_redraw();
                                     }
@@ -464,9 +479,6 @@ impl ApplicationHandler for WindowApp {
                                     self.selected_custom_index = -1;
                                     self.slider_drag = Some(SliderType::Value);
                                     self.update_hsv_preferences();
-                                    if let Some(renderer) = &mut self.renderer {
-                                        renderer.set_hsv(self.hue, self.saturation, self.value);
-                                    }
                                     if let Some(window) = &self.window {
                                         window.request_redraw();
                                     }
@@ -485,9 +497,6 @@ impl ApplicationHandler for WindowApp {
                                     self.saturation = hsv.s;
                                     self.value = hsv.v;
                                     self.update_hsv_preferences();
-                                    if let Some(renderer) = &mut self.renderer {
-                                        renderer.set_hsv(self.hue, self.saturation, self.value);
-                                    }
                                     if let Some(window) = &self.window {
                                         window.request_redraw();
                                     }
@@ -504,9 +513,6 @@ impl ApplicationHandler for WindowApp {
                                     }
                                     self.custom_colors.push([current.r, current.g, current.b]);
                                     self.update_hsv_preferences();
-                                    if let Some(renderer) = &mut self.renderer {
-                                        renderer.set_custom_colors(self.custom_colors.clone());
-                                    }
                                     if let Some(window) = &self.window {
                                         window.request_redraw();
                                     }
@@ -521,9 +527,6 @@ impl ApplicationHandler for WindowApp {
                                             e
                                         ));
                                     }
-                                    if let Some(renderer) = &mut self.renderer {
-                                        renderer.set_brush_size(size);
-                                    }
                                     println!("Selected brush size: {}", size);
                                     if let Some(window) = &self.window {
                                         window.request_redraw();
@@ -536,9 +539,6 @@ impl ApplicationHandler for WindowApp {
                                         "Eraser mode: {}",
                                         if self.is_eraser { "ON" } else { "OFF" }
                                     ));
-                                    if let Some(renderer) = &mut self.renderer {
-                                        renderer.set_eraser(self.is_eraser);
-                                    }
                                     if let Some(window) = &self.window {
                                         window.request_redraw();
                                     }
@@ -583,9 +583,6 @@ impl ApplicationHandler for WindowApp {
                                     let new_zoom = (self.zoom * 1.25).min(10.0);
                                     if (new_zoom - self.zoom).abs() > 0.001 {
                                         self.zoom = new_zoom;
-                                        if let Some(renderer) = &mut self.renderer {
-                                            renderer.set_zoom(new_zoom);
-                                        }
                                         if let Some(window) = &self.window {
                                             window.request_redraw();
                                         }
@@ -596,9 +593,6 @@ impl ApplicationHandler for WindowApp {
                                     let new_zoom = (self.zoom / 1.25).max(0.1);
                                     if (new_zoom - self.zoom).abs() > 0.001 {
                                         self.zoom = new_zoom;
-                                        if let Some(renderer) = &mut self.renderer {
-                                            renderer.set_zoom(new_zoom);
-                                        }
                                         if let Some(window) = &self.window {
                                             window.request_redraw();
                                         }
@@ -609,9 +603,6 @@ impl ApplicationHandler for WindowApp {
                                     self.opacity = opacity;
                                     self.preferences.brush.default_opacity = opacity;
                                     let _ = crate::preferences::save(&self.preferences);
-                                    if let Some(renderer) = &mut self.renderer {
-                                        renderer.set_opacity(opacity);
-                                    }
                                     logger::info(&format!("Opacity: {}", opacity));
                                     if let Some(window) = &self.window {
                                         window.request_redraw();
@@ -719,7 +710,8 @@ impl ApplicationHandler for WindowApp {
 
                             // Add the current mouse position as the first point (in canvas coords)
                             if let Some(active_stroke) = &mut *self.active_stroke.borrow_mut() {
-                                let canvas_point = self.screen_to_canvas(self.mouse_position.x, self.mouse_position.y);
+                                let canvas_point = self
+                                    .screen_to_canvas(self.mouse_position.x, self.mouse_position.y);
                                 active_stroke.add_point(canvas_point);
                                 println!(
                                     "Added first point to active stroke: ({}, {})",
@@ -755,9 +747,6 @@ impl ApplicationHandler for WindowApp {
                             self.is_eraser = true;
                             logger::info("Eraser mode: ON (right-click held)");
                             println!("Eraser mode: ON");
-                            if let Some(renderer) = &mut self.renderer {
-                                renderer.set_eraser(true);
-                            }
                             if let Some(window) = &self.window {
                                 window.request_redraw();
                             }
@@ -766,9 +755,6 @@ impl ApplicationHandler for WindowApp {
                             self.is_eraser = false;
                             logger::info("Eraser mode: OFF (right-click released)");
                             println!("Eraser mode: OFF");
-                            if let Some(renderer) = &mut self.renderer {
-                                renderer.set_eraser(false);
-                            }
                             if let Some(window) = &self.window {
                                 window.request_redraw();
                             }
@@ -791,10 +777,6 @@ impl ApplicationHandler for WindowApp {
                     // Pan in opposite direction of mouse movement (drag canvas with mouse)
                     self.pan_offset = (old_pan_x - dx / self.zoom, old_pan_y - dy / self.zoom);
                     self.last_mouse_position = screen_point;
-                    if let Some(renderer) = &mut self.renderer {
-                        renderer.set_zoom(self.zoom);
-                        renderer.set_pan(self.pan_offset);
-                    }
                     if let Some(window) = &self.window {
                         window.request_redraw();
                     }
@@ -810,7 +792,10 @@ impl ApplicationHandler for WindowApp {
                 {
                     let canvas_point = self.screen_to_canvas(screen_point.x, screen_point.y);
                     active_stroke.add_point(canvas_point);
-                    println!("Added point to active stroke: ({}, {})", canvas_point.x, canvas_point.y);
+                    println!(
+                        "Added point to active stroke: ({}, {})",
+                        canvas_point.x, canvas_point.y
+                    );
                     println!(
                         "Active stroke now has {} points",
                         active_stroke.points().len()
@@ -821,7 +806,9 @@ impl ApplicationHandler for WindowApp {
                 }
 
                 // Handle slider dragging (UI stays fixed, no transform)
-                if let Some((slider, value)) = ui::slider_drag(screen_point.x, screen_point.y, self.slider_drag) {
+                if let Some((slider, value)) =
+                    ui::slider_drag(screen_point.x, screen_point.y, self.slider_drag)
+                {
                     match slider {
                         SliderType::Hue => {
                             self.hue = value;
@@ -837,9 +824,6 @@ impl ApplicationHandler for WindowApp {
                         }
                     }
                     self.update_hsv_preferences();
-                    if let Some(renderer) = &mut self.renderer {
-                        renderer.set_hsv(self.hue, self.saturation, self.value);
-                    }
                     if let Some(window) = &self.window {
                         window.request_redraw();
                     }
@@ -850,10 +834,12 @@ impl ApplicationHandler for WindowApp {
             } => {
                 if key_event.state == winit::event::ElementState::Pressed {
                     // Handle space key for panning
-                    if let winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) = key_event.logical_key {
+                    if let winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) =
+                        key_event.logical_key
+                    {
                         self.is_panning = true;
                     }
-                    
+
                     // Check for 's' key (save/export)
                     // Note: Ctrl modifier detection may need additional handling
                     if let winit::keyboard::Key::Character(ref c) = key_event.logical_key
@@ -884,9 +870,6 @@ impl ApplicationHandler for WindowApp {
                                 self.saturation = hsv.s;
                                 self.value = hsv.v;
                                 self.update_hsv_preferences();
-                                if let Some(renderer) = &mut self.renderer {
-                                    renderer.set_hsv(self.hue, self.saturation, self.value);
-                                }
                                 if let Some(window) = &self.window {
                                     window.request_redraw();
                                 }
@@ -911,9 +894,6 @@ impl ApplicationHandler for WindowApp {
                                 self.saturation = hsv.s;
                                 self.value = hsv.v;
                                 self.update_hsv_preferences();
-                                if let Some(renderer) = &mut self.renderer {
-                                    renderer.set_hsv(self.hue, self.saturation, self.value);
-                                }
                                 if let Some(window) = &self.window {
                                     window.request_redraw();
                                 }
@@ -963,9 +943,6 @@ impl ApplicationHandler for WindowApp {
                                                 "Eraser mode: {}",
                                                 if self.is_eraser { "ON" } else { "OFF" }
                                             ));
-                                            if let Some(renderer) = &mut self.renderer {
-                                                renderer.set_eraser(self.is_eraser);
-                                            }
                                             if let Some(window) = &self.window {
                                                 window.request_redraw();
                                             }
@@ -977,9 +954,6 @@ impl ApplicationHandler for WindowApp {
                                             crate::canvas::brush_size_up(self.brush_size);
                                         self.preferences.brush.default_size = self.brush_size;
                                         let _ = crate::preferences::save(&self.preferences);
-                                        if let Some(renderer) = &mut self.renderer {
-                                            renderer.set_brush_size(self.brush_size);
-                                        }
                                         logger::info(&format!("Brush size: {}", self.brush_size));
                                         if let Some(window) = &self.window {
                                             window.request_redraw();
@@ -991,9 +965,6 @@ impl ApplicationHandler for WindowApp {
                                             crate::canvas::brush_size_down(self.brush_size);
                                         self.preferences.brush.default_size = self.brush_size;
                                         let _ = crate::preferences::save(&self.preferences);
-                                        if let Some(renderer) = &mut self.renderer {
-                                            renderer.set_brush_size(self.brush_size);
-                                        }
                                         logger::info(&format!("Brush size: {}", self.brush_size));
                                         if let Some(window) = &self.window {
                                             window.request_redraw();
