@@ -1,103 +1,89 @@
-# Technical Debt Fixes — v0.0.6
+# Technical Debt Fixes — v0.0.6 / v0.0.7
 
-This document covers the technical debt fixes applied in v0.0.6, the bugs they resolved, and the tests added to prevent regressions.
-
----
-
-## 1. Dead Code Removal
-
-**What:** Removed `RancerApp` and `AppConfig` structs from `lib.rs` — they were never used. The actual entry point in `main.rs` dispatches directly to platform-specific backends.
-
-**Why:** Confusing dead code that misled anyone reading the codebase about the app's architecture.
-
-**Files:** `src/lib.rs`
+This document covers the technical debt fixes applied across v0.0.6 and v0.0.7.
 
 ---
 
-## 2. Canvas Resize Coordinate Mapping
+## v0.0.6 Fixes
 
-**What:** Added `canvas.resize()` call in the `WindowEvent::Resized` handler so the canvas coordinate space matches the window size after resize.
+### 1. Dead Code Removal
+Removed `RancerApp` and `AppConfig` structs from `lib.rs` — never used.
 
-**Bug:** Strokes drawn before a window resize ended up at wrong positions relative to the new window size.
+### 2. Canvas Resize Coordinate Mapping
+Added `canvas.resize()` in `WindowEvent::Resized` handler.
 
-**Files:** `src/window_winit.rs`
+### 3. Shared UI Hit Detection
+Extracted 449 lines of duplicated UI hit detection into `src/ui.rs`.
 
----
+### 4. Combined Vertex Buffer with Stroke Separation
+Combined all stroke vertices into a single GPU buffer, but draw each stroke separately.
 
-## 3. Shared UI Hit Detection
+### 5. WGPU Error Handling on Windows
+Made the Cairo fallback Linux-only via `#[cfg]` attributes.
 
-**What:** Extracted 449 lines of duplicated UI hit detection logic from `window_winit.rs` and `window_gtk4.rs` into a shared `src/ui.rs` module.
-
-**Bug fixed:** The winit backend never set `slider_drag` on click, meaning slider dragging only worked on GTK4. The unified module ensures consistent behavior.
-
-**Also fixed:** GTK4 checked the save button *before* custom colors while winit checked them in reverse order. The unified version eliminates this inconsistency.
-
-**Files:** `src/ui.rs` (new), `src/window_winit.rs`, `src/window_gtk4.rs`, `src/lib.rs`
-
-**Tests:** 16 new tests in `ui::tests` covering all UI element hit detection.
+### 6. Zero-Size Window Guard
+Added guard for `(0, 0)` window size during `resumed` phase.
 
 ---
 
-## 4. Combined Vertex Buffer with Stroke Separation
+## v0.0.7 Structural Refactoring
 
-**What:** Combined all stroke vertices into a single GPU buffer per frame, but draw each stroke separately using vertex range offsets.
+### 1. Split `geometry.rs` (2095 → 3 files)
+- **Before:** Single 2095-line monolith mixing stroke geometry, UI geometry, and shared utilities
+- **After:** `geometry/mod.rs` (shared utilities + re-exports), `geometry/stroke.rs` (stroke vertices), `geometry/ui_elements.rs` (UI vertices)
+- **Impact:** Zero changes to consumers — `pub use` re-exports maintain backward compatibility
 
-**Bug:** The initial implementation drew all vertices in a single `draw()` call, which caused the GPU to treat all strokes as one continuous triangle strip — connecting separate strokes together with visible lines.
+### 2. Refactored `renderer.rs` (1129 → 477 lines)
+- **Before:** 15 fields (9 app state + 6 WGPU), 12 setter methods, 12 proxy vertex methods
+- **After:** 11 fields (all WGPU internals), 0 setters, 0 proxies
+- **New pattern:** `RenderFrame` — single source of truth for render data, passed to `render(&mut self, frame: &RenderFrame)`
+- **Impact:** Eliminated all state sync bugs between `WindowApp` and `Renderer`
 
-**Fix:** Track `start..end` ranges per stroke while building the combined buffer, then issue separate `draw(range, 0..1)` calls per stroke. This gives the best of both worlds: one GPU allocation, but correct stroke separation.
+### 3. Refactored `opengl_renderer.rs` (444 → 276 lines)
+- **Before:** `render_hsv` took 12 parameters, 12 proxy vertex methods
+- **After:** `render(&self, frame: &GlRenderFrame)` — 1 parameter, batched UI rendering
+- **Performance:** 12 GPU uploads per frame → 2 (strokes + batched UI)
 
-**Performance:** Reduces GPU buffer allocations from N+1 per frame (one per stroke + one per UI element) to 2 (one combined stroke buffer + one combined UI buffer).
+### 4. Refactored `window_gtk4.rs` (1222 → ~1030 lines)
+- **Before:** ~20 individual `Rc<RefCell<...>>` variables, 17-parameter `setup_mouse_events`
+- **After:** Single `GlRenderState` struct, 4-parameter `setup_mouse_events`
+- **Performance:** Debounced preference saves (save on close only, not per-event)
 
-**Files:** `src/renderer.rs`
+### 5. Refactored `window_winit.rs` (~1180 → ~1035 lines)
+- **Before:** 16 scattered state fields, deeply nested event handlers
+- **After:** `WinitRenderState` struct, extracted `handle_ui_click()`, `handle_keyboard()`, `handle_cursor_moved()` methods
+- **New:** `request_redraw()` helper consolidates triple redraw + Windows repaint workaround
 
-**Tests:** 3 new tests in `renderer::tests`:
-- `test_combined_stroke_buffer_tracks_ranges` — verifies ranges are non-overlapping and cover all vertices
-- `test_combined_buffer_empty_canvas` — verifies empty canvas produces no ranges
-- `test_single_point_stroke_excluded` — verifies single-point strokes are skipped
+### 6. MSAA Fix
+- **Before:** `sample_count` hardcoded to 1 despite config specifying 4
+- **After:** Multisampled texture created when `sample_count > 1`, resolves to swapchain
 
----
+### 7. Export Fixes
+- **Bounding box:** Export now computes stroke bounding box instead of using window dimensions
+- **File dialog:** Replaced auto-save with `rfd` native save dialog
+- **OS notifications:** `notify-send` on Linux, console print on Windows
+- **Size limits:** Min 100×100, max 4096×4096
 
-## 5. WGPU Error Handling on Windows
-
-**What:** Made the Cairo fallback Linux-only via `#[cfg]` attributes. On Windows, WGPU failure now returns a clear error instead of silently entering an invalid backend state.
-
-**Bug:** If WGPU surface creation failed on Windows, the renderer fell back to `RenderBackend::Cairo` — but Cairo is Linux-only. On Windows, this silently set an invalid backend.
-
-**Files:** `src/renderer.rs`
-
----
-
-## 6. Zero-Size Window Guard
-
-**What:** Added a guard in `window_winit.rs` that falls back to preferences dimensions when `window.inner_size()` returns `(0, 0)` during the `resumed` phase.
-
-**Bug:** On some Windows systems, `window.inner_size()` returns `(0, 0)` during the `resumed` callback — before the OS has fully realized the window. This zero size was passed to `surface.configure()`, causing a wgpu panic:
-```
-wgpu error: Validation Error
-In Surface::configure
-Both `Surface` width and height must be non-zero.
-```
-
-**Two-layer defense:**
-1. **`window_winit.rs`** — If `inner_size()` returns zero, fall back to `preferences.window.width/height` (1280x720)
-2. **`renderer.rs`** — `.max(1)` on surface dimensions as a second line of defense
-
-**Files:** `src/window_winit.rs`, `src/renderer.rs`
-
-**Tests:** 3 new tests in `window_winit::tests`:
-- `test_zero_size_window_guard` — verifies fallback to preferences when size is (0, 0)
-- `test_nonzero_size_window_uses_actual_size` — verifies actual size is used when valid
-- `test_partial_zero_size_guard` — verifies guard works when only one dimension is zero
+### 8. Bug Fixes
+- Layer rendering order inverted → fixed with `.enumerate().rev()`
+- Active stroke renders on top of all layers → fixed by inserting at active layer position
+- Slider drag blocked by drawing state check → fixed by checking for active stroke before returning
+- Duplicate `#[test]` attribute on `test_active_stroke_with_opacity`
 
 ---
 
 ## Test Summary
 
-| Module | Tests Added | Total |
-|--------|-------------|-------|
-| `ui::tests` | 16 | 16 |
-| `renderer::tests` | 3 | 5 |
-| `window_winit::tests` | 3 | 8 |
-| **Total** | **22** | **146** |
+| Module | Tests (v0.0.7) |
+|--------|----------------|
+| `canvas::tests` | 38 |
+| `geometry::tests` | 32 |
+| `export::tests` | 10 |
+| `preferences::tests` | 13 |
+| `renderer::tests` | 5 |
+| `ui::tests` | 16 |
+| `logger::tests` | 2 |
+| `window_winit::tests` | 8 |
+| **Total** | **168** |
 
-All 146 tests pass with no regressions.
+All 168 tests pass with no regressions.

@@ -1,11 +1,31 @@
 ## [0.0.7] - 2026-04-03
 
 ### Added
+- **Layer system**: Full layer support — multiple layers (up to 20), visibility toggle, opacity, lock, reorder, add/delete
 - **Zoom & Pan**: Mouse wheel zoom toward cursor, space+drag panning, zoom in/out UI buttons
-- **Layer system (Phase 1)**: Layer struct with visibility, opacity, and locked state; Canvas now supports multiple layers
+- **MSAA support**: Multisampled rendering with resolve texture (WGPU backend, configurable sample count)
+- **Native export dialog**: File save dialog via `rfd`, OS notifications (`notify-send` on Linux), console feedback
+- **Export bounding box**: Export now captures all stroke content regardless of position (min 100x100, max 4096x4096)
+- **168 unit tests** across canvas, geometry, export, preferences, renderer, and UI modules
 
 ### Changed
-- Updated version to 0.0.7
+- **Refactored `geometry.rs`** (2095 → 3 files): Split into `geometry/mod.rs`, `geometry/stroke.rs`, `geometry/ui_elements.rs`
+- **Refactored `renderer.rs`** (1129 → 477 lines): Introduced `RenderFrame` pattern, eliminated duplicated state, removed 12 setter methods and 12 proxy vertex methods
+- **Refactored `opengl_renderer.rs`** (444 → 276 lines): Introduced `GlRenderFrame` pattern, batched UI rendering (12 GPU uploads → 1)
+- **Refactored `window_gtk4.rs`** (1222 → ~1030 lines): Consolidated ~20 `Rc<RefCell<...>>` into single `GlRenderState`, debounced preference saves
+- **Refactored `window_winit.rs`** (~1180 → ~1035 lines): Extracted `handle_ui_click()`, `handle_keyboard()`, `handle_cursor_moved()` methods, consolidated state into `WinitRenderState`
+- **Export UX**: Replaced silent auto-save with native file dialog, added OS notifications
+
+### Fixed
+- **Layer rendering order**: Layers now render back-to-front correctly (bottom layer first)
+- **Active stroke layer placement**: Active stroke now renders at the correct layer position instead of on top of all layers
+- **Slider drag regression**: Fixed GTK4 slider drag being blocked by drawing state check
+- **Export window-area clipping**: Export now computes stroke bounding box and captures all content
+- **Duplicate `#[test]` attribute** on `test_active_stroke_with_opacity` in canvas.rs
+- **Unused import warnings** across geometry submodules
+
+### Dependencies
+- Added `rfd = "0.15"` (Linux + Windows) for native file dialogs
 
 ## [0.0.6] - 2026-03-30
 

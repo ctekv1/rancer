@@ -18,10 +18,30 @@ use std::rc::Rc;
 
 use crate::canvas::{ActiveStroke, Canvas, Point};
 use crate::logger;
-use crate::opengl_renderer::GlRenderer;
+use crate::opengl_renderer::{GlRenderFrame, GlRenderer, GlUiState, GlViewportState};
 use crate::preferences::Preferences;
 use crate::ui::{self, SliderType};
 use crate::window_backend::{MouseState as BackendMouseState, WindowBackend};
+
+/// Consolidated render state shared across all GTK4 closures.
+/// Replaces ~20 individual Rc<RefCell<...>> variables.
+struct GlRenderState {
+    hue: f32,
+    saturation: f32,
+    value: f32,
+    custom_colors: Vec<[u8; 3]>,
+    selected_custom_index: i32,
+    brush_size: f32,
+    opacity: f32,
+    is_eraser: bool,
+    zoom: f32,
+    pan_offset: (f32, f32),
+    is_panning: bool,
+    last_mouse_position: Point,
+    slider_drag: Option<SliderType>,
+    mouse_state: MouseState,
+    mouse_position: Point,
+}
 
 /// Represents the current state of mouse interaction
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -32,8 +52,6 @@ pub enum MouseState {
     Drawing,
 }
 
-/// Brush size options (defined in canvas::BRUSH_SIZES)
-///
 /// Window application state using GTK4
 #[allow(dead_code)]
 pub struct WindowApp {
@@ -120,16 +138,6 @@ impl WindowApp {
         crate::canvas::hsv_to_rgb(self.hue, self.saturation, self.value)
     }
 
-    /// Update HSV values in preferences and save
-    #[allow(dead_code)]
-    fn update_hsv_preferences(&mut self) {
-        self.preferences.palette.h = self.hue;
-        self.preferences.palette.s = self.saturation;
-        self.preferences.palette.v = self.value;
-        self.preferences.palette.custom_colors = self.custom_colors.clone();
-        let _ = crate::preferences::save(&self.preferences);
-    }
-
     /// Transform screen coordinates to canvas coordinates using current zoom/pan
     #[allow(dead_code)]
     fn screen_to_canvas(&self, screen_x: f32, screen_y: f32) -> Point {
@@ -148,450 +156,361 @@ impl WindowBackend for WindowApp {
 
         let canvas = self.canvas.clone();
         let active_stroke = self.active_stroke.clone();
-        let mouse_state = self.mouse_state;
-        let mouse_position = self.mouse_position;
-        let brush_size = self.brush_size;
-        let opacity = self.opacity;
-        let is_eraser = self.is_eraser;
-        let hue = self.hue;
-        let saturation = self.saturation;
-        let value = self.value;
-        let custom_colors = self.custom_colors.clone();
-        let selected_custom_index = self.selected_custom_index;
-        let slider_drag = self.slider_drag;
         let preferences = Rc::new(RefCell::new(self.preferences.clone()));
 
-        self.app.connect_activate(move |app| {
-            let prefs = preferences.borrow();
+        // Consolidated render state — replaces ~20 individual Rc<RefCell<...>>
+        let render_state = Rc::new(RefCell::new(GlRenderState {
+            hue: self.hue,
+            saturation: self.saturation,
+            value: self.value,
+            custom_colors: self.custom_colors.clone(),
+            selected_custom_index: self.selected_custom_index,
+            brush_size: self.brush_size,
+            opacity: self.opacity,
+            is_eraser: self.is_eraser,
+            zoom: 1.0,
+            pan_offset: (0.0, 0.0),
+            is_panning: false,
+            last_mouse_position: Point { x: 0.0, y: 0.0 },
+            slider_drag: None,
+            mouse_state: MouseState::Idle,
+            mouse_position: Point { x: 0.0, y: 0.0 },
+        }));
 
-            // Create the window using preferences
-            let window = ApplicationWindow::builder()
-                .application(app)
-                .title(&prefs.window.title)
-                .default_width(prefs.window.width as i32)
-                .default_height(prefs.window.height as i32)
-                .build();
+        self.app.connect_activate({
+            let canvas = canvas.clone();
+            let active_stroke = active_stroke.clone();
+            let render_state = render_state.clone();
+            let preferences = preferences.clone();
 
-            logger::info(&format!(
-                "Window size: {}x{}",
-                prefs.window.width, prefs.window.height
-            ));
-            logger::info(&format!("Window title: {}", prefs.window.title));
-            logger::info("========================");
+            move |app| {
+                let prefs = preferences.borrow();
 
-            // Drop borrow before moving preferences into closures
-            drop(prefs);
+                let window = ApplicationWindow::builder()
+                    .application(app)
+                    .title(&prefs.window.title)
+                    .default_width(prefs.window.width as i32)
+                    .default_height(prefs.window.height as i32)
+                    .build();
 
-            // Create GLArea for OpenGL rendering
-            let gl_area = GLArea::builder().hexpand(true).vexpand(true).build();
-            gl_area.set_focusable(true);
+                logger::info(&format!(
+                    "Window size: {}x{}",
+                    prefs.window.width, prefs.window.height
+                ));
+                logger::info(&format!("Window title: {}", prefs.window.title));
+                logger::info("========================");
 
-            window.set_child(Some(&gl_area));
+                drop(prefs);
 
-            // Shared state (clone non-Copy types inside closure)
-            let brush_size_shared = Rc::new(RefCell::new(brush_size));
-            let opacity_shared = Rc::new(RefCell::new(opacity));
-            let is_eraser_shared = Rc::new(RefCell::new(is_eraser));
-            let hue_shared = Rc::new(RefCell::new(hue));
-            let saturation_shared = Rc::new(RefCell::new(saturation));
-            let value_shared = Rc::new(RefCell::new(value));
-            let custom_colors_shared = Rc::new(RefCell::new(custom_colors.clone()));
-            let selected_custom_index_shared = Rc::new(RefCell::new(selected_custom_index));
-            let slider_drag_shared = Rc::new(RefCell::new(slider_drag));
-            let zoom_shared = Rc::new(RefCell::new(1.0f32));
-            let pan_offset_shared = Rc::new(RefCell::new((0.0f32, 0.0f32)));
-            let is_panning_shared = Rc::new(RefCell::new(false));
-            let gl_renderer: Rc<RefCell<Option<GlRenderer>>> = Rc::new(RefCell::new(None));
+                let gl_area = GLArea::builder().hexpand(true).vexpand(true).build();
+                gl_area.set_focusable(true);
+                window.set_child(Some(&gl_area));
 
-            // Set up mouse event handlers
-            let mouse_position_rc = Rc::new(RefCell::new(mouse_position));
-            setup_mouse_events(
-                &gl_area,
-                &canvas,
-                &active_stroke,
-                mouse_state,
-                mouse_position_rc.clone(),
-                brush_size_shared.clone(),
-                opacity_shared.clone(),
-                is_eraser_shared.clone(),
-                hue_shared.clone(),
-                saturation_shared.clone(),
-                value_shared.clone(),
-                custom_colors_shared.clone(),
-                selected_custom_index_shared.clone(),
-                slider_drag_shared.clone(),
-                preferences.clone(),
-                zoom_shared.clone(),
-                pan_offset_shared.clone(),
-                is_panning_shared.clone(),
-                Point { x: 0.0, y: 0.0 },
-            );
+                let gl_renderer: Rc<RefCell<Option<GlRenderer>>> = Rc::new(RefCell::new(None));
 
-            // Set up keyboard handler
-            let key_controller = EventControllerKey::new();
-            let canvas_kb = canvas.clone();
-            let prefs_kb = preferences.clone();
-            let gl_area_kb = gl_area.clone();
-            let is_eraser_kb = is_eraser_shared.clone();
-            let brush_size_kb = brush_size_shared.clone();
-            let active_stroke_kb = active_stroke.clone();
-            let hue_kb = hue_shared.clone();
-            let saturation_kb = saturation_shared.clone();
-            let value_kb = value_shared.clone();
-            let custom_colors_kb = custom_colors_shared.clone();
-            let selected_custom_index_kb = selected_custom_index_shared.clone();
-            let zoom_kb = zoom_shared.clone();
-            let pan_offset_kb = pan_offset_shared.clone();
-            let _zoom_kb = zoom_kb;
-            let _pan_offset_kb = pan_offset_kb;
-            let is_panning_kb = is_panning_shared.clone();
+                setup_mouse_events(
+                    &gl_area,
+                    &canvas,
+                    &active_stroke,
+                    &render_state,
+                );
 
-            key_controller.connect_key_pressed(move |_controller, key, _keycode, state| {
-                // Handle space key for panning
-                if key == gtk4::gdk::Key::space {
-                    *is_panning_kb.borrow_mut() = true;
-                }
+                // Keyboard handler
+                let key_controller = EventControllerKey::new();
+                let canvas_kb = canvas.clone();
+                let active_stroke_kb = active_stroke.clone();
+                let gl_area_kb = gl_area.clone();
+                let render_state_kb = render_state.clone();
 
-                match key {
-                    gtk4::gdk::Key::s | gtk4::gdk::Key::S => {
-                        // Export canvas to PNG
-                        let canvas_ref = canvas_kb.borrow();
-                        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
-                        let filename = format!("rancer_export_{timestamp}.png");
-                        let export_path = dirs::picture_dir()
-                            .unwrap_or_else(|| std::path::PathBuf::from("."))
-                            .join(filename);
-
-                        logger::info(&format!("Exporting canvas to: {export_path:?}"));
-
-                        match crate::export::export_to_png(&canvas_ref, &export_path) {
-                            Ok(_) => {
-                                logger::info(&format!("Export successful: {export_path:?}"));
-                                println!("Exported to: {export_path:?}");
-                            }
-                            Err(e) => {
-                                logger::error(&format!("Export failed: {e}"));
-                                eprintln!("Export failed: {e}");
-                            }
-                        }
-                        glib::Propagation::Stop
+                key_controller.connect_key_pressed(move |_controller, key, _keycode, state| {
+                    if key == gtk4::gdk::Key::space {
+                        render_state_kb.borrow_mut().is_panning = true;
                     }
-                    gtk4::gdk::Key::Up => {
-                        // Navigate custom colors
-                        let custom_colors = custom_colors_kb.borrow();
-                        if !custom_colors.is_empty() {
-                            let mut selected = selected_custom_index_kb.borrow_mut();
-                            let new_index = if *selected < 0 {
-                                0
-                            } else {
-                                ((*selected as usize + 1) % custom_colors.len()) as i32
-                            };
-                            *selected = new_index;
-                            let color = custom_colors[new_index as usize];
-                            let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
-                                r: color[0],
-                                g: color[1],
-                                b: color[2],
-                                a: 255,
-                            });
-                            *hue_kb.borrow_mut() = hsv.h;
-                            *saturation_kb.borrow_mut() = hsv.s;
-                            *value_kb.borrow_mut() = hsv.v;
-                            let mut prefs = prefs_kb.borrow_mut();
-                            prefs.palette.h = hsv.h;
-                            prefs.palette.s = hsv.s;
-                            prefs.palette.v = hsv.v;
-                            let _ = crate::preferences::save(&prefs);
-                        }
-                        gl_area_kb.queue_render();
-                        glib::Propagation::Stop
-                    }
-                    gtk4::gdk::Key::Down => {
-                        // Navigate custom colors
-                        let custom_colors = custom_colors_kb.borrow();
-                        if !custom_colors.is_empty() {
-                            let mut selected = selected_custom_index_kb.borrow_mut();
-                            let new_index = if *selected <= 0 {
-                                custom_colors.len() as i32 - 1
-                            } else {
-                                *selected - 1
-                            };
-                            *selected = new_index;
-                            let color = custom_colors[new_index as usize];
-                            let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
-                                r: color[0],
-                                g: color[1],
-                                b: color[2],
-                                a: 255,
-                            });
-                            *hue_kb.borrow_mut() = hsv.h;
-                            *saturation_kb.borrow_mut() = hsv.s;
-                            *value_kb.borrow_mut() = hsv.v;
-                            let mut prefs = prefs_kb.borrow_mut();
-                            prefs.palette.h = hsv.h;
-                            prefs.palette.s = hsv.s;
-                            prefs.palette.v = hsv.v;
-                            let _ = crate::preferences::save(&prefs);
-                        }
-                        gl_area_kb.queue_render();
-                        glib::Propagation::Stop
-                    }
-                    gtk4::gdk::Key::z | gtk4::gdk::Key::Z => {
-                        if state.contains(ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK) {
-                            // Ctrl+Shift+Z: Redo
-                            let mut canvas = canvas_kb.borrow_mut();
-                            if canvas.can_redo() {
-                                canvas.redo();
-                                logger::info("Redo: restored last undone stroke");
-                                println!("Redo: restored last undone stroke");
-                                gl_area_kb.queue_render();
+
+                    match key {
+                        gtk4::gdk::Key::s | gtk4::gdk::Key::S => {
+                            let canvas_ref = canvas_kb.borrow();
+                            let gl_area_ref = gl_area_kb.clone();
+
+                            let filename = crate::export_ui::default_export_filename();
+                            let handle = rfd::FileDialog::new()
+                                .set_file_name(&filename)
+                                .add_filter("PNG Image", &["png"])
+                                .save_file();
+
+                            if let Some(path) = handle {
+                                match crate::export::export_to_png(&canvas_ref, &path) {
+                                    Ok(_) => {
+                                        crate::export_ui::notify_export_result(true, &path, None);
+                                    }
+                                    Err(e) => {
+                                        crate::export_ui::notify_export_result(false, &path, Some(&e.to_string()));
+                                    }
+                                }
+                                gl_area_ref.queue_render();
                             }
                             glib::Propagation::Stop
-                        } else if state.contains(ModifierType::CONTROL_MASK) {
-                            // Ctrl+Z: Undo
-                            let mut canvas = canvas_kb.borrow_mut();
-                            if canvas.can_undo() {
-                                canvas.undo();
-                                logger::info("Undo: removed last stroke");
-                                println!("Undo: removed last stroke");
-                                gl_area_kb.queue_render();
-                            }
-                            glib::Propagation::Stop
-                        } else {
-                            glib::Propagation::Proceed
                         }
-                    }
-                    gtk4::gdk::Key::y | gtk4::gdk::Key::Y => {
-                        if state.contains(ModifierType::CONTROL_MASK) {
-                            // Ctrl+Y: Redo (alternative)
-                            let mut canvas = canvas_kb.borrow_mut();
-                            if canvas.can_redo() {
-                                canvas.redo();
-                                logger::info("Redo: restored last undone stroke");
-                                println!("Redo: restored last undone stroke");
-                                gl_area_kb.queue_render();
+                        gtk4::gdk::Key::Up => {
+                            let mut state = render_state_kb.borrow_mut();
+                            if !state.custom_colors.is_empty() {
+                                let new_index = if state.selected_custom_index < 0 {
+                                    0
+                                } else {
+                                    ((state.selected_custom_index as usize + 1) % state.custom_colors.len()) as i32
+                                };
+                                state.selected_custom_index = new_index;
+                                let color = state.custom_colors[new_index as usize];
+                                let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
+                                    r: color[0], g: color[1], b: color[2], a: 255,
+                                });
+                                state.hue = hsv.h;
+                                state.saturation = hsv.s;
+                                state.value = hsv.v;
                             }
-                            glib::Propagation::Stop
-                        } else {
-                            glib::Propagation::Proceed
-                        }
-                    }
-                    gtk4::gdk::Key::Delete => {
-                        if state.contains(ModifierType::CONTROL_MASK) {
-                            // Ctrl+Delete: Clear canvas
-                            let mut canvas = canvas_kb.borrow_mut();
-                            canvas.clear();
-                            logger::info("Canvas cleared");
+                            drop(state);
                             gl_area_kb.queue_render();
+                            glib::Propagation::Stop
                         }
-                        glib::Propagation::Stop
-                    }
-                    gtk4::gdk::Key::e | gtk4::gdk::Key::E => {
-                        // Toggle eraser (only when not drawing)
-                        let is_drawing = active_stroke_kb.borrow().is_some();
-                        if !is_drawing {
-                            let mut is_eraser = is_eraser_kb.borrow_mut();
-                            *is_eraser = !*is_eraser;
-                            logger::info(&format!(
-                                "Eraser mode: {}",
-                                if *is_eraser { "ON" } else { "OFF" }
-                            ));
+                        gtk4::gdk::Key::Down => {
+                            let mut state = render_state_kb.borrow_mut();
+                            if !state.custom_colors.is_empty() {
+                                let new_index = if state.selected_custom_index <= 0 {
+                                    state.custom_colors.len() as i32 - 1
+                                } else {
+                                    state.selected_custom_index - 1
+                                };
+                                state.selected_custom_index = new_index;
+                                let color = state.custom_colors[new_index as usize];
+                                let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
+                                    r: color[0], g: color[1], b: color[2], a: 255,
+                                });
+                                state.hue = hsv.h;
+                                state.saturation = hsv.s;
+                                state.value = hsv.v;
+                            }
+                            drop(state);
                             gl_area_kb.queue_render();
+                            glib::Propagation::Stop
                         }
-                        glib::Propagation::Stop
-                    }
-                    gtk4::gdk::Key::plus | gtk4::gdk::Key::equal => {
-                        // Increase brush size
-                        let mut brush = brush_size_kb.borrow_mut();
-                        *brush = crate::canvas::brush_size_up(*brush);
-                        logger::info(&format!("Brush size: {}", *brush));
-                        let mut prefs = prefs_kb.borrow_mut();
-                        prefs.brush.default_size = *brush;
-                        let _ = crate::preferences::save(&prefs);
-                        gl_area_kb.queue_render();
-                        glib::Propagation::Stop
-                    }
-                    gtk4::gdk::Key::minus => {
-                        // Decrease brush size
-                        let mut brush = brush_size_kb.borrow_mut();
-                        *brush = crate::canvas::brush_size_down(*brush);
-                        logger::info(&format!("Brush size: {}", *brush));
-                        let mut prefs = prefs_kb.borrow_mut();
-                        prefs.brush.default_size = *brush;
-                        let _ = crate::preferences::save(&prefs);
-                        gl_area_kb.queue_render();
-                        glib::Propagation::Stop
-                    }
-                    _ => glib::Propagation::Proceed,
-                }
-            });
-
-            // Handle space key release for panning
-            let is_panning_release = is_panning_shared.clone();
-            key_controller.connect_key_released(move |_controller, key, _keycode, _state| {
-                if key == gtk4::gdk::Key::space {
-                    *is_panning_release.borrow_mut() = false;
-                }
-            });
-
-            gl_area.add_controller(key_controller);
-
-            // Set up scroll handler for zoom
-            let zoom_scroll = zoom_shared.clone();
-            let pan_scroll = pan_offset_shared.clone();
-            let gl_area_scroll = gl_area.clone();
-            let mouse_pos_for_scroll = mouse_position_rc.clone();
-            let scroll_controller =
-                EventControllerScroll::new(gtk4::EventControllerScrollFlags::VERTICAL);
-            scroll_controller.connect_scroll(move |_controller, _dx, dy| {
-                let old_zoom = *zoom_scroll.borrow();
-                let zoom_factor = 1.25;
-                let new_zoom = if dy < 0.0 {
-                    // Scroll up = zoom in
-                    (old_zoom * zoom_factor).min(10.0)
-                } else if dy > 0.0 {
-                    // Scroll down = zoom out
-                    (old_zoom / zoom_factor).max(0.1)
-                } else {
-                    old_zoom
-                };
-
-                if (new_zoom - old_zoom).abs() > 0.001 {
-                    // Zoom toward mouse position:
-                    // 1. Calculate where mouse is in canvas coordinates before zoom
-                    let old_pan = *pan_scroll.borrow();
-                    let mouse_pos = *mouse_pos_for_scroll.borrow();
-                    let mouse_canvas_x = mouse_pos.x / old_zoom + old_pan.0;
-                    let mouse_canvas_y = mouse_pos.y / old_zoom + old_pan.1;
-
-                    // 2. Calculate new pan so that same canvas point is under mouse after zoom
-                    let new_pan_x = mouse_canvas_x - mouse_pos.x / new_zoom;
-                    let new_pan_y = mouse_canvas_y - mouse_pos.y / new_zoom;
-
-                    *zoom_scroll.borrow_mut() = new_zoom;
-                    *pan_scroll.borrow_mut() = (new_pan_x, new_pan_y);
-
-                    gl_area_scroll.queue_render();
-                }
-                glib::Propagation::Stop
-            });
-            gl_area.add_controller(scroll_controller);
-
-            // Set up OpenGL render callback
-            let gl_renderer_clone = gl_renderer.clone();
-            let canvas_clone = canvas.clone();
-            let active_stroke_clone = active_stroke.clone();
-            let brush_for_render = brush_size_shared.clone();
-            let opacity_for_render = opacity_shared.clone();
-            let is_eraser_for_render = is_eraser_shared.clone();
-            let hue_for_render = hue_shared.clone();
-            let saturation_for_render = saturation_shared.clone();
-            let value_for_render = value_shared.clone();
-            let custom_colors_for_render = custom_colors_shared.clone();
-            let selected_custom_index_for_render = selected_custom_index_shared.clone();
-
-            gl_area.connect_render(move |gl_area, _context| {
-                // Ensure GL context is current before any GL operations
-                gl_area.make_current();
-
-                let _gl_context = match gl_area.context() {
-                    Some(ctx) => ctx,
-                    None => {
-                        logger::warn("GLArea has no context, skipping render");
-                        return glib::Propagation::Stop;
-                    }
-                };
-
-                // Lazily initialize the GL renderer on first render
-                if gl_renderer_clone.borrow().is_none() {
-                    if let Err(e) = crate::gl_loader::init_gl_library() {
-                        logger::error(&format!("Failed to initialize GL library: {e}"));
-                        return glib::Propagation::Stop;
-                    }
-
-                    let gl = Rc::new(unsafe {
-                        glow::Context::from_loader_function(crate::gl_loader::create_gl_loader())
-                    });
-                    match GlRenderer::new(gl) {
-                        Ok(renderer) => {
-                            logger::info("OpenGL renderer initialized successfully");
-                            *gl_renderer_clone.borrow_mut() = Some(renderer);
+                        gtk4::gdk::Key::z | gtk4::gdk::Key::Z => {
+                            if state.contains(ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK) {
+                                let mut canvas = canvas_kb.borrow_mut();
+                                if canvas.can_redo() {
+                                    canvas.redo();
+                                    logger::info("Redo: restored last undone stroke");
+                                    println!("Redo: restored last undone stroke");
+                                    gl_area_kb.queue_render();
+                                }
+                                glib::Propagation::Stop
+                            } else if state.contains(ModifierType::CONTROL_MASK) {
+                                let mut canvas = canvas_kb.borrow_mut();
+                                if canvas.can_undo() {
+                                    canvas.undo();
+                                    logger::info("Undo: removed last stroke");
+                                    println!("Undo: removed last stroke");
+                                    gl_area_kb.queue_render();
+                                }
+                                glib::Propagation::Stop
+                            } else {
+                                glib::Propagation::Proceed
+                            }
                         }
-                        Err(e) => {
-                            logger::error(&format!("Failed to initialize OpenGL renderer: {e}"));
+                        gtk4::gdk::Key::y | gtk4::gdk::Key::Y => {
+                            if state.contains(ModifierType::CONTROL_MASK) {
+                                let mut canvas = canvas_kb.borrow_mut();
+                                if canvas.can_redo() {
+                                    canvas.redo();
+                                    logger::info("Redo: restored last undone stroke");
+                                    println!("Redo: restored last undone stroke");
+                                    gl_area_kb.queue_render();
+                                }
+                                glib::Propagation::Stop
+                            } else {
+                                glib::Propagation::Proceed
+                            }
+                        }
+                        gtk4::gdk::Key::Delete => {
+                            if state.contains(ModifierType::CONTROL_MASK) {
+                                let mut canvas = canvas_kb.borrow_mut();
+                                canvas.clear();
+                                logger::info("Canvas cleared");
+                                gl_area_kb.queue_render();
+                            }
+                            glib::Propagation::Stop
+                        }
+                        gtk4::gdk::Key::e | gtk4::gdk::Key::E => {
+                            let is_drawing = active_stroke_kb.borrow().is_some();
+                            if !is_drawing {
+                                render_state_kb.borrow_mut().is_eraser =
+                                    !render_state_kb.borrow().is_eraser;
+                                logger::info(&format!(
+                                    "Eraser mode: {}",
+                                    if render_state_kb.borrow().is_eraser { "ON" } else { "OFF" }
+                                ));
+                                gl_area_kb.queue_render();
+                            }
+                            glib::Propagation::Stop
+                        }
+                        gtk4::gdk::Key::plus | gtk4::gdk::Key::equal => {
+                            let mut state = render_state_kb.borrow_mut();
+                            state.brush_size = crate::canvas::brush_size_up(state.brush_size);
+                            logger::info(&format!("Brush size: {}", state.brush_size));
+                            drop(state);
+                            gl_area_kb.queue_render();
+                            glib::Propagation::Stop
+                        }
+                        gtk4::gdk::Key::minus => {
+                            let mut state = render_state_kb.borrow_mut();
+                            state.brush_size = crate::canvas::brush_size_down(state.brush_size);
+                            logger::info(&format!("Brush size: {}", state.brush_size));
+                            drop(state);
+                            gl_area_kb.queue_render();
+                            glib::Propagation::Stop
+                        }
+                        _ => glib::Propagation::Proceed,
+                    }
+                });
+
+                key_controller.connect_key_released({
+                    let render_state = render_state.clone();
+                    move |_controller, key, _keycode, _state| {
+                        if key == gtk4::gdk::Key::space {
+                            render_state.borrow_mut().is_panning = false;
+                        }
+                    }
+                });
+
+                gl_area.add_controller(key_controller);
+
+                // Scroll handler for zoom
+                let gl_area_scroll = gl_area.clone();
+                let render_state_scroll = render_state.clone();
+                let scroll_controller =
+                    EventControllerScroll::new(gtk4::EventControllerScrollFlags::VERTICAL);
+                scroll_controller.connect_scroll(move |_controller, _dx, dy| {
+                    let mut state = render_state_scroll.borrow_mut();
+                    let old_zoom = state.zoom;
+                    let zoom_factor = 1.25;
+                    let new_zoom = if dy < 0.0 {
+                        (old_zoom * zoom_factor).min(10.0)
+                    } else if dy > 0.0 {
+                        (old_zoom / zoom_factor).max(0.1)
+                    } else {
+                        old_zoom
+                    };
+
+                    if (new_zoom - old_zoom).abs() > 0.001 {
+                        let mouse_pos = state.mouse_position;
+                        let mouse_canvas_x = mouse_pos.x / old_zoom + state.pan_offset.0;
+                        let mouse_canvas_y = mouse_pos.y / old_zoom + state.pan_offset.1;
+
+                        let new_pan_x = mouse_canvas_x - mouse_pos.x / new_zoom;
+                        let new_pan_y = mouse_canvas_y - mouse_pos.y / new_zoom;
+
+                        state.zoom = new_zoom;
+                        state.pan_offset = (new_pan_x, new_pan_y);
+
+                        gl_area_scroll.queue_render();
+                    }
+                    glib::Propagation::Stop
+                });
+                gl_area.add_controller(scroll_controller);
+
+                // OpenGL render callback
+                let gl_renderer_render = gl_renderer.clone();
+                let canvas_render = canvas.clone();
+                let active_stroke_render = active_stroke.clone();
+                let render_state_render = render_state.clone();
+
+                gl_area.connect_render(move |gl_area, _context| {
+                    gl_area.make_current();
+
+                    let _gl_context = match gl_area.context() {
+                        Some(ctx) => ctx,
+                        None => {
+                            logger::warn("GLArea has no context, skipping render");
                             return glib::Propagation::Stop;
                         }
+                    };
+
+                    if gl_renderer_render.borrow().is_none() {
+                        if let Err(e) = crate::gl_loader::init_gl_library() {
+                            logger::error(&format!("Failed to initialize GL library: {e}"));
+                            return glib::Propagation::Stop;
+                        }
+
+                        let gl = Rc::new(unsafe {
+                            glow::Context::from_loader_function(crate::gl_loader::create_gl_loader())
+                        });
+                        match GlRenderer::new(gl) {
+                            Ok(renderer) => {
+                                logger::info("OpenGL renderer initialized successfully");
+                                *gl_renderer_render.borrow_mut() = Some(renderer);
+                            }
+                            Err(e) => {
+                                logger::error(&format!("Failed to initialize OpenGL renderer: {e}"));
+                                return glib::Propagation::Stop;
+                            }
+                        }
                     }
-                }
 
-                if let Some(ref mut renderer) = *gl_renderer_clone.borrow_mut() {
-                    // Update zoom and pan from shared state
-                    let current_zoom = *zoom_shared.borrow();
-                    let current_pan = *pan_offset_shared.borrow();
-                    renderer.set_zoom(current_zoom);
-                    renderer.set_pan(current_pan);
+                    if let Some(ref renderer) = *gl_renderer_render.borrow() {
+                        let state = render_state_render.borrow();
+                        let canvas_ref = canvas_render.borrow();
+                        let active_ref = active_stroke_render.borrow();
+                        let width = gl_area.width();
+                        let height = gl_area.height();
 
-                    let canvas = canvas_clone.borrow();
-                    let active_stroke = active_stroke_clone.borrow();
-                    let current_brush_size = *brush_for_render.borrow();
-                    let current_opacity = *opacity_for_render.borrow();
-                    let is_eraser = *is_eraser_for_render.borrow();
-                    let hue = *hue_for_render.borrow();
-                    let saturation = *saturation_for_render.borrow();
-                    let value = *value_for_render.borrow();
-                    let custom_colors = custom_colors_for_render.borrow().clone();
-                    let selected_custom_index = *selected_custom_index_for_render.borrow();
-                    let width = gl_area.width();
-                    let height = gl_area.height();
-                    // DPI-aware: approximate logical size using a scale factor if available
-                    let dpi_scale: f32 = 1.0; // default
-                    let width_logical = (width as f32) / dpi_scale;
-                    let height_logical = (height as f32) / dpi_scale;
-                    // Update logical size and render using logical dimensions
-                    renderer.set_canvas_logical_size(width_logical, height_logical);
-                    renderer.render_hsv(
-                        &canvas,
-                        &active_stroke,
-                        current_brush_size,
-                        is_eraser,
-                        current_opacity,
-                        width_logical as i32,
-                        height_logical as i32,
-                        hue,
-                        saturation,
-                        value,
-                        custom_colors,
-                        selected_custom_index,
-                    );
-                }
+                        let frame = GlRenderFrame {
+                            canvas: &canvas_ref,
+                            active_stroke: &active_ref,
+                            ui: GlUiState {
+                                hue: state.hue,
+                                saturation: state.saturation,
+                                value: state.value,
+                                custom_colors: state.custom_colors.clone(),
+                                selected_custom_index: state.selected_custom_index,
+                                brush_size: state.brush_size,
+                                opacity: state.opacity,
+                                is_eraser: state.is_eraser,
+                            },
+                            viewport: GlViewportState {
+                                zoom: state.zoom,
+                                pan_offset: state.pan_offset,
+                            },
+                            window_size: (width, height),
+                        };
+                        renderer.render(&frame);
+                    }
 
-                glib::Propagation::Proceed
-            });
+                    glib::Propagation::Proceed
+                });
 
-            // Save preferences on window close
-            let prefs_close = preferences.clone();
-            let brush_close = brush_size_shared.clone();
-            let hue_close = hue_shared.clone();
-            let saturation_close = saturation_shared.clone();
-            let value_close = value_shared.clone();
-            let custom_colors_close = custom_colors_shared.clone();
-            window.connect_close_request(move |_window| {
-                let mut prefs = prefs_close.borrow_mut();
-                prefs.palette.h = *hue_close.borrow();
-                prefs.palette.s = *saturation_close.borrow();
-                prefs.palette.v = *value_close.borrow();
-                prefs.palette.custom_colors = custom_colors_close.borrow().clone();
-                prefs.brush.default_size = *brush_close.borrow();
+                // Save preferences on window close
+                let render_state_close = render_state.clone();
+                let prefs_close = preferences.clone();
+                window.connect_close_request(move |_window| {
+                    let state = render_state_close.borrow();
+                    let mut prefs = prefs_close.borrow_mut();
+                    prefs.palette.h = state.hue;
+                    prefs.palette.s = state.saturation;
+                    prefs.palette.v = state.value;
+                    prefs.palette.custom_colors = state.custom_colors.clone();
+                    prefs.brush.default_size = state.brush_size;
+                    prefs.brush.default_opacity = state.opacity;
+                    drop(state);
 
-                if let Err(e) = crate::preferences::save(&prefs) {
-                    logger::error(&format!("Failed to save preferences on close: {e}"));
-                }
+                    if let Err(e) = crate::preferences::save(&prefs) {
+                        logger::error(&format!("Failed to save preferences on close: {e}"));
+                    }
 
-                glib::Propagation::Proceed
-            });
+                    glib::Propagation::Proceed
+                });
 
-            window.present();
-            gl_area.grab_focus();
+                window.present();
+                gl_area.grab_focus();
+            }
         });
 
         Ok(())
@@ -631,93 +550,50 @@ impl WindowBackend for WindowApp {
 }
 
 /// Set up mouse event handlers for the GLArea
-#[allow(clippy::too_many_arguments)]
 fn setup_mouse_events(
     gl_area: &GLArea,
     canvas: &Rc<RefCell<Canvas>>,
     active_stroke: &Rc<RefCell<Option<ActiveStroke>>>,
-    mouse_state: MouseState,
-    mouse_position: Rc<RefCell<Point>>,
-    brush_size: Rc<RefCell<f32>>,
-    opacity: Rc<RefCell<f32>>,
-    is_eraser: Rc<RefCell<bool>>,
-    hue: Rc<RefCell<f32>>,
-    saturation: Rc<RefCell<f32>>,
-    value: Rc<RefCell<f32>>,
-    custom_colors: Rc<RefCell<Vec<[u8; 3]>>>,
-    selected_custom_index: Rc<RefCell<i32>>,
-    slider_drag: Rc<RefCell<Option<SliderType>>>,
-    preferences: Rc<RefCell<crate::preferences::Preferences>>,
-    zoom: Rc<RefCell<f32>>,
-    pan_offset: Rc<RefCell<(f32, f32)>>,
-    is_panning: Rc<RefCell<bool>>,
-    last_mouse_position: Point,
+    render_state: &Rc<RefCell<GlRenderState>>,
 ) {
-    // Mouse click handler for left button
+    // Mouse click handler
     let click_gesture = GestureClick::new();
     click_gesture.set_button(gtk4::gdk::ffi::GDK_BUTTON_PRIMARY as u32);
 
-    let canvas_clone = canvas.clone();
-    let active_stroke_clone = active_stroke.clone();
-    let mouse_state_clone = Rc::new(RefCell::new(mouse_state));
-    let mouse_position_clone = mouse_position;
-    let brush_size_clone = brush_size.clone();
-    let opacity_clone = opacity.clone();
-    let is_eraser_clone = is_eraser.clone();
-    let hue_clone = hue.clone();
-    let saturation_clone = saturation.clone();
-    let value_clone = value.clone();
-    let custom_colors_clone = custom_colors.clone();
-    let selected_custom_index_clone = selected_custom_index.clone();
-    let prefs_clone = preferences.clone();
-    let slider_drag_clone = slider_drag.clone();
-    let zoom_clone = zoom.clone();
-    let pan_offset_clone = pan_offset.clone();
-
-    // Clone Rc's for use in other closures
-    let mouse_state_clone2 = mouse_state_clone.clone();
-    let mouse_position_clone2 = mouse_position_clone.clone();
+    let canvas_click = canvas.clone();
+    let active_stroke_click = active_stroke.clone();
+    let render_state_click = render_state.clone();
 
     click_gesture.connect_pressed(move |gesture, _n_press, x, y| {
-        let point = Point {
-            x: x as f32,
-            y: y as f32,
-        };
-        *mouse_position_clone.borrow_mut() = point;
-        *mouse_state_clone.borrow_mut() = MouseState::Drawing;
+        let point = Point { x: x as f32, y: y as f32 };
+        let mut state = render_state_click.borrow_mut();
+        state.mouse_position = point;
+        state.mouse_state = MouseState::Drawing;
 
-        // Use shared UI hit detection
-        let custom_colors_snapshot = custom_colors_clone.borrow().clone();
-        let canvas_hit = canvas_clone.borrow();
+        let custom_colors_snapshot = state.custom_colors.clone();
+        drop(state);
+
+        let canvas_hit = canvas_click.borrow();
         let layer_count = canvas_hit.layer_count();
         let active_layer = canvas_hit.active_layer();
         drop(canvas_hit);
+
         let window_width = if let Some(widget) = gesture.widget() {
             widget.allocated_width() as f32
         } else {
             1280.0
         };
         let hit = ui::hit_test(
-            x as f32,
-            y as f32,
-            &custom_colors_snapshot,
-            layer_count,
-            active_layer,
-            window_width,
+            x as f32, y as f32,
+            &custom_colors_snapshot, layer_count, active_layer, window_width,
         );
 
         match hit {
             ui::UiElement::HueSlider(value) => {
-                *hue_clone.borrow_mut() = value;
-                *selected_custom_index_clone.borrow_mut() = -1;
-                *slider_drag_clone.borrow_mut() = Some(SliderType::Hue);
-                update_hsv_prefs(
-                    &prefs_clone,
-                    *hue_clone.borrow(),
-                    *saturation_clone.borrow(),
-                    *value_clone.borrow(),
-                    custom_colors_clone.borrow().clone(),
-                );
+                let mut state = render_state_click.borrow_mut();
+                state.hue = value;
+                state.selected_custom_index = -1;
+                state.slider_drag = Some(SliderType::Hue);
                 if let Some(widget) = gesture.widget()
                     && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                 {
@@ -726,16 +602,10 @@ fn setup_mouse_events(
                 return;
             }
             ui::UiElement::SaturationSlider(value) => {
-                *saturation_clone.borrow_mut() = value;
-                *selected_custom_index_clone.borrow_mut() = -1;
-                *slider_drag_clone.borrow_mut() = Some(SliderType::Saturation);
-                update_hsv_prefs(
-                    &prefs_clone,
-                    *hue_clone.borrow(),
-                    *saturation_clone.borrow(),
-                    *value_clone.borrow(),
-                    custom_colors_clone.borrow().clone(),
-                );
+                let mut state = render_state_click.borrow_mut();
+                state.saturation = value;
+                state.selected_custom_index = -1;
+                state.slider_drag = Some(SliderType::Saturation);
                 if let Some(widget) = gesture.widget()
                     && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                 {
@@ -744,16 +614,10 @@ fn setup_mouse_events(
                 return;
             }
             ui::UiElement::ValueSlider(value) => {
-                *value_clone.borrow_mut() = value;
-                *selected_custom_index_clone.borrow_mut() = -1;
-                *slider_drag_clone.borrow_mut() = Some(SliderType::Value);
-                update_hsv_prefs(
-                    &prefs_clone,
-                    *hue_clone.borrow(),
-                    *saturation_clone.borrow(),
-                    *value_clone.borrow(),
-                    custom_colors_clone.borrow().clone(),
-                );
+                let mut state = render_state_click.borrow_mut();
+                state.value = value;
+                state.selected_custom_index = -1;
+                state.slider_drag = Some(SliderType::Value);
                 if let Some(widget) = gesture.widget()
                     && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                 {
@@ -762,26 +626,15 @@ fn setup_mouse_events(
                 return;
             }
             ui::UiElement::CustomColor(idx) => {
-                let custom = custom_colors_clone.borrow();
-                let color = custom[idx];
-                drop(custom);
+                let mut state = render_state_click.borrow_mut();
+                let color = state.custom_colors[idx];
                 let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
-                    r: color[0],
-                    g: color[1],
-                    b: color[2],
-                    a: 255,
+                    r: color[0], g: color[1], b: color[2], a: 255,
                 });
-                *hue_clone.borrow_mut() = hsv.h;
-                *saturation_clone.borrow_mut() = hsv.s;
-                *value_clone.borrow_mut() = hsv.v;
-                *selected_custom_index_clone.borrow_mut() = idx as i32;
-                update_hsv_prefs(
-                    &prefs_clone,
-                    hsv.h,
-                    hsv.s,
-                    hsv.v,
-                    custom_colors_clone.borrow().clone(),
-                );
+                state.hue = hsv.h;
+                state.saturation = hsv.s;
+                state.value = hsv.v;
+                state.selected_custom_index = idx as i32;
                 if let Some(widget) = gesture.widget()
                     && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                 {
@@ -790,17 +643,12 @@ fn setup_mouse_events(
                 return;
             }
             ui::UiElement::SaveColor => {
-                let h = *hue_clone.borrow();
-                let s = *saturation_clone.borrow();
-                let v = *value_clone.borrow();
-                let current = crate::canvas::hsv_to_rgb(h, s, v);
-                let mut colors = custom_colors_clone.borrow_mut();
-                if colors.len() >= 10 {
-                    colors.remove(0);
+                let mut state = render_state_click.borrow_mut();
+                let current = crate::canvas::hsv_to_rgb(state.hue, state.saturation, state.value);
+                if state.custom_colors.len() >= 10 {
+                    state.custom_colors.remove(0);
                 }
-                colors.push([current.r, current.g, current.b]);
-                drop(colors);
-                update_hsv_prefs(&prefs_clone, h, s, v, custom_colors_clone.borrow().clone());
+                state.custom_colors.push([current.r, current.g, current.b]);
                 if let Some(widget) = gesture.widget()
                     && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                 {
@@ -809,13 +657,8 @@ fn setup_mouse_events(
                 return;
             }
             ui::UiElement::BrushSize(size) => {
-                *brush_size_clone.borrow_mut() = size;
+                render_state_click.borrow_mut().brush_size = size;
                 println!("Selected brush size: {size}");
-                let mut prefs = prefs_clone.borrow_mut();
-                prefs.brush.default_size = size;
-                if let Err(e) = crate::preferences::save(&prefs) {
-                    eprintln!("Failed to save preferences: {e}");
-                }
                 if let Some(widget) = gesture.widget()
                     && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                 {
@@ -824,9 +667,9 @@ fn setup_mouse_events(
                 return;
             }
             ui::UiElement::Eraser => {
-                let mut is_eraser = is_eraser_clone.borrow_mut();
-                *is_eraser = !*is_eraser;
-                println!("Eraser mode: {}", if *is_eraser { "ON" } else { "OFF" });
+                let mut state = render_state_click.borrow_mut();
+                state.is_eraser = !state.is_eraser;
+                println!("Eraser mode: {}", if state.is_eraser { "ON" } else { "OFF" });
                 if let Some(widget) = gesture.widget()
                     && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                 {
@@ -835,7 +678,7 @@ fn setup_mouse_events(
                 return;
             }
             ui::UiElement::Clear => {
-                canvas_clone.borrow_mut().clear();
+                canvas_click.borrow_mut().clear();
                 logger::info("Canvas cleared");
                 println!("Canvas cleared");
                 if let Some(widget) = gesture.widget()
@@ -846,7 +689,7 @@ fn setup_mouse_events(
                 return;
             }
             ui::UiElement::Undo => {
-                let mut canvas = canvas_clone.borrow_mut();
+                let mut canvas = canvas_click.borrow_mut();
                 if canvas.can_undo() {
                     canvas.undo();
                     logger::info("Undo: removed last stroke");
@@ -860,7 +703,7 @@ fn setup_mouse_events(
                 return;
             }
             ui::UiElement::Redo => {
-                let mut canvas = canvas_clone.borrow_mut();
+                let mut canvas = canvas_click.borrow_mut();
                 if canvas.can_redo() {
                     canvas.redo();
                     logger::info("Redo: restored last stroke");
@@ -874,9 +717,7 @@ fn setup_mouse_events(
                 return;
             }
             ui::UiElement::Opacity(opacity) => {
-                *opacity_clone.borrow_mut() = opacity;
-                prefs_clone.borrow_mut().brush.default_opacity = opacity;
-                let _ = crate::preferences::save(&prefs_clone.borrow());
+                render_state_click.borrow_mut().opacity = opacity;
                 logger::info(&format!("Opacity: {}", opacity));
                 if let Some(widget) = gesture.widget()
                     && let Some(gl_area) = widget.downcast_ref::<GLArea>()
@@ -886,37 +727,35 @@ fn setup_mouse_events(
                 return;
             }
             ui::UiElement::Export => {
-                let canvas_ref = canvas_clone.borrow();
-                let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
-                let filename = format!("rancer_export_{timestamp}.png");
-                let export_path = dirs::picture_dir()
-                    .unwrap_or_else(|| std::path::PathBuf::from("."))
-                    .join(filename);
+                let canvas_ref = canvas_click.borrow();
+                let filename = crate::export_ui::default_export_filename();
+                let handle = rfd::FileDialog::new()
+                    .set_file_name(&filename)
+                    .add_filter("PNG Image", &["png"])
+                    .save_file();
 
-                logger::info(&format!("Exporting canvas to: {export_path:?}"));
-
-                match crate::export::export_to_png(&canvas_ref, &export_path) {
-                    Ok(_) => {
-                        logger::info(&format!("Export successful: {export_path:?}"));
-                        println!("Exported to: {export_path:?}");
+                if let Some(path) = handle {
+                    match crate::export::export_to_png(&canvas_ref, &path) {
+                        Ok(_) => {
+                            crate::export_ui::notify_export_result(true, &path, None);
+                        }
+                        Err(e) => {
+                            crate::export_ui::notify_export_result(false, &path, Some(&e.to_string()));
+                        }
                     }
-                    Err(e) => {
-                        logger::error(&format!("Export failed: {e}"));
-                        eprintln!("Export failed: {e}");
+                    if let Some(widget) = gesture.widget()
+                        && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                    {
+                        gl_area.queue_render();
                     }
-                }
-                if let Some(widget) = gesture.widget()
-                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
-                {
-                    gl_area.queue_render();
                 }
                 return;
             }
             ui::UiElement::ZoomIn => {
-                let mut zoom = zoom_clone.borrow_mut();
-                let new_zoom = (*zoom * 1.25).min(10.0);
-                if (new_zoom - *zoom).abs() > 0.001 {
-                    *zoom = new_zoom;
+                let mut state = render_state_click.borrow_mut();
+                let new_zoom = (state.zoom * 1.25).min(10.0);
+                if (new_zoom - state.zoom).abs() > 0.001 {
+                    state.zoom = new_zoom;
                     if let Some(widget) = gesture.widget()
                         && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                     {
@@ -926,10 +765,10 @@ fn setup_mouse_events(
                 return;
             }
             ui::UiElement::ZoomOut => {
-                let mut zoom = zoom_clone.borrow_mut();
-                let new_zoom = (*zoom / 1.25).max(0.1);
-                if (new_zoom - *zoom).abs() > 0.001 {
-                    *zoom = new_zoom;
+                let mut state = render_state_click.borrow_mut();
+                let new_zoom = (state.zoom / 1.25).max(0.1);
+                if (new_zoom - state.zoom).abs() > 0.001 {
+                    state.zoom = new_zoom;
                     if let Some(widget) = gesture.widget()
                         && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                     {
@@ -939,7 +778,7 @@ fn setup_mouse_events(
                 return;
             }
             ui::UiElement::LayerRow(index) => {
-                let _ = canvas_clone.borrow_mut().set_active_layer(index);
+                let _ = canvas_click.borrow_mut().set_active_layer(index);
                 if let Some(widget) = gesture.widget()
                     && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                 {
@@ -948,7 +787,7 @@ fn setup_mouse_events(
                 return;
             }
             ui::UiElement::LayerVisibility(index) => {
-                let _ = canvas_clone.borrow_mut().toggle_layer_visibility(index);
+                let _ = canvas_click.borrow_mut().toggle_layer_visibility(index);
                 if let Some(widget) = gesture.widget()
                     && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                 {
@@ -957,7 +796,7 @@ fn setup_mouse_events(
                 return;
             }
             ui::UiElement::AddLayer => {
-                let mut canvas = canvas_clone.borrow_mut();
+                let mut canvas = canvas_click.borrow_mut();
                 if canvas.layer_count() < crate::canvas::MAX_LAYERS {
                     let _ = canvas.add_layer(None);
                     let new_index = canvas.layer_count() - 1;
@@ -971,7 +810,7 @@ fn setup_mouse_events(
                 return;
             }
             ui::UiElement::DeleteLayer => {
-                let mut canvas = canvas_clone.borrow_mut();
+                let mut canvas = canvas_click.borrow_mut();
                 if canvas.layer_count() > 1 {
                     let current = canvas.active_layer();
                     let _ = canvas.remove_layer(current);
@@ -984,7 +823,7 @@ fn setup_mouse_events(
                 return;
             }
             ui::UiElement::MoveLayerUp => {
-                let mut canvas = canvas_clone.borrow_mut();
+                let mut canvas = canvas_click.borrow_mut();
                 let idx = canvas.active_layer();
                 if idx > 0 {
                     let _ = canvas.move_layer(idx, idx - 1);
@@ -997,7 +836,7 @@ fn setup_mouse_events(
                 return;
             }
             ui::UiElement::MoveLayerDown => {
-                let mut canvas = canvas_clone.borrow_mut();
+                let mut canvas = canvas_click.borrow_mut();
                 let idx = canvas.active_layer();
                 if idx < canvas.layer_count() - 1 {
                     let _ = canvas.move_layer(idx, idx + 1);
@@ -1015,43 +854,42 @@ fn setup_mouse_events(
         }
 
         // If not on UI, start drawing
-        if canvas_clone.borrow().is_active_layer_locked() {
+        if canvas_click.borrow().is_active_layer_locked() {
             return;
         }
-        let is_eraser = *is_eraser_clone.borrow();
-        let h = *hue_clone.borrow();
-        let s = *saturation_clone.borrow();
-        let v = *value_clone.borrow();
+        let state = render_state_click.borrow();
+        let is_eraser = state.is_eraser;
+        let h = state.hue;
+        let s = state.saturation;
+        let v = state.value;
         let color = if is_eraser {
             crate::canvas::Color::WHITE
         } else {
             crate::canvas::hsv_to_rgb(h, s, v)
         };
-        let current_brush_size = *brush_size_clone.borrow();
-        let current_opacity = *opacity_clone.borrow();
-        let mut canvas = canvas_clone.borrow_mut();
+        let current_brush_size = state.brush_size;
+        let current_opacity = state.opacity;
+        drop(state);
+
+        let mut canvas = canvas_click.borrow_mut();
         let active_stroke = canvas.begin_stroke(color, current_brush_size, current_opacity);
         println!(
             "Created {}stroke with color RGB({}, {}, {}) and width {}",
             if is_eraser { "eraser " } else { "" },
-            color.r,
-            color.g,
-            color.b,
-            current_brush_size
+            color.r, color.g, color.b, current_brush_size
         );
 
-        *active_stroke_clone.borrow_mut() = Some(active_stroke);
+        *active_stroke_click.borrow_mut() = Some(active_stroke);
 
-        // Transform first point to canvas coordinates
-        let zoom = *zoom_clone.borrow();
-        let pan = *pan_offset_clone.borrow();
+        let state = render_state_click.borrow();
+        let zoom = state.zoom;
+        let pan = state.pan_offset;
+        drop(state);
+
         let canvas_x = point.x / zoom + pan.0;
         let canvas_y = point.y / zoom + pan.1;
-        if let Some(active_stroke) = &mut *active_stroke_clone.borrow_mut() {
-            active_stroke.add_point(Point {
-                x: canvas_x,
-                y: canvas_y,
-            });
+        if let Some(active_stroke) = &mut *active_stroke_click.borrow_mut() {
+            active_stroke.add_point(Point { x: canvas_x, y: canvas_y });
             println!(
                 "Added first point to active stroke: ({}, {})",
                 point.x, point.y
@@ -1069,17 +907,18 @@ fn setup_mouse_events(
     let click_gesture_release = GestureClick::new();
     click_gesture_release.set_button(gtk4::gdk::ffi::GDK_BUTTON_PRIMARY as u32);
 
-    let active_stroke_clone2 = active_stroke.clone();
-    let canvas_clone2 = canvas.clone();
-    let mouse_state_clone3 = mouse_state_clone2.clone();
-    let slider_drag_release = slider_drag.clone();
+    let active_stroke_release = active_stroke.clone();
+    let canvas_release = canvas.clone();
+    let render_state_release = render_state.clone();
 
     click_gesture_release.connect_released(move |_gesture, _n_press, _x, _y| {
-        *mouse_state_clone3.borrow_mut() = MouseState::Idle;
-        *slider_drag_release.borrow_mut() = None;
+        let mut state = render_state_release.borrow_mut();
+        state.mouse_state = MouseState::Idle;
+        state.slider_drag = None;
+        drop(state);
 
-        if let Some(active_stroke) = active_stroke_clone2.borrow_mut().take() {
-            let mut canvas = canvas_clone2.borrow_mut();
+        if let Some(active_stroke) = active_stroke_release.borrow_mut().take() {
+            let mut canvas = canvas_release.borrow_mut();
             if let Err(e) = canvas.commit_stroke(active_stroke) {
                 eprintln!("Failed to commit stroke: {e}");
             } else {
@@ -1093,40 +932,24 @@ fn setup_mouse_events(
     // Mouse motion handler
     let motion_controller = EventControllerMotion::new();
 
-    let active_stroke_clone3 = active_stroke.clone();
-    let mouse_state_clone4 = mouse_state_clone2.clone();
-    let mouse_position_clone3 = mouse_position_clone2.clone();
-    let slider_drag_motion = slider_drag.clone();
-    let hue_motion = hue.clone();
-    let saturation_motion = saturation.clone();
-    let value_motion = value.clone();
-    let selected_custom_index_motion = selected_custom_index.clone();
-    let prefs_motion = preferences.clone();
-    let custom_colors_motion = custom_colors.clone();
-    let zoom_motion = zoom.clone();
-    let pan_offset_motion = pan_offset.clone();
-    let is_panning_motion = is_panning.clone();
-    let last_mouse_position_motion = Rc::new(RefCell::new(last_mouse_position));
+    let active_stroke_motion = active_stroke.clone();
+    let render_state_motion = render_state.clone();
 
     motion_controller.connect_motion(move |controller, x, y| {
-        let point = Point {
-            x: x as f32,
-            y: y as f32,
-        };
-        *mouse_position_clone3.borrow_mut() = point;
+        let point = Point { x: x as f32, y: y as f32 };
+        let mut state = render_state_motion.borrow_mut();
+        state.mouse_position = point;
 
-        // Handle panning when space is held - use delta
-        if *is_panning_motion.borrow() {
-            let zoom = *zoom_motion.borrow();
-            let old_pan = *pan_offset_motion.borrow();
-            let last_pos = *last_mouse_position_motion.borrow();
+        // Handle panning
+        if state.is_panning {
+            let zoom = state.zoom;
+            let old_pan = state.pan_offset;
+            let last_pos = state.last_mouse_position;
             let dx = point.x - last_pos.x;
             let dy = point.y - last_pos.y;
-            // Pan in opposite direction of mouse movement (drag canvas with mouse)
-            let new_pan_x = old_pan.0 - dx / zoom;
-            let new_pan_y = old_pan.1 - dy / zoom;
-            *pan_offset_motion.borrow_mut() = (new_pan_x, new_pan_y);
-            *last_mouse_position_motion.borrow_mut() = point;
+            state.pan_offset = (old_pan.0 - dx / zoom, old_pan.1 - dy / zoom);
+            state.last_mouse_position = point;
+            drop(state);
             if let Some(widget) = controller.widget()
                 && let Some(gl_area) = widget.downcast_ref::<GLArea>()
             {
@@ -1135,56 +958,50 @@ fn setup_mouse_events(
             return;
         }
 
-        // Update last mouse position for panning
-        *last_mouse_position_motion.borrow_mut() = point;
+        state.last_mouse_position = point;
 
-        if *mouse_state_clone4.borrow() == MouseState::Drawing
-            && let Some(active_stroke) = &mut *active_stroke_clone3.borrow_mut()
-        {
-            // Transform to canvas coordinates
-            let zoom = *zoom_motion.borrow();
-            let pan = *pan_offset_motion.borrow();
-            let canvas_x = point.x / zoom + pan.0;
-            let canvas_y = point.y / zoom + pan.1;
-            active_stroke.add_point(Point {
-                x: canvas_x,
-                y: canvas_y,
-            });
-            println!(
-                "Active stroke now has {} points",
-                active_stroke.points().len()
-            );
-            if let Some(widget) = controller.widget()
-                && let Some(gl_area) = widget.downcast_ref::<GLArea>()
-            {
-                gl_area.queue_render();
+        if state.mouse_state == MouseState::Drawing {
+            if let Some(active_stroke) = &mut *active_stroke_motion.borrow_mut() {
+                let zoom = state.zoom;
+                let pan = state.pan_offset;
+                let canvas_x = point.x / zoom + pan.0;
+                let canvas_y = point.y / zoom + pan.1;
+                active_stroke.add_point(Point { x: canvas_x, y: canvas_y });
+                println!(
+                    "Active stroke now has {} points",
+                    active_stroke.points().len()
+                );
+                drop(state);
+                if let Some(widget) = controller.widget()
+                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                {
+                    gl_area.queue_render();
+                }
+                return;
             }
         }
 
         // Handle slider dragging
-        let active_slider = *slider_drag_motion.borrow();
+        let active_slider = state.slider_drag;
+        drop(state);
+
         if let Some((slider, value)) = ui::slider_drag(x as f32, y as f32, active_slider) {
+            let mut state = render_state_motion.borrow_mut();
             match slider {
                 SliderType::Hue => {
-                    *hue_motion.borrow_mut() = value;
-                    *selected_custom_index_motion.borrow_mut() = -1;
+                    state.hue = value;
+                    state.selected_custom_index = -1;
                 }
                 SliderType::Saturation => {
-                    *saturation_motion.borrow_mut() = value;
-                    *selected_custom_index_motion.borrow_mut() = -1;
+                    state.saturation = value;
+                    state.selected_custom_index = -1;
                 }
                 SliderType::Value => {
-                    *value_motion.borrow_mut() = value;
-                    *selected_custom_index_motion.borrow_mut() = -1;
+                    state.value = value;
+                    state.selected_custom_index = -1;
                 }
             }
-            update_hsv_prefs(
-                &prefs_motion,
-                *hue_motion.borrow(),
-                *saturation_motion.borrow(),
-                *value_motion.borrow(),
-                custom_colors_motion.borrow().clone(),
-            );
+            drop(state);
             if let Some(widget) = controller.widget()
                 && let Some(gl_area) = widget.downcast_ref::<GLArea>()
             {
@@ -1194,22 +1011,6 @@ fn setup_mouse_events(
     });
 
     gl_area.add_controller(motion_controller);
-}
-
-/// Update HSV preferences helper
-fn update_hsv_prefs(
-    prefs: &Rc<RefCell<crate::preferences::Preferences>>,
-    h: f32,
-    s: f32,
-    v: f32,
-    custom_colors: Vec<[u8; 3]>,
-) {
-    let mut p = prefs.borrow_mut();
-    p.palette.h = h;
-    p.palette.s = s;
-    p.palette.v = v;
-    p.palette.custom_colors = custom_colors;
-    let _ = crate::preferences::save(&p);
 }
 
 /// Run the GTK4 window application

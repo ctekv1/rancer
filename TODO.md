@@ -3,6 +3,10 @@
 ## Completed (v0.0.7)
 
 - [x] Zoom & Pan - Mouse wheel zoom toward cursor, space+drag panning, zoom buttons
+- [x] Layer System - Multiple layers, reorder, visibility toggle, opacity, lock
+- [x] MSAA - Multisampled rendering with resolve texture (WGPU backend)
+- [x] Export UX - Native file save dialog, OS notifications, bounding box export
+- [x] Structural refactoring - geometry.rs split, RenderFrame pattern, consolidated state
 
 ## Completed (v0.0.6)
 
@@ -16,31 +20,10 @@
 - [x] Dependency audit - Removed unused `futures`, trimmed `tokio` to `rt-multi-thread`
 - [x] CI pipeline - Test count corrected, Linux + Windows workflows
 
-## Tier 2 - Professional Features (v0.0.7+)
+## Tier 2 - Professional Features (v0.0.8+)
 
-- [x] Zoom & Pan - Mouse wheel zoom, space+drag pan, zoom buttons
-  - [x] Phase 1: Shader Changes
-    - [x] Add zoom/pan uniforms to WGPU shader (render.wgsl)
-    - [x] Add zoom/pan uniforms to OpenGL shader (opengl_renderer.rs)
-    - [x] Update vertex transform to apply zoom/pan
-    - [x] Adjust line width by zoom factor (cancelled - not needed for MVP)
-  - [x] Phase 2: Renderer State
-    - [x] Add zoom/pan fields to WGPU Renderer struct
-    - [x] Add zoom/pan fields to OpenGL Renderer struct
-    - [x] Add set_zoom/set_pan public methods to both renderers
-  - [x] Phase 3: Mouse Coordinate Transform
-    - [x] Transform mouse coords in window_winit.rs (drawing)
-    - [x] Transform mouse coords in window_gtk4.rs (drawing)
-    - [x] Transform canvas hit test coords in ui.rs (cancelled - not needed for Approach A: UI stays fixed)
-  - [x] Phase 4: Zoom/Pan Input Handlers
-    - [x] Handle mouse wheel zoom in window_winit.rs
-    - [x] Handle mouse wheel zoom in window_gtk4.rs
-    - [x] Handle space+drag pan in window_winit.rs
-    - [x] Handle space+drag pan in window_gtk4.rs
-  - [x] Zoom toward mouse cursor position
-  - [x] Zoom in/out UI buttons
 - [ ] Brush Types - Round, square, spray, calligraphy
-- [ ] Layer System - Multiple layers, reorder, visibility toggle
+- [x] Layer System - Multiple layers, reorder, visibility toggle
   - [x] Phase 1: Data Model (canvas.rs)
     - [x] Add Layer struct (name, strokes, visible, opacity, locked)
     - [x] Update Canvas struct with layers Vec and active_layer index
@@ -75,13 +58,13 @@
     - [x] Add unit tests for layer CRUD operations
     - [x] Test undo/redo with multiple layers
     - [x] Test layer visibility toggle
-  - [ ] Known Issues
-    - [x] ~~Layer rendering order inverted — bottom of list renders on top, needs `.rev()` in `all_strokes()`~~ (fixed v0.0.7)
-    - [x] ~~Active stroke renders on top of all layers instead of only the active layer~~ (fixed v0.0.7)
+  - [x] Known Issues
+    - [x] ~~Layer rendering order inverted~~ (fixed v0.0.7)
+    - [x] ~~Active stroke renders on top of all layers~~ (fixed v0.0.7)
 - [ ] Selection Tool - Rectangular selection with move/copy
 - [ ] Transform Tools - Scale, rotate, flip canvas/strokes
 
-## Tier 3 - File Management (v0.0.8+)
+## Tier 3 - File Management (v0.0.9+)
 
 - [ ] Project Format - Save/load .rancer files (JSON/bincode)
 - [ ] Image Import - Open PNG/JPG as background layer
@@ -98,12 +81,20 @@
 
 ## Technical Debt & Known Issues
 
-- [x] ~~**MSAA not functional**~~ — Fixed: MSAA now uses a resolve texture. `config.msaa_samples` (default 4) is respected. Renders to multisampled texture, resolves to swapchain.
+- [x] ~~**MSAA not functional**~~ — Fixed v0.0.7: MSAA now uses a resolve texture. `config.msaa_samples` (default 4) is respected.
   - Linux: GLArea/OpenGL renderer still lacks multisampling (separate issue)
 - [ ] **Windows high-DPI resize** - Black space/content shift on window resize (upstream wgpu issue)
   - Workaround attempted: triple `request_redraw()` + `force_window_repaint()` in `window_winit.rs`
   - See `docs/window-resize-issue.md` for full investigation
-- [ ] **Export UX** - Saves silently to Pictures directory with no file picker or confirmation toast
-  - Consider using `rfd` crate for native file dialog
-- [ ] **Export captures only window area** - After zooming out, export only captures the original window-sized region, not the full canvas
-  - `export.rs` uses `canvas.size()` which is tied to window dimensions, not canvas content bounds
+  - May require switching graphics backend (SDL2 or raw Win32)
+- [x] ~~**Export UX**~~ — Fixed v0.0.7: native file save dialog via `rfd`, OS notifications
+- [x] ~~**Export captures only window area**~~ — Fixed v0.0.7: stroke bounding box, max 4096x4096
+
+## Structural Refactoring (v0.0.7)
+
+- [x] Split `geometry.rs` (2095 lines) into 3 files: `mod.rs`, `stroke.rs`, `ui_elements.rs`
+- [x] Refactored `renderer.rs` (1129 → 477 lines): `RenderFrame` pattern, eliminated duplicated state
+- [x] Refactored `opengl_renderer.rs` (444 → 276 lines): `GlRenderFrame` pattern, batched UI rendering
+- [x] Refactored `window_gtk4.rs` (1222 → ~1030 lines): Consolidated `GlRenderState`, debounced saves
+- [x] Refactored `window_winit.rs` (~1180 → ~1035 lines): Extracted handler methods, consolidated state
+- [x] Fixed duplicate `#[test]` attribute in `canvas.rs`

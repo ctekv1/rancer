@@ -5,6 +5,7 @@
 
 pub mod canvas;
 pub mod export;
+pub mod export_ui;
 pub mod geometry;
 pub mod logger;
 pub mod preferences;

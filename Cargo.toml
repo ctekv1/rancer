@@ -29,3 +29,7 @@ gtk4 = "0.9"
 cairo-rs = "0.20"
 glow = "0.14"
 libloading = "0.8"
+rfd = "0.15"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+rfd = "0.15"

@@ -29,8 +29,6 @@ fn force_window_repaint(window: &Window) {
             let hwnd_val = h.hwnd.get();
             if hwnd_val != 0 {
                 let hwnd = hwnd_val as *mut std::ffi::c_void;
-                // SAFETY: We're calling Win32 APIs on a valid HWND obtained from winit.
-                // These functions are standard Windows APIs for window management.
                 unsafe {
                     unsafe extern "system" {
                         fn InvalidateRect(
@@ -49,17 +47,33 @@ fn force_window_repaint(window: &Window) {
 }
 
 #[cfg(not(windows))]
-fn force_window_repaint(_window: &Window) {
-    // No-op on non-Windows platforms
-}
+fn force_window_repaint(_window: &Window) {}
 
 /// Represents the current state of mouse interaction
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MouseState {
-    /// No mouse button is pressed
     Idle,
-    /// Left mouse button is pressed and drawing
     Drawing,
+}
+
+/// Consolidated UI/render state
+struct WinitRenderState {
+    hue: f32,
+    saturation: f32,
+    value: f32,
+    custom_colors: Vec<[u8; 3]>,
+    selected_custom_index: i32,
+    brush_size: f32,
+    opacity: f32,
+    is_eraser: bool,
+    slider_drag: Option<SliderType>,
+    zoom: f32,
+    pan_offset: (f32, f32),
+    is_panning: bool,
+    last_mouse_position: Point,
+    mouse_state: MouseState,
+    mouse_position: Point,
+    active_layer: usize,
 }
 
 /// Window application state using winit
@@ -70,45 +84,16 @@ pub struct WindowApp {
     renderer: Option<Renderer>,
     /// Canvas for drawing operations
     canvas: Rc<RefCell<Canvas>>,
-    /// HSV color values
-    hue: f32,
-    saturation: f32,
-    value: f32,
-    /// Custom saved colors
-    custom_colors: Vec<[u8; 3]>,
-    /// Selected custom color index (-1 if none)
-    selected_custom_index: i32,
     /// Current active stroke being drawn
     active_stroke: Rc<RefCell<Option<ActiveStroke>>>,
-    /// Current mouse state
-    mouse_state: MouseState,
-    /// Current mouse position
-    mouse_position: Point,
-    /// Brush size in pixels
-    brush_size: f32,
-    /// Brush opacity
-    opacity: f32,
-    /// Eraser mode active
-    is_eraser: bool,
-    /// Slider drag state (which slider is being dragged)
-    slider_drag: Option<SliderType>,
     /// User preferences
     preferences: Preferences,
     /// Current keyboard modifiers state
     modifiers: ModifiersState,
     /// Scale factor for DPI scaling
     scale_factor: f64,
-    /// Viewport zoom level (1.0 = 100%)
-    zoom: f32,
-    /// Viewport pan offset (in canvas coordinates)
-    pan_offset: (f32, f32),
-    /// Whether space key is held for panning
-    is_panning: bool,
-    /// Last mouse position for panning delta calculation
-    last_mouse_position: Point,
-    /// Index of the active layer
-    #[allow(dead_code)]
-    active_layer: usize,
+    /// Consolidated UI/render state
+    render_state: WinitRenderState,
 }
 
 impl WindowApp {
@@ -120,77 +105,443 @@ impl WindowApp {
             window: None,
             renderer: None,
             canvas: Rc::new(RefCell::new(Canvas::new())),
-            hue: preferences.palette.h,
-            saturation: preferences.palette.s,
-            value: preferences.palette.v,
-            custom_colors: preferences.palette.custom_colors.clone(),
-            selected_custom_index: -1,
             active_stroke: Rc::new(RefCell::new(None)),
-            mouse_state: MouseState::Idle,
-            mouse_position: Point { x: 0.0, y: 0.0 },
-            brush_size: preferences.brush.default_size,
-            opacity: preferences.brush.default_opacity,
-            is_eraser: false,
-            slider_drag: None,
             preferences,
             modifiers: ModifiersState::empty(),
             scale_factor: 1.0,
-            zoom: 1.0,
-            pan_offset: (0.0, 0.0),
-            is_panning: false,
-            last_mouse_position: Point { x: 0.0, y: 0.0 },
-            active_layer: 0,
+            render_state: WinitRenderState {
+                hue: 0.0,
+                saturation: 0.0,
+                value: 0.0,
+                custom_colors: Vec::new(),
+                selected_custom_index: -1,
+                brush_size: 3.0,
+                opacity: 1.0,
+                is_eraser: false,
+                slider_drag: None,
+                zoom: 1.0,
+                pan_offset: (0.0, 0.0),
+                is_panning: false,
+                last_mouse_position: Point { x: 0.0, y: 0.0 },
+                mouse_state: MouseState::Idle,
+                mouse_position: Point { x: 0.0, y: 0.0 },
+                active_layer: 0,
+            },
         }
     }
 
     /// Transform screen coordinates to canvas coordinates using current zoom/pan
     fn screen_to_canvas(&self, screen_x: f32, screen_y: f32) -> Point {
-        let canvas_x = screen_x / self.zoom + self.pan_offset.0;
-        let canvas_y = screen_y / self.zoom + self.pan_offset.1;
+        let canvas_x = screen_x / self.render_state.zoom + self.render_state.pan_offset.0;
+        let canvas_y = screen_y / self.render_state.zoom + self.render_state.pan_offset.1;
         Point {
             x: canvas_x,
             y: canvas_y,
         }
     }
 
-    /// Export canvas to PNG file
-    fn export_canvas_to_file(&self) {
-        let canvas = self.canvas.borrow();
-        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
-        let filename = format!("rancer_export_{}.png", timestamp);
-
-        // Get user's Pictures directory or use current directory
-        let export_path = dirs::picture_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join(filename);
-
-        logger::info(&format!(
-            "Attempting to export canvas to: {:?}",
-            export_path
-        ));
-
-        match crate::export::export_to_png(&canvas, &export_path) {
-            Ok(_) => {
-                logger::info(&format!("Export successful: {:?}", export_path));
-            }
-            Err(e) => {
-                logger::error(&format!("Export failed: {}", e));
-            }
+    /// Request a redraw and apply Windows repaint workaround
+    fn request_redraw(&self) {
+        if let Some(window) = &self.window {
+            window.request_redraw();
+            window.request_redraw();
+            window.request_redraw();
+            force_window_repaint(window);
         }
-    }
-
-    /// Update HSV values in preferences and save
-    fn update_hsv_preferences(&mut self) {
-        self.preferences.palette.h = self.hue;
-        self.preferences.palette.s = self.saturation;
-        self.preferences.palette.v = self.value;
-        self.preferences.palette.custom_colors = self.custom_colors.clone();
-        let _ = crate::preferences::save(&self.preferences);
     }
 
     /// Get current color from HSV values
     fn current_color(&self) -> crate::canvas::Color {
-        crate::canvas::hsv_to_rgb(self.hue, self.saturation, self.value)
+        crate::canvas::hsv_to_rgb(
+            self.render_state.hue,
+            self.render_state.saturation,
+            self.render_state.value,
+        )
+    }
+
+    /// Update HSV values in preferences and save
+    fn update_hsv_preferences(&mut self) {
+        self.preferences.palette.h = self.render_state.hue;
+        self.preferences.palette.s = self.render_state.saturation;
+        self.preferences.palette.v = self.render_state.value;
+        self.preferences.palette.custom_colors = self.render_state.custom_colors.clone();
+        let _ = crate::preferences::save(&self.preferences);
+    }
+
+    /// Export canvas to PNG file using a native save dialog
+    #[cfg(target_os = "windows")]
+    fn export_canvas_to_file(&self) {
+        let filename = crate::export_ui::default_export_filename();
+        let handle = rfd::FileDialog::new()
+            .set_file_name(&filename)
+            .add_filter("PNG Image", &["png"])
+            .save_file();
+
+        let Some(path) = handle else { return };
+
+        let canvas = self.canvas.borrow();
+        match crate::export::export_to_png(&canvas, &path) {
+            Ok(_) => {
+                crate::export_ui::notify_export_result(true, &path, None);
+            }
+            Err(e) => {
+                crate::export_ui::notify_export_result(false, &path, Some(&e.to_string()));
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn export_canvas_to_file(&self) {
+        let filename = crate::export_ui::default_export_filename();
+        let export_path = dirs::picture_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(filename);
+
+        let canvas = self.canvas.borrow();
+        match crate::export::export_to_png(&canvas, &export_path) {
+            Ok(_) => {
+                crate::export_ui::notify_export_result(true, &export_path, None);
+            }
+            Err(e) => {
+                crate::export_ui::notify_export_result(false, &export_path, Some(&e.to_string()));
+            }
+        }
+    }
+
+    /// Handle UI element click — returns true if a UI element was hit
+    fn handle_ui_click(&mut self, hit: ui::UiElement) -> bool {
+        match hit {
+            ui::UiElement::HueSlider(value) => {
+                self.render_state.hue = value;
+                self.render_state.selected_custom_index = -1;
+                self.render_state.slider_drag = Some(SliderType::Hue);
+                self.update_hsv_preferences();
+            }
+            ui::UiElement::SaturationSlider(value) => {
+                self.render_state.saturation = value;
+                self.render_state.selected_custom_index = -1;
+                self.render_state.slider_drag = Some(SliderType::Saturation);
+                self.update_hsv_preferences();
+            }
+            ui::UiElement::ValueSlider(value) => {
+                self.render_state.value = value;
+                self.render_state.selected_custom_index = -1;
+                self.render_state.slider_drag = Some(SliderType::Value);
+                self.update_hsv_preferences();
+            }
+            ui::UiElement::CustomColor(idx) => {
+                self.render_state.selected_custom_index = idx as i32;
+                let color = self.render_state.custom_colors[idx];
+                let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
+                    r: color[0], g: color[1], b: color[2], a: 255,
+                });
+                self.render_state.hue = hsv.h;
+                self.render_state.saturation = hsv.s;
+                self.render_state.value = hsv.v;
+                self.update_hsv_preferences();
+            }
+            ui::UiElement::SaveColor => {
+                let current = crate::canvas::hsv_to_rgb(
+                    self.render_state.hue,
+                    self.render_state.saturation,
+                    self.render_state.value,
+                );
+                if self.render_state.custom_colors.len() >= 10 {
+                    self.render_state.custom_colors.remove(0);
+                }
+                self.render_state.custom_colors.push([current.r, current.g, current.b]);
+                self.update_hsv_preferences();
+            }
+            ui::UiElement::BrushSize(size) => {
+                self.render_state.brush_size = size;
+                self.preferences.brush.default_size = size;
+                let _ = crate::preferences::save(&self.preferences);
+                println!("Selected brush size: {}", size);
+            }
+            ui::UiElement::Eraser => {
+                self.render_state.is_eraser = !self.render_state.is_eraser;
+                logger::info(&format!(
+                    "Eraser mode: {}",
+                    if self.render_state.is_eraser { "ON" } else { "OFF" }
+                ));
+            }
+            ui::UiElement::Clear => {
+                self.canvas.borrow_mut().clear();
+                logger::info("Canvas cleared");
+            }
+            ui::UiElement::Undo => {
+                let mut canvas = self.canvas.borrow_mut();
+                if canvas.can_undo() {
+                    canvas.undo();
+                    logger::info("Undo: removed last stroke");
+                }
+            }
+            ui::UiElement::Redo => {
+                let mut canvas = self.canvas.borrow_mut();
+                if canvas.can_redo() {
+                    canvas.redo();
+                    logger::info("Redo: restored last stroke");
+                }
+            }
+            ui::UiElement::Export => {
+                self.export_canvas_to_file();
+            }
+            ui::UiElement::ZoomIn => {
+                let new_zoom = (self.render_state.zoom * 1.25).min(10.0);
+                if (new_zoom - self.render_state.zoom).abs() > 0.001 {
+                    self.render_state.zoom = new_zoom;
+                }
+            }
+            ui::UiElement::ZoomOut => {
+                let new_zoom = (self.render_state.zoom / 1.25).max(0.1);
+                if (new_zoom - self.render_state.zoom).abs() > 0.001 {
+                    self.render_state.zoom = new_zoom;
+                }
+            }
+            ui::UiElement::Opacity(opacity) => {
+                self.render_state.opacity = opacity;
+                self.preferences.brush.default_opacity = opacity;
+                let _ = crate::preferences::save(&self.preferences);
+                logger::info(&format!("Opacity: {}", opacity));
+            }
+            ui::UiElement::LayerRow(index) => {
+                if self.canvas.borrow_mut().set_active_layer(index).is_ok() {
+                    self.render_state.active_layer = index;
+                }
+            }
+            ui::UiElement::LayerVisibility(index) => {
+                let _ = self.canvas.borrow_mut().toggle_layer_visibility(index);
+            }
+            ui::UiElement::AddLayer => {
+                let mut canvas = self.canvas.borrow_mut();
+                if canvas.layer_count() < crate::canvas::MAX_LAYERS {
+                    let _ = canvas.add_layer(None);
+                    let new_index = canvas.layer_count() - 1;
+                    let _ = canvas.set_active_layer(new_index);
+                    self.render_state.active_layer = new_index;
+                }
+            }
+            ui::UiElement::DeleteLayer => {
+                let mut canvas = self.canvas.borrow_mut();
+                if canvas.layer_count() > 1 {
+                    let _ = canvas.remove_layer(self.render_state.active_layer);
+                    self.render_state.active_layer = canvas.active_layer();
+                }
+            }
+            ui::UiElement::MoveLayerUp => {
+                let mut canvas = self.canvas.borrow_mut();
+                let idx = self.render_state.active_layer;
+                if idx > 0 {
+                    let _ = canvas.move_layer(idx, idx - 1);
+                    self.render_state.active_layer = canvas.active_layer();
+                }
+            }
+            ui::UiElement::MoveLayerDown => {
+                let mut canvas = self.canvas.borrow_mut();
+                let idx = self.render_state.active_layer;
+                if idx < canvas.layer_count() - 1 {
+                    let _ = canvas.move_layer(idx, idx + 1);
+                    self.render_state.active_layer = canvas.active_layer();
+                }
+            }
+            ui::UiElement::Canvas => return false,
+        }
+        true
+    }
+
+    /// Handle keyboard input
+    fn handle_keyboard(&mut self, key_event: &winit::event::KeyEvent) {
+        if key_event.state != winit::event::ElementState::Pressed {
+            return;
+        }
+
+        // Space key for panning
+        if let winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) = key_event.logical_key {
+            self.render_state.is_panning = true;
+            return;
+        }
+
+        // 's' key for export
+        if let winit::keyboard::Key::Character(ref c) = key_event.logical_key && c == "s" {
+            self.export_canvas_to_file();
+            return;
+        }
+
+        match key_event.logical_key.as_ref() {
+            winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowUp) => {
+                if !self.render_state.custom_colors.is_empty() {
+                    let new_index = if self.render_state.selected_custom_index < 0 {
+                        0
+                    } else {
+                        ((self.render_state.selected_custom_index as usize + 1)
+                            % self.render_state.custom_colors.len()) as i32
+                    };
+                    self.render_state.selected_custom_index = new_index;
+                    let color = self.render_state.custom_colors[new_index as usize];
+                    let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
+                        r: color[0], g: color[1], b: color[2], a: 255,
+                    });
+                    self.render_state.hue = hsv.h;
+                    self.render_state.saturation = hsv.s;
+                    self.render_state.value = hsv.v;
+                    self.update_hsv_preferences();
+                    self.request_redraw();
+                }
+            }
+            winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowDown) => {
+                if !self.render_state.custom_colors.is_empty() {
+                    let new_index = if self.render_state.selected_custom_index <= 0 {
+                        self.render_state.custom_colors.len() as i32 - 1
+                    } else {
+                        self.render_state.selected_custom_index - 1
+                    };
+                    self.render_state.selected_custom_index = new_index;
+                    let color = self.render_state.custom_colors[new_index as usize];
+                    let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
+                        r: color[0], g: color[1], b: color[2], a: 255,
+                    });
+                    self.render_state.hue = hsv.h;
+                    self.render_state.saturation = hsv.s;
+                    self.render_state.value = hsv.v;
+                    self.update_hsv_preferences();
+                    self.request_redraw();
+                }
+            }
+            winit::keyboard::Key::Character(c) => {
+                let c_str: &str = c;
+                if self.modifiers.contains(winit::keyboard::ModifiersState::CONTROL) {
+                    match c_str {
+                        "z" | "Z" => {
+                            let mut canvas = self.canvas.borrow_mut();
+                            if canvas.can_undo() {
+                                canvas.undo();
+                                logger::info("Undo: removed last stroke");
+                                println!("Undo: removed last stroke");
+                                self.request_redraw();
+                            }
+                        }
+                        "y" | "Y" => {
+                            let mut canvas = self.canvas.borrow_mut();
+                            if canvas.can_redo() {
+                                canvas.redo();
+                                logger::info("Redo: restored last undone stroke");
+                                println!("Redo: restored last undone stroke");
+                                self.request_redraw();
+                            }
+                        }
+                        _ => {}
+                    }
+                } else {
+                    match c_str {
+                        "e" | "E" => {
+                            if self.render_state.mouse_state != MouseState::Drawing {
+                                self.render_state.is_eraser = !self.render_state.is_eraser;
+                                logger::info(&format!(
+                                    "Eraser mode: {}",
+                                    if self.render_state.is_eraser { "ON" } else { "OFF" }
+                                ));
+                                self.request_redraw();
+                            }
+                        }
+                        "+" | "=" => {
+                            self.render_state.brush_size =
+                                crate::canvas::brush_size_up(self.render_state.brush_size);
+                            self.preferences.brush.default_size = self.render_state.brush_size;
+                            let _ = crate::preferences::save(&self.preferences);
+                            logger::info(&format!("Brush size: {}", self.render_state.brush_size));
+                            self.request_redraw();
+                        }
+                        "-" | "_" => {
+                            self.render_state.brush_size =
+                                crate::canvas::brush_size_down(self.render_state.brush_size);
+                            self.preferences.brush.default_size = self.render_state.brush_size;
+                            let _ = crate::preferences::save(&self.preferences);
+                            logger::info(&format!("Brush size: {}", self.render_state.brush_size));
+                            self.request_redraw();
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            winit::keyboard::Key::Named(winit::keyboard::NamedKey::Delete) => {
+                if self.modifiers.contains(winit::keyboard::ModifiersState::CONTROL) {
+                    self.canvas.borrow_mut().clear();
+                    logger::info("Canvas cleared");
+                    self.request_redraw();
+                }
+            }
+            winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) => {
+                if key_event.state == winit::event::ElementState::Released {
+                    self.render_state.is_panning = false;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Handle cursor motion
+    fn handle_cursor_moved(&mut self, screen_point: Point) {
+        self.render_state.mouse_position = screen_point;
+
+        // Handle panning
+        if self.render_state.is_panning {
+            let dx = screen_point.x - self.render_state.last_mouse_position.x;
+            let dy = screen_point.y - self.render_state.last_mouse_position.y;
+            let (old_pan_x, old_pan_y) = self.render_state.pan_offset;
+            self.render_state.pan_offset = (
+                old_pan_x - dx / self.render_state.zoom,
+                old_pan_y - dy / self.render_state.zoom,
+            );
+            self.render_state.last_mouse_position = screen_point;
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+            return;
+        }
+
+        self.render_state.last_mouse_position = screen_point;
+
+        // Drawing
+        if self.render_state.mouse_state == MouseState::Drawing {
+            if let Some(active_stroke) = &mut *self.active_stroke.borrow_mut() {
+                let canvas_point = self.screen_to_canvas(screen_point.x, screen_point.y);
+                active_stroke.add_point(canvas_point);
+                println!(
+                    "Active stroke now has {} points",
+                    active_stroke.points().len()
+                );
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+            return;
+        }
+
+        // Slider dragging
+        if let Some((slider, value)) = ui::slider_drag(
+            screen_point.x,
+            screen_point.y,
+            self.render_state.slider_drag,
+        ) {
+            match slider {
+                SliderType::Hue => {
+                    self.render_state.hue = value;
+                    self.render_state.selected_custom_index = -1;
+                }
+                SliderType::Saturation => {
+                    self.render_state.saturation = value;
+                    self.render_state.selected_custom_index = -1;
+                }
+                SliderType::Value => {
+                    self.render_state.value = value;
+                    self.render_state.selected_custom_index = -1;
+                }
+            }
+            self.update_hsv_preferences();
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+        }
     }
 }
 
@@ -230,7 +581,6 @@ impl ApplicationHandler for WindowApp {
             let size = window.inner_size();
             let config = RendererConfig::default();
 
-            // Guard against zero-size window (can happen on some systems during resumed phase)
             let render_width = if size.width > 0 {
                 size.width
             } else {
@@ -249,7 +599,6 @@ impl ApplicationHandler for WindowApp {
                 ));
             }
 
-            // Use tokio runtime to initialize WGPU (async)
             let rt = tokio::runtime::Runtime::new().unwrap();
             match rt.block_on(Renderer::new(
                 config,
@@ -287,17 +636,14 @@ impl ApplicationHandler for WindowApp {
                 self.modifiers = modifiers.state();
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                // Handle zoom with mouse wheel
                 let zoom_factor = 1.25;
-                let old_zoom = self.zoom;
+                let old_zoom = self.render_state.zoom;
 
                 let new_zoom = match delta {
                     winit::event::MouseScrollDelta::LineDelta(_, dy) => {
                         if dy > 0.0 {
-                            // Scroll up = zoom in
                             (old_zoom * zoom_factor).min(10.0)
                         } else if dy < 0.0 {
-                            // Scroll down = zoom out
                             (old_zoom / zoom_factor).max(0.1)
                         } else {
                             old_zoom
@@ -315,17 +661,16 @@ impl ApplicationHandler for WindowApp {
                 };
 
                 if (new_zoom - old_zoom).abs() > 0.001 {
-                    // Zoom toward mouse position:
-                    // 1. Calculate where mouse is in canvas coordinates before zoom
-                    let mouse_canvas_x = self.mouse_position.x / old_zoom + self.pan_offset.0;
-                    let mouse_canvas_y = self.mouse_position.y / old_zoom + self.pan_offset.1;
+                    let mouse_canvas_x =
+                        self.render_state.mouse_position.x / old_zoom + self.render_state.pan_offset.0;
+                    let mouse_canvas_y =
+                        self.render_state.mouse_position.y / old_zoom + self.render_state.pan_offset.1;
 
-                    // 2. Calculate new pan so that same canvas point is under mouse after zoom
-                    let new_pan_x = mouse_canvas_x - self.mouse_position.x / new_zoom;
-                    let new_pan_y = mouse_canvas_y - self.mouse_position.y / new_zoom;
+                    let new_pan_x = mouse_canvas_x - self.render_state.mouse_position.x / new_zoom;
+                    let new_pan_y = mouse_canvas_y - self.render_state.mouse_position.y / new_zoom;
 
-                    self.zoom = new_zoom;
-                    self.pan_offset = (new_pan_x, new_pan_y);
+                    self.render_state.zoom = new_zoom;
+                    self.render_state.pan_offset = (new_pan_x, new_pan_y);
 
                     if let Some(window) = &self.window {
                         window.request_redraw();
@@ -333,7 +678,6 @@ impl ApplicationHandler for WindowApp {
                 }
             }
             WindowEvent::Resized(physical_size) => {
-                // Update scale factor (may change if window moves between monitors)
                 if let Some(ref window) = self.window {
                     self.scale_factor = window.scale_factor();
                 }
@@ -343,7 +687,6 @@ impl ApplicationHandler for WindowApp {
                     physical_size.width, physical_size.height
                 ));
 
-                // Convert physical size to logical size before saving
                 let logical_width = (physical_size.width as f64 / self.scale_factor) as u32;
                 let logical_height = (physical_size.height as f64 / self.scale_factor) as u32;
 
@@ -352,13 +695,11 @@ impl ApplicationHandler for WindowApp {
                     logical_width, logical_height
                 ));
 
-                // Update preferences with logical window size
                 self.preferences.window.width = logical_width;
                 self.preferences.window.height = logical_height;
                 self.preferences.canvas.width = logical_width;
                 self.preferences.canvas.height = logical_height;
 
-                // Save preferences on change
                 if let Err(e) = crate::preferences::save(&self.preferences) {
                     logger::error(&format!("Failed to save preferences: {}", e));
                 }
@@ -370,16 +711,9 @@ impl ApplicationHandler for WindowApp {
                     let mut canvas = self.canvas.borrow_mut();
                     canvas.resize(physical_size.width, physical_size.height);
                 }
-                if let Some(window) = &self.window {
-                    window.request_redraw();
-                    window.request_redraw();
-                    window.request_redraw();
-                    // Force Windows to repaint the window, fixing black space issue
-                    force_window_repaint(window);
-                }
+                self.request_redraw();
             }
             WindowEvent::RedrawRequested => {
-                // Render the frame
                 if let Some(renderer) = &mut self.renderer {
                     let canvas = self.canvas.borrow();
                     let active_stroke = self.active_stroke.borrow();
@@ -388,18 +722,18 @@ impl ApplicationHandler for WindowApp {
                         canvas: &canvas,
                         active_stroke: active_stroke.as_ref(),
                         ui: UiRenderState {
-                            hue: self.hue,
-                            saturation: self.saturation,
-                            value: self.value,
-                            custom_colors: &self.custom_colors,
-                            selected_custom_index: self.selected_custom_index,
-                            brush_size: self.brush_size,
-                            opacity: self.opacity,
-                            is_eraser: self.is_eraser,
+                            hue: self.render_state.hue,
+                            saturation: self.render_state.saturation,
+                            value: self.render_state.value,
+                            custom_colors: &self.render_state.custom_colors,
+                            selected_custom_index: self.render_state.selected_custom_index,
+                            brush_size: self.render_state.brush_size,
+                            opacity: self.render_state.opacity,
+                            is_eraser: self.render_state.is_eraser,
                         },
                         viewport: ViewportState {
-                            zoom: self.zoom,
-                            pan_offset: self.pan_offset,
+                            zoom: self.render_state.zoom,
+                            pan_offset: self.render_state.pan_offset,
                         },
                     };
 
@@ -429,12 +763,12 @@ impl ApplicationHandler for WindowApp {
                         winit::event::ElementState::Pressed => {
                             println!(
                                 "Mouse button pressed at ({}, {})",
-                                self.mouse_position.x, self.mouse_position.y
+                                self.render_state.mouse_position.x,
+                                self.render_state.mouse_position.y
                             );
 
-                            // Check if click is on UI elements
-                            let x = self.mouse_position.x;
-                            let y = self.mouse_position.y;
+                            let x = self.render_state.mouse_position.x;
+                            let y = self.render_state.mouse_position.y;
                             let window_width = self
                                 .window
                                 .as_ref()
@@ -447,276 +781,48 @@ impl ApplicationHandler for WindowApp {
                             let hit = ui::hit_test(
                                 x,
                                 y,
-                                &self.custom_colors,
+                                &self.render_state.custom_colors,
                                 layer_count,
                                 active_layer,
                                 window_width,
                             );
 
-                            match hit {
-                                ui::UiElement::HueSlider(value) => {
-                                    self.hue = value;
-                                    self.selected_custom_index = -1;
-                                    self.slider_drag = Some(SliderType::Hue);
-                                    self.update_hsv_preferences();
-                                    if let Some(window) = &self.window {
-                                        window.request_redraw();
-                                    }
-                                    return;
-                                }
-                                ui::UiElement::SaturationSlider(value) => {
-                                    self.saturation = value;
-                                    self.selected_custom_index = -1;
-                                    self.slider_drag = Some(SliderType::Saturation);
-                                    self.update_hsv_preferences();
-                                    if let Some(window) = &self.window {
-                                        window.request_redraw();
-                                    }
-                                    return;
-                                }
-                                ui::UiElement::ValueSlider(value) => {
-                                    self.value = value;
-                                    self.selected_custom_index = -1;
-                                    self.slider_drag = Some(SliderType::Value);
-                                    self.update_hsv_preferences();
-                                    if let Some(window) = &self.window {
-                                        window.request_redraw();
-                                    }
-                                    return;
-                                }
-                                ui::UiElement::CustomColor(idx) => {
-                                    self.selected_custom_index = idx as i32;
-                                    let color = self.custom_colors[idx];
-                                    let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
-                                        r: color[0],
-                                        g: color[1],
-                                        b: color[2],
-                                        a: 255,
-                                    });
-                                    self.hue = hsv.h;
-                                    self.saturation = hsv.s;
-                                    self.value = hsv.v;
-                                    self.update_hsv_preferences();
-                                    if let Some(window) = &self.window {
-                                        window.request_redraw();
-                                    }
-                                    return;
-                                }
-                                ui::UiElement::SaveColor => {
-                                    let current = crate::canvas::hsv_to_rgb(
-                                        self.hue,
-                                        self.saturation,
-                                        self.value,
-                                    );
-                                    if self.custom_colors.len() >= 10 {
-                                        self.custom_colors.remove(0);
-                                    }
-                                    self.custom_colors.push([current.r, current.g, current.b]);
-                                    self.update_hsv_preferences();
-                                    if let Some(window) = &self.window {
-                                        window.request_redraw();
-                                    }
-                                    return;
-                                }
-                                ui::UiElement::BrushSize(size) => {
-                                    self.brush_size = size;
-                                    self.preferences.brush.default_size = size;
-                                    if let Err(e) = crate::preferences::save(&self.preferences) {
-                                        logger::error(&format!(
-                                            "Failed to save preferences: {}",
-                                            e
-                                        ));
-                                    }
-                                    println!("Selected brush size: {}", size);
-                                    if let Some(window) = &self.window {
-                                        window.request_redraw();
-                                    }
-                                    return;
-                                }
-                                ui::UiElement::Eraser => {
-                                    self.is_eraser = !self.is_eraser;
-                                    logger::info(&format!(
-                                        "Eraser mode: {}",
-                                        if self.is_eraser { "ON" } else { "OFF" }
-                                    ));
-                                    if let Some(window) = &self.window {
-                                        window.request_redraw();
-                                    }
-                                    return;
-                                }
-                                ui::UiElement::Clear => {
-                                    let mut canvas = self.canvas.borrow_mut();
-                                    canvas.clear();
-                                    logger::info("Canvas cleared");
-                                    if let Some(window) = &self.window {
-                                        window.request_redraw();
-                                    }
-                                    return;
-                                }
-                                ui::UiElement::Undo => {
-                                    let mut canvas = self.canvas.borrow_mut();
-                                    if canvas.can_undo() {
-                                        canvas.undo();
-                                        logger::info("Undo: removed last stroke");
-                                        if let Some(window) = &self.window {
-                                            window.request_redraw();
-                                        }
-                                    }
-                                    return;
-                                }
-                                ui::UiElement::Redo => {
-                                    let mut canvas = self.canvas.borrow_mut();
-                                    if canvas.can_redo() {
-                                        canvas.redo();
-                                        logger::info("Redo: restored last stroke");
-                                        if let Some(window) = &self.window {
-                                            window.request_redraw();
-                                        }
-                                    }
-                                    return;
-                                }
-                                ui::UiElement::Export => {
-                                    self.export_canvas_to_file();
-                                    return;
-                                }
-                                ui::UiElement::ZoomIn => {
-                                    let new_zoom = (self.zoom * 1.25).min(10.0);
-                                    if (new_zoom - self.zoom).abs() > 0.001 {
-                                        self.zoom = new_zoom;
-                                        if let Some(window) = &self.window {
-                                            window.request_redraw();
-                                        }
-                                    }
-                                    return;
-                                }
-                                ui::UiElement::ZoomOut => {
-                                    let new_zoom = (self.zoom / 1.25).max(0.1);
-                                    if (new_zoom - self.zoom).abs() > 0.001 {
-                                        self.zoom = new_zoom;
-                                        if let Some(window) = &self.window {
-                                            window.request_redraw();
-                                        }
-                                    }
-                                    return;
-                                }
-                                ui::UiElement::Opacity(opacity) => {
-                                    self.opacity = opacity;
-                                    self.preferences.brush.default_opacity = opacity;
-                                    let _ = crate::preferences::save(&self.preferences);
-                                    logger::info(&format!("Opacity: {}", opacity));
-                                    if let Some(window) = &self.window {
-                                        window.request_redraw();
-                                    }
-                                    return;
-                                }
-                                ui::UiElement::LayerRow(index) => {
-                                    if self.canvas.borrow_mut().set_active_layer(index).is_ok() {
-                                        self.active_layer = index;
-                                        if let Some(window) = &self.window {
-                                            window.request_redraw();
-                                        }
-                                    }
-                                    return;
-                                }
-                                ui::UiElement::LayerVisibility(index) => {
-                                    let _ = self.canvas.borrow_mut().toggle_layer_visibility(index);
-                                    if let Some(window) = &self.window {
-                                        window.request_redraw();
-                                    }
-                                    return;
-                                }
-                                ui::UiElement::AddLayer => {
-                                    let mut canvas = self.canvas.borrow_mut();
-                                    if canvas.layer_count() < crate::canvas::MAX_LAYERS {
-                                        let _ = canvas.add_layer(None);
-                                        let new_index = canvas.layer_count() - 1;
-                                        let _ = canvas.set_active_layer(new_index);
-                                        self.active_layer = new_index;
-                                    }
-                                    if let Some(window) = &self.window {
-                                        window.request_redraw();
-                                    }
-                                    return;
-                                }
-                                ui::UiElement::DeleteLayer => {
-                                    let mut canvas = self.canvas.borrow_mut();
-                                    if canvas.layer_count() > 1 {
-                                        let _ = canvas.remove_layer(self.active_layer);
-                                        self.active_layer = canvas.active_layer();
-                                    }
-                                    if let Some(window) = &self.window {
-                                        window.request_redraw();
-                                    }
-                                    return;
-                                }
-                                ui::UiElement::MoveLayerUp => {
-                                    let mut canvas = self.canvas.borrow_mut();
-                                    let idx = self.active_layer;
-                                    if idx > 0 {
-                                        let _ = canvas.move_layer(idx, idx - 1);
-                                        self.active_layer = canvas.active_layer();
-                                    }
-                                    if let Some(window) = &self.window {
-                                        window.request_redraw();
-                                    }
-                                    return;
-                                }
-                                ui::UiElement::MoveLayerDown => {
-                                    let mut canvas = self.canvas.borrow_mut();
-                                    let idx = self.active_layer;
-                                    if idx < canvas.layer_count() - 1 {
-                                        let _ = canvas.move_layer(idx, idx + 1);
-                                        self.active_layer = canvas.active_layer();
-                                    }
-                                    if let Some(window) = &self.window {
-                                        window.request_redraw();
-                                    }
-                                    return;
-                                }
-                                ui::UiElement::Canvas => {
-                                    // Not on any UI element — start drawing
-                                }
+                            if self.handle_ui_click(hit) {
+                                self.request_redraw();
+                                return;
                             }
 
-                            // If not on UI, start drawing
-                            {
-                                let canvas = self.canvas.borrow();
-                                if canvas.is_active_layer_locked() {
-                                    return;
-                                }
+                            // Start drawing
+                            if self.canvas.borrow().is_active_layer_locked() {
+                                return;
                             }
-                            self.mouse_state = MouseState::Drawing;
+                            self.render_state.mouse_state = MouseState::Drawing;
 
-                            // Begin a new active stroke
-                            let color = if self.is_eraser {
+                            let color = if self.render_state.is_eraser {
                                 crate::canvas::Color::WHITE
                             } else {
                                 self.current_color()
                             };
                             let mut canvas = self.canvas.borrow_mut();
-                            let active_stroke =
-                                canvas.begin_stroke(color, self.brush_size, self.opacity);
+                            let active_stroke = canvas.begin_stroke(
+                                color,
+                                self.render_state.brush_size,
+                                self.render_state.opacity,
+                            );
                             println!(
                                 "Created {}stroke with color RGB({}, {}, {}) and width {}",
-                                if self.is_eraser { "eraser " } else { "" },
-                                color.r,
-                                color.g,
-                                color.b,
-                                self.brush_size
+                                if self.render_state.is_eraser { "eraser " } else { "" },
+                                color.r, color.g, color.b, self.render_state.brush_size
                             );
 
-                            // Store the active stroke
                             *self.active_stroke.borrow_mut() = Some(active_stroke);
 
-                            // Add the current mouse position as the first point (in canvas coords)
                             if let Some(active_stroke) = &mut *self.active_stroke.borrow_mut() {
-                                let canvas_point = self
-                                    .screen_to_canvas(self.mouse_position.x, self.mouse_position.y);
-                                active_stroke.add_point(canvas_point);
-                                println!(
-                                    "Added first point to active stroke: ({}, {})",
-                                    self.mouse_position.x, self.mouse_position.y
+                                let canvas_point = self.screen_to_canvas(
+                                    self.render_state.mouse_position.x,
+                                    self.render_state.mouse_position.y,
                                 );
+                                active_stroke.add_point(canvas_point);
                                 println!(
                                     "Active stroke now has {} points",
                                     active_stroke.points().len()
@@ -724,8 +830,8 @@ impl ApplicationHandler for WindowApp {
                             }
                         }
                         winit::event::ElementState::Released => {
-                            self.mouse_state = MouseState::Idle;
-                            self.slider_drag = None;
+                            self.render_state.mouse_state = MouseState::Idle;
+                            self.render_state.slider_drag = None;
 
                             if let Some(active_stroke) = self.active_stroke.borrow_mut().take() {
                                 let mut canvas = self.canvas.borrow_mut();
@@ -741,10 +847,9 @@ impl ApplicationHandler for WindowApp {
                         window.request_redraw();
                     }
                 } else if button == winit::event::MouseButton::Right {
-                    // Right-click for eraser mode
                     match button_state {
                         winit::event::ElementState::Pressed => {
-                            self.is_eraser = true;
+                            self.render_state.is_eraser = true;
                             logger::info("Eraser mode: ON (right-click held)");
                             println!("Eraser mode: ON");
                             if let Some(window) = &self.window {
@@ -752,7 +857,7 @@ impl ApplicationHandler for WindowApp {
                             }
                         }
                         winit::event::ElementState::Released => {
-                            self.is_eraser = false;
+                            self.render_state.is_eraser = false;
                             logger::info("Eraser mode: OFF (right-click released)");
                             println!("Eraser mode: OFF");
                             if let Some(window) = &self.window {
@@ -767,234 +872,12 @@ impl ApplicationHandler for WindowApp {
                     x: position.x as f32,
                     y: position.y as f32,
                 };
-                self.mouse_position = screen_point;
-
-                // Handle panning when space is held
-                if self.is_panning {
-                    let dx = screen_point.x - self.last_mouse_position.x;
-                    let dy = screen_point.y - self.last_mouse_position.y;
-                    let (old_pan_x, old_pan_y) = self.pan_offset;
-                    // Pan in opposite direction of mouse movement (drag canvas with mouse)
-                    self.pan_offset = (old_pan_x - dx / self.zoom, old_pan_y - dy / self.zoom);
-                    self.last_mouse_position = screen_point;
-                    if let Some(window) = &self.window {
-                        window.request_redraw();
-                    }
-                    return;
-                }
-
-                // Update last mouse position for panning
-                self.last_mouse_position = screen_point;
-
-                // If we're drawing, add the point to the active stroke (transform to canvas coords)
-                if self.mouse_state == MouseState::Drawing
-                    && let Some(active_stroke) = &mut *self.active_stroke.borrow_mut()
-                {
-                    let canvas_point = self.screen_to_canvas(screen_point.x, screen_point.y);
-                    active_stroke.add_point(canvas_point);
-                    println!(
-                        "Added point to active stroke: ({}, {})",
-                        canvas_point.x, canvas_point.y
-                    );
-                    println!(
-                        "Active stroke now has {} points",
-                        active_stroke.points().len()
-                    );
-                    if let Some(window) = &self.window {
-                        window.request_redraw();
-                    }
-                }
-
-                // Handle slider dragging (UI stays fixed, no transform)
-                if let Some((slider, value)) =
-                    ui::slider_drag(screen_point.x, screen_point.y, self.slider_drag)
-                {
-                    match slider {
-                        SliderType::Hue => {
-                            self.hue = value;
-                            self.selected_custom_index = -1;
-                        }
-                        SliderType::Saturation => {
-                            self.saturation = value;
-                            self.selected_custom_index = -1;
-                        }
-                        SliderType::Value => {
-                            self.value = value;
-                            self.selected_custom_index = -1;
-                        }
-                    }
-                    self.update_hsv_preferences();
-                    if let Some(window) = &self.window {
-                        window.request_redraw();
-                    }
-                }
+                self.handle_cursor_moved(screen_point);
             }
             WindowEvent::KeyboardInput {
                 event: key_event, ..
             } => {
-                if key_event.state == winit::event::ElementState::Pressed {
-                    // Handle space key for panning
-                    if let winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) =
-                        key_event.logical_key
-                    {
-                        self.is_panning = true;
-                    }
-
-                    // Check for 's' key (save/export)
-                    // Note: Ctrl modifier detection may need additional handling
-                    if let winit::keyboard::Key::Character(ref c) = key_event.logical_key
-                        && c == "s"
-                    {
-                        self.export_canvas_to_file();
-                    }
-
-                    match key_event.logical_key.as_ref() {
-                        winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowUp) => {
-                            if !self.custom_colors.is_empty() {
-                                let new_index = if self.selected_custom_index < 0 {
-                                    0
-                                } else {
-                                    ((self.selected_custom_index as usize + 1)
-                                        % self.custom_colors.len())
-                                        as i32
-                                };
-                                self.selected_custom_index = new_index;
-                                let color = self.custom_colors[new_index as usize];
-                                let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
-                                    r: color[0],
-                                    g: color[1],
-                                    b: color[2],
-                                    a: 255,
-                                });
-                                self.hue = hsv.h;
-                                self.saturation = hsv.s;
-                                self.value = hsv.v;
-                                self.update_hsv_preferences();
-                                if let Some(window) = &self.window {
-                                    window.request_redraw();
-                                }
-                            }
-                        }
-                        winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowDown) => {
-                            if !self.custom_colors.is_empty() {
-                                let new_index = if self.selected_custom_index <= 0 {
-                                    self.custom_colors.len() as i32 - 1
-                                } else {
-                                    self.selected_custom_index - 1
-                                };
-                                self.selected_custom_index = new_index;
-                                let color = self.custom_colors[new_index as usize];
-                                let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
-                                    r: color[0],
-                                    g: color[1],
-                                    b: color[2],
-                                    a: 255,
-                                });
-                                self.hue = hsv.h;
-                                self.saturation = hsv.s;
-                                self.value = hsv.v;
-                                self.update_hsv_preferences();
-                                if let Some(window) = &self.window {
-                                    window.request_redraw();
-                                }
-                            }
-                        }
-                        winit::keyboard::Key::Character(c) => {
-                            let c_str: &str = c;
-                            if self
-                                .modifiers
-                                .contains(winit::keyboard::ModifiersState::CONTROL)
-                            {
-                                match c_str {
-                                    "z" | "Z" => {
-                                        // Ctrl+Z: Undo
-                                        let mut canvas = self.canvas.borrow_mut();
-                                        if canvas.can_undo() {
-                                            canvas.undo();
-                                            logger::info("Undo: removed last stroke");
-                                            println!("Undo: removed last stroke");
-                                            if let Some(window) = &self.window {
-                                                window.request_redraw();
-                                            }
-                                        }
-                                    }
-                                    "y" | "Y" => {
-                                        // Ctrl+Y: Redo (Windows convention)
-                                        let mut canvas = self.canvas.borrow_mut();
-                                        if canvas.can_redo() {
-                                            canvas.redo();
-                                            logger::info("Redo: restored last undone stroke");
-                                            println!("Redo: restored last undone stroke");
-                                            if let Some(window) = &self.window {
-                                                window.request_redraw();
-                                            }
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            } else {
-                                // Non-Ctrl shortcuts
-                                match c_str {
-                                    "e" | "E" => {
-                                        // Toggle eraser (only when not drawing)
-                                        if self.mouse_state != MouseState::Drawing {
-                                            self.is_eraser = !self.is_eraser;
-                                            logger::info(&format!(
-                                                "Eraser mode: {}",
-                                                if self.is_eraser { "ON" } else { "OFF" }
-                                            ));
-                                            if let Some(window) = &self.window {
-                                                window.request_redraw();
-                                            }
-                                        }
-                                    }
-                                    "+" | "=" => {
-                                        // Increase brush size
-                                        self.brush_size =
-                                            crate::canvas::brush_size_up(self.brush_size);
-                                        self.preferences.brush.default_size = self.brush_size;
-                                        let _ = crate::preferences::save(&self.preferences);
-                                        logger::info(&format!("Brush size: {}", self.brush_size));
-                                        if let Some(window) = &self.window {
-                                            window.request_redraw();
-                                        }
-                                    }
-                                    "-" | "_" => {
-                                        // Decrease brush size
-                                        self.brush_size =
-                                            crate::canvas::brush_size_down(self.brush_size);
-                                        self.preferences.brush.default_size = self.brush_size;
-                                        let _ = crate::preferences::save(&self.preferences);
-                                        logger::info(&format!("Brush size: {}", self.brush_size));
-                                        if let Some(window) = &self.window {
-                                            window.request_redraw();
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                        winit::keyboard::Key::Named(winit::keyboard::NamedKey::Delete) => {
-                            if self
-                                .modifiers
-                                .contains(winit::keyboard::ModifiersState::CONTROL)
-                            {
-                                let mut canvas = self.canvas.borrow_mut();
-                                canvas.clear();
-                                logger::info("Canvas cleared");
-                                if let Some(window) = &self.window {
-                                    window.request_redraw();
-                                }
-                            }
-                        }
-                        winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) => {
-                            if key_event.state == winit::event::ElementState::Released {
-                                self.is_panning = false;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
+                self.handle_keyboard(&key_event);
             }
             _ => {}
         }
@@ -1003,24 +886,21 @@ impl ApplicationHandler for WindowApp {
 
 impl WindowBackend for WindowApp {
     fn init(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        // Initialization happens in resumed()
         Ok(())
     }
 
-    fn run(&self) {
-        // This is handled by the event loop in main
-    }
+    fn run(&self) {}
 
     fn canvas(&self) -> &Rc<RefCell<Canvas>> {
         &self.canvas
     }
 
     fn mouse_position(&self) -> Point {
-        self.mouse_position
+        self.render_state.mouse_position
     }
 
     fn mouse_state(&self) -> BackendMouseState {
-        match self.mouse_state {
+        match self.render_state.mouse_state {
             MouseState::Idle => BackendMouseState::Idle,
             MouseState::Drawing => BackendMouseState::Drawing,
         }
@@ -1061,8 +941,8 @@ mod tests {
     fn test_window_app_creation() {
         let preferences = Preferences::default();
         let app = WindowApp::new(preferences);
-        assert_eq!(app.mouse_state, MouseState::Idle);
-        assert_eq!(app.brush_size, 3.0);
+        assert_eq!(app.render_state.mouse_state, MouseState::Idle);
+        assert_eq!(app.render_state.brush_size, 3.0);
     }
 
     #[test]
@@ -1079,7 +959,7 @@ mod tests {
         let preferences = Preferences::default();
         let app = WindowApp::new(preferences);
 
-        assert!(!app.is_eraser);
+        assert!(!app.render_state.is_eraser);
         assert!(app.window.is_none());
         assert!(app.renderer.is_none());
     }
@@ -1088,79 +968,68 @@ mod tests {
     fn test_mouse_position_initial() {
         let preferences = Preferences::default();
         let app = WindowApp::new(preferences);
-
-        assert_eq!(app.mouse_position.x, 0.0);
-        assert_eq!(app.mouse_position.y, 0.0);
+        assert_eq!(app.render_state.mouse_position.x, 0.0);
+        assert_eq!(app.render_state.mouse_position.y, 0.0);
     }
 
     #[test]
     fn test_canvas_access() {
         let preferences = Preferences::default();
         let app = WindowApp::new(preferences);
-
-        let canvas = app.canvas();
-        assert_eq!(canvas.borrow().all_strokes().len(), 0);
+        assert_eq!(app.canvas.borrow().layer_count(), 1);
     }
 
     #[test]
     fn test_zero_size_window_guard() {
-        // Verify that when window.inner_size() returns (0, 0),
-        // the fallback to preferences dimensions is used
+        let size = winit::dpi::PhysicalSize::new(0u32, 0u32);
         let preferences = Preferences::default();
-        assert_eq!(preferences.window.width, 1280);
-        assert_eq!(preferences.window.height, 720);
-
-        // Simulate the guard logic: if size is zero, use preferences
-        let zero_size = (0u32, 0u32);
-        let render_width = if zero_size.0 > 0 {
-            zero_size.0
+        let render_width = if size.width > 0 {
+            size.width
         } else {
             preferences.window.width
         };
-        let render_height = if zero_size.1 > 0 {
-            zero_size.1
+        let render_height = if size.height > 0 {
+            size.height
         } else {
             preferences.window.height
         };
-        assert_eq!(render_width, 1280);
-        assert_eq!(render_height, 720);
-    }
-
-    #[test]
-    fn test_nonzero_size_window_uses_actual_size() {
-        // When window.inner_size() returns a valid size, it should be used
-        let preferences = Preferences::default();
-        let actual_size = (1920u32, 1080u32);
-        let render_width = if actual_size.0 > 0 {
-            actual_size.0
-        } else {
-            preferences.window.width
-        };
-        let render_height = if actual_size.1 > 0 {
-            actual_size.1
-        } else {
-            preferences.window.height
-        };
-        assert_eq!(render_width, 1920);
-        assert_eq!(render_height, 1080);
+        assert_eq!(render_width, preferences.window.width);
+        assert_eq!(render_height, preferences.window.height);
     }
 
     #[test]
     fn test_partial_zero_size_guard() {
-        // Guard should work even if only one dimension is zero
+        let size = winit::dpi::PhysicalSize::new(0u32, 768u32);
         let preferences = Preferences::default();
-        let partial_zero = (800u32, 0u32);
-        let render_width = if partial_zero.0 > 0 {
-            partial_zero.0
+        let render_width = if size.width > 0 {
+            size.width
         } else {
             preferences.window.width
         };
-        let render_height = if partial_zero.1 > 0 {
-            partial_zero.1
+        let render_height = if size.height > 0 {
+            size.height
         } else {
             preferences.window.height
         };
-        assert_eq!(render_width, 800);
+        assert_eq!(render_width, preferences.window.width);
+        assert_eq!(render_height, 768);
+    }
+
+    #[test]
+    fn test_nonzero_size_window_uses_actual_size() {
+        let size = winit::dpi::PhysicalSize::new(1280u32, 720u32);
+        let preferences = Preferences::default();
+        let render_width = if size.width > 0 {
+            size.width
+        } else {
+            preferences.window.width
+        };
+        let render_height = if size.height > 0 {
+            size.height
+        } else {
+            preferences.window.height
+        };
+        assert_eq!(render_width, 1280);
         assert_eq!(render_height, 720);
     }
 }
