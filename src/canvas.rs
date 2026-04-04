@@ -4,6 +4,8 @@
 //! This is a placeholder implementation that will be expanded with
 //! actual drawing, rendering, and GPU integration.
 
+use serde::{Deserialize, Serialize};
+
 /// Represents a 2D point in canvas space
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point {
@@ -448,6 +450,16 @@ impl Canvas {
 /// Default brush sizes available in the application
 pub const BRUSH_SIZES: [f32; 5] = [3.0, 5.0, 10.0, 25.0, 50.0];
 
+/// Available brush types for drawing
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub enum BrushType {
+    #[default]
+    Square,
+    Round,
+    Spray,
+    Calligraphy,
+}
+
 /// Cycle brush size up (larger) - returns new size
 /// If already at max, stays at max
 pub fn brush_size_up(current: f32) -> f32 {
@@ -486,16 +498,19 @@ pub struct ActiveStroke {
     width: f32,
     /// Opacity of the stroke (0.0 to 1.0)
     opacity: f32,
+    /// Type of brush used for this stroke
+    brush_type: BrushType,
 }
 
 impl ActiveStroke {
     /// Create a new active stroke with the given properties
-    pub fn new(color: Color, width: f32, opacity: f32) -> Self {
+    pub fn new(color: Color, width: f32, opacity: f32, brush_type: BrushType) -> Self {
         Self {
             points: Vec::new(),
             color,
             width,
             opacity,
+            brush_type,
         }
     }
 
@@ -524,6 +539,11 @@ impl ActiveStroke {
         self.opacity
     }
 
+    /// Get the brush type of the active stroke
+    pub fn brush_type(&self) -> BrushType {
+        self.brush_type
+    }
+
     /// Check if the stroke has any points
     pub fn is_empty(&self) -> bool {
         self.points.is_empty()
@@ -547,8 +567,8 @@ impl ActiveStroke {
 
 impl Canvas {
     /// Begin a new active stroke with the specified properties
-    pub fn begin_stroke(&mut self, color: Color, width: f32, opacity: f32) -> ActiveStroke {
-        ActiveStroke::new(color, width, opacity)
+    pub fn begin_stroke(&mut self, color: Color, width: f32, opacity: f32, brush_type: BrushType) -> ActiveStroke {
+        ActiveStroke::new(color, width, opacity, brush_type)
     }
 
     /// Commit an active stroke to the active layer
@@ -614,7 +634,7 @@ mod tests {
 
     #[test]
     fn test_active_stroke_creation() {
-        let active_stroke = ActiveStroke::new(RED, 3.0, 0.8);
+        let active_stroke = ActiveStroke::new(RED, 3.0, 0.8, BrushType::default());
 
         assert_eq!(active_stroke.color(), RED);
         assert_eq!(active_stroke.width(), 3.0);
@@ -625,7 +645,7 @@ mod tests {
 
     #[test]
     fn test_active_stroke_point_addition() {
-        let mut active_stroke = ActiveStroke::new(RED, 2.0, 1.0);
+        let mut active_stroke = ActiveStroke::new(RED, 2.0, 1.0, BrushType::default());
 
         active_stroke.add_point(Point { x: 10.0, y: 20.0 });
         active_stroke.add_point(Point { x: 15.0, y: 25.0 });
@@ -639,7 +659,7 @@ mod tests {
 
     #[test]
     fn test_active_stroke_commit() {
-        let mut active_stroke = ActiveStroke::new(BLUE, 4.0, 0.5);
+        let mut active_stroke = ActiveStroke::new(BLUE, 4.0, 0.5, BrushType::default());
 
         active_stroke.add_point(Point { x: 0.0, y: 0.0 });
         active_stroke.add_point(Point { x: 5.0, y: 5.0 });
@@ -656,7 +676,7 @@ mod tests {
 
     #[test]
     fn test_active_stroke_commit_empty() {
-        let active_stroke = ActiveStroke::new(GREEN, 1.0, 1.0);
+        let active_stroke = ActiveStroke::new(GREEN, 1.0, 1.0, BrushType::default());
 
         let result = active_stroke.commit();
         assert!(result.is_none(), "Empty stroke should not commit");
@@ -666,7 +686,7 @@ mod tests {
     fn test_canvas_active_stroke_integration() {
         let mut canvas = Canvas::new();
 
-        let mut active_stroke = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
+        let mut active_stroke = canvas.begin_stroke(Color::BLACK, 2.0, 1.0, BrushType::default());
         assert_eq!(active_stroke.color(), Color::BLACK);
         assert_eq!(active_stroke.width(), 2.0);
         assert_eq!(active_stroke.opacity(), 1.0);
@@ -690,7 +710,7 @@ mod tests {
     fn test_canvas_commit_empty_stroke() {
         let mut canvas = Canvas::new();
 
-        let active_stroke = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
+        let active_stroke = canvas.begin_stroke(Color::BLACK, 2.0, 1.0, BrushType::default());
 
         let result = canvas.commit_stroke(active_stroke);
         assert!(result.is_err());
@@ -701,12 +721,12 @@ mod tests {
     fn test_canvas_multiple_strokes_with_different_colors() {
         let mut canvas = Canvas::new();
 
-        let mut stroke1 = canvas.begin_stroke(RED, 3.0, 1.0);
+        let mut stroke1 = canvas.begin_stroke(RED, 3.0, 1.0, BrushType::default());
         stroke1.add_point(Point { x: 0.0, y: 0.0 });
         stroke1.add_point(Point { x: 10.0, y: 10.0 });
         canvas.commit_stroke(stroke1).unwrap();
 
-        let mut stroke2 = canvas.begin_stroke(BLUE, 2.0, 0.8);
+        let mut stroke2 = canvas.begin_stroke(BLUE, 2.0, 0.8, BrushType::default());
         stroke2.add_point(Point { x: 20.0, y: 20.0 });
         stroke2.add_point(Point { x: 30.0, y: 30.0 });
         canvas.commit_stroke(stroke2).unwrap();
@@ -738,7 +758,7 @@ mod tests {
     fn test_new_stroke_clears_undo_stack() {
         let mut canvas = Canvas::new();
 
-        let mut s1 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
+        let mut s1 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0, BrushType::default());
         s1.add_point(Point { x: 0.0, y: 0.0 });
         s1.add_point(Point { x: 10.0, y: 10.0 });
         canvas.commit_stroke(s1).unwrap();
@@ -746,7 +766,7 @@ mod tests {
         canvas.undo();
         assert_eq!(canvas.all_strokes().len(), 0);
 
-        let mut s2 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
+        let mut s2 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0, BrushType::default());
         s2.add_point(Point { x: 20.0, y: 20.0 });
         s2.add_point(Point { x: 30.0, y: 30.0 });
         canvas.commit_stroke(s2).unwrap();
@@ -760,7 +780,7 @@ mod tests {
         assert!(!canvas.can_undo());
         assert!(!canvas.can_redo());
 
-        let mut s1 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
+        let mut s1 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0, BrushType::default());
         s1.add_point(Point { x: 0.0, y: 0.0 });
         canvas.commit_stroke(s1).unwrap();
 
@@ -771,12 +791,12 @@ mod tests {
     fn test_undo_redo_cycle() {
         let mut canvas = Canvas::new();
 
-        let mut s1 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
+        let mut s1 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0, BrushType::default());
         s1.add_point(Point { x: 0.0, y: 0.0 });
         s1.add_point(Point { x: 10.0, y: 10.0 });
         canvas.commit_stroke(s1).unwrap();
 
-        let mut s2 = canvas.begin_stroke(Color::BLACK, 3.0, 1.0);
+        let mut s2 = canvas.begin_stroke(Color::BLACK, 3.0, 1.0, BrushType::default());
         s2.add_point(Point { x: 20.0, y: 20.0 });
         s2.add_point(Point { x: 30.0, y: 30.0 });
         canvas.commit_stroke(s2).unwrap();
@@ -795,7 +815,7 @@ mod tests {
         let mut canvas = Canvas::new();
 
         for i in 0..5 {
-            let mut s = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
+            let mut s = canvas.begin_stroke(Color::BLACK, 2.0, 1.0, BrushType::default());
             s.add_point(Point {
                 x: i as f32 * 10.0,
                 y: i as f32 * 10.0,
@@ -828,7 +848,7 @@ mod tests {
     fn test_clear_resets_all_stacks() {
         let mut canvas = Canvas::new();
 
-        let mut s1 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
+        let mut s1 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0, BrushType::default());
         s1.add_point(Point { x: 0.0, y: 0.0 });
         s1.add_point(Point { x: 10.0, y: 10.0 });
         canvas.commit_stroke(s1).unwrap();
@@ -946,7 +966,7 @@ mod tests {
         let mut canvas = Canvas::new();
 
         for i in 0..3 {
-            let mut s = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
+            let mut s = canvas.begin_stroke(Color::BLACK, 2.0, 1.0, BrushType::default());
             s.add_point(Point {
                 x: i as f32,
                 y: i as f32,
@@ -964,7 +984,7 @@ mod tests {
     fn test_active_stroke_with_opacity() {
         let mut canvas = Canvas::new();
 
-        let mut s = canvas.begin_stroke(Color::BLACK, 5.0, 0.5);
+        let mut s = canvas.begin_stroke(Color::BLACK, 5.0, 0.5, BrushType::default());
         s.add_point(Point { x: 0.0, y: 0.0 });
         s.add_point(Point { x: 10.0, y: 10.0 });
 
@@ -982,7 +1002,7 @@ mod tests {
     fn test_canvas_clear_with_active_stroke() {
         let mut canvas = Canvas::new();
 
-        let mut s = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
+        let mut s = canvas.begin_stroke(Color::BLACK, 2.0, 1.0, BrushType::default());
         s.add_point(Point { x: 0.0, y: 0.0 });
         canvas.commit_stroke(s).unwrap();
 
@@ -996,7 +1016,7 @@ mod tests {
     fn test_stroke_with_many_points() {
         let mut canvas = Canvas::new();
 
-        let mut s = canvas.begin_stroke(Color::BLACK, 3.0, 1.0);
+        let mut s = canvas.begin_stroke(Color::BLACK, 3.0, 1.0, BrushType::default());
         for i in 0..100 {
             s.add_point(Point {
                 x: i as f32,
@@ -1190,13 +1210,13 @@ mod tests {
         let mut canvas = Canvas::new();
         canvas.add_layer(None).unwrap();
         canvas.set_active_layer(0).unwrap();
-        let mut s1 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
+        let mut s1 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0, BrushType::default());
         s1.add_point(Point { x: 0.0, y: 0.0 });
         s1.add_point(Point { x: 10.0, y: 10.0 });
         canvas.commit_stroke(s1).unwrap();
 
         canvas.set_active_layer(1).unwrap();
-        let mut s2 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0);
+        let mut s2 = canvas.begin_stroke(Color::BLACK, 2.0, 1.0, BrushType::default());
         s2.add_point(Point { x: 20.0, y: 20.0 });
         s2.add_point(Point { x: 30.0, y: 30.0 });
         canvas.commit_stroke(s2).unwrap();

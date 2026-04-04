@@ -16,7 +16,7 @@ use gtk4::{
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::canvas::{ActiveStroke, Canvas, Point};
+use crate::canvas::{ActiveStroke, BrushType, Canvas, Point};
 use crate::logger;
 use crate::opengl_renderer::{GlRenderFrame, GlRenderer, GlUiState, GlViewportState};
 use crate::preferences::Preferences;
@@ -565,7 +565,10 @@ fn setup_mouse_events(
     let render_state_click = render_state.clone();
 
     click_gesture.connect_pressed(move |gesture, _n_press, x, y| {
-        let point = Point { x: x as f32, y: y as f32 };
+        let point = Point {
+            x: x as f32,
+            y: y as f32,
+        };
         let mut state = render_state_click.borrow_mut();
         state.mouse_position = point;
         state.mouse_state = MouseState::Drawing;
@@ -584,8 +587,12 @@ fn setup_mouse_events(
             1280.0
         };
         let hit = ui::hit_test(
-            x as f32, y as f32,
-            &custom_colors_snapshot, layer_count, active_layer, window_width,
+            x as f32,
+            y as f32,
+            &custom_colors_snapshot,
+            layer_count,
+            active_layer,
+            window_width,
         );
 
         match hit {
@@ -629,7 +636,10 @@ fn setup_mouse_events(
                 let mut state = render_state_click.borrow_mut();
                 let color = state.custom_colors[idx];
                 let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
-                    r: color[0], g: color[1], b: color[2], a: 255,
+                    r: color[0],
+                    g: color[1],
+                    b: color[2],
+                    a: 255,
                 });
                 state.hue = hsv.h;
                 state.saturation = hsv.s;
@@ -669,7 +679,10 @@ fn setup_mouse_events(
             ui::UiElement::Eraser => {
                 let mut state = render_state_click.borrow_mut();
                 state.is_eraser = !state.is_eraser;
-                println!("Eraser mode: {}", if state.is_eraser { "ON" } else { "OFF" });
+                println!(
+                    "Eraser mode: {}",
+                    if state.is_eraser { "ON" } else { "OFF" }
+                );
                 if let Some(widget) = gesture.widget()
                     && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                 {
@@ -740,7 +753,11 @@ fn setup_mouse_events(
                             crate::export_ui::notify_export_result(true, &path, None);
                         }
                         Err(e) => {
-                            crate::export_ui::notify_export_result(false, &path, Some(&e.to_string()));
+                            crate::export_ui::notify_export_result(
+                                false,
+                                &path,
+                                Some(&e.to_string()),
+                            );
                         }
                     }
                     if let Some(widget) = gesture.widget()
@@ -872,11 +889,14 @@ fn setup_mouse_events(
         drop(state);
 
         let mut canvas = canvas_click.borrow_mut();
-        let active_stroke = canvas.begin_stroke(color, current_brush_size, current_opacity);
+        let active_stroke = canvas.begin_stroke(color, current_brush_size, current_opacity, BrushType::default());
         println!(
             "Created {}stroke with color RGB({}, {}, {}) and width {}",
             if is_eraser { "eraser " } else { "" },
-            color.r, color.g, color.b, current_brush_size
+            color.r,
+            color.g,
+            color.b,
+            current_brush_size
         );
 
         *active_stroke_click.borrow_mut() = Some(active_stroke);
@@ -889,7 +909,10 @@ fn setup_mouse_events(
         let canvas_x = point.x / zoom + pan.0;
         let canvas_y = point.y / zoom + pan.1;
         if let Some(active_stroke) = &mut *active_stroke_click.borrow_mut() {
-            active_stroke.add_point(Point { x: canvas_x, y: canvas_y });
+            active_stroke.add_point(Point {
+                x: canvas_x,
+                y: canvas_y,
+            });
             println!(
                 "Added first point to active stroke: ({}, {})",
                 point.x, point.y
@@ -936,7 +959,10 @@ fn setup_mouse_events(
     let render_state_motion = render_state.clone();
 
     motion_controller.connect_motion(move |controller, x, y| {
-        let point = Point { x: x as f32, y: y as f32 };
+        let point = Point {
+            x: x as f32,
+            y: y as f32,
+        };
         let mut state = render_state_motion.borrow_mut();
         state.mouse_position = point;
 
@@ -966,7 +992,10 @@ fn setup_mouse_events(
                 let pan = state.pan_offset;
                 let canvas_x = point.x / zoom + pan.0;
                 let canvas_y = point.y / zoom + pan.1;
-                active_stroke.add_point(Point { x: canvas_x, y: canvas_y });
+                active_stroke.add_point(Point {
+                    x: canvas_x,
+                    y: canvas_y,
+                });
                 println!(
                     "Active stroke now has {} points",
                     active_stroke.points().len()

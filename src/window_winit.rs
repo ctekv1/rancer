@@ -12,10 +12,10 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
 
-use crate::canvas::{ActiveStroke, Canvas, Point};
+use crate::canvas::{ActiveStroke, BrushType, Canvas, Point};
 use crate::logger;
 use crate::preferences::Preferences;
-use crate::renderer::{Renderer, RendererConfig, RenderFrame, UiRenderState, ViewportState};
+use crate::renderer::{RenderFrame, Renderer, RendererConfig, UiRenderState, ViewportState};
 use crate::ui::{self, SliderType};
 use crate::window_backend::{MouseState as BackendMouseState, WindowBackend};
 
@@ -233,7 +233,10 @@ impl WindowApp {
                 self.render_state.selected_custom_index = idx as i32;
                 let color = self.render_state.custom_colors[idx];
                 let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
-                    r: color[0], g: color[1], b: color[2], a: 255,
+                    r: color[0],
+                    g: color[1],
+                    b: color[2],
+                    a: 255,
                 });
                 self.render_state.hue = hsv.h;
                 self.render_state.saturation = hsv.s;
@@ -249,7 +252,9 @@ impl WindowApp {
                 if self.render_state.custom_colors.len() >= 10 {
                     self.render_state.custom_colors.remove(0);
                 }
-                self.render_state.custom_colors.push([current.r, current.g, current.b]);
+                self.render_state
+                    .custom_colors
+                    .push([current.r, current.g, current.b]);
                 self.update_hsv_preferences();
             }
             ui::UiElement::BrushSize(size) => {
@@ -262,7 +267,11 @@ impl WindowApp {
                 self.render_state.is_eraser = !self.render_state.is_eraser;
                 logger::info(&format!(
                     "Eraser mode: {}",
-                    if self.render_state.is_eraser { "ON" } else { "OFF" }
+                    if self.render_state.is_eraser {
+                        "ON"
+                    } else {
+                        "OFF"
+                    }
                 ));
             }
             ui::UiElement::Clear => {
@@ -356,13 +365,16 @@ impl WindowApp {
         }
 
         // Space key for panning
-        if let winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) = key_event.logical_key {
+        if let winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) = key_event.logical_key
+        {
             self.render_state.is_panning = true;
             return;
         }
 
         // 's' key for export
-        if let winit::keyboard::Key::Character(ref c) = key_event.logical_key && c == "s" {
+        if let winit::keyboard::Key::Character(ref c) = key_event.logical_key
+            && c == "s"
+        {
             self.export_canvas_to_file();
             return;
         }
@@ -379,7 +391,10 @@ impl WindowApp {
                     self.render_state.selected_custom_index = new_index;
                     let color = self.render_state.custom_colors[new_index as usize];
                     let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
-                        r: color[0], g: color[1], b: color[2], a: 255,
+                        r: color[0],
+                        g: color[1],
+                        b: color[2],
+                        a: 255,
                     });
                     self.render_state.hue = hsv.h;
                     self.render_state.saturation = hsv.s;
@@ -398,7 +413,10 @@ impl WindowApp {
                     self.render_state.selected_custom_index = new_index;
                     let color = self.render_state.custom_colors[new_index as usize];
                     let hsv = crate::canvas::rgb_to_hsv(crate::canvas::Color {
-                        r: color[0], g: color[1], b: color[2], a: 255,
+                        r: color[0],
+                        g: color[1],
+                        b: color[2],
+                        a: 255,
                     });
                     self.render_state.hue = hsv.h;
                     self.render_state.saturation = hsv.s;
@@ -409,7 +427,10 @@ impl WindowApp {
             }
             winit::keyboard::Key::Character(c) => {
                 let c_str: &str = c;
-                if self.modifiers.contains(winit::keyboard::ModifiersState::CONTROL) {
+                if self
+                    .modifiers
+                    .contains(winit::keyboard::ModifiersState::CONTROL)
+                {
                     match c_str {
                         "z" | "Z" => {
                             let mut canvas = self.canvas.borrow_mut();
@@ -438,7 +459,11 @@ impl WindowApp {
                                 self.render_state.is_eraser = !self.render_state.is_eraser;
                                 logger::info(&format!(
                                     "Eraser mode: {}",
-                                    if self.render_state.is_eraser { "ON" } else { "OFF" }
+                                    if self.render_state.is_eraser {
+                                        "ON"
+                                    } else {
+                                        "OFF"
+                                    }
                                 ));
                                 self.request_redraw();
                             }
@@ -464,7 +489,10 @@ impl WindowApp {
                 }
             }
             winit::keyboard::Key::Named(winit::keyboard::NamedKey::Delete) => {
-                if self.modifiers.contains(winit::keyboard::ModifiersState::CONTROL) {
+                if self
+                    .modifiers
+                    .contains(winit::keyboard::ModifiersState::CONTROL)
+                {
                     self.canvas.borrow_mut().clear();
                     logger::info("Canvas cleared");
                     self.request_redraw();
@@ -661,10 +689,10 @@ impl ApplicationHandler for WindowApp {
                 };
 
                 if (new_zoom - old_zoom).abs() > 0.001 {
-                    let mouse_canvas_x =
-                        self.render_state.mouse_position.x / old_zoom + self.render_state.pan_offset.0;
-                    let mouse_canvas_y =
-                        self.render_state.mouse_position.y / old_zoom + self.render_state.pan_offset.1;
+                    let mouse_canvas_x = self.render_state.mouse_position.x / old_zoom
+                        + self.render_state.pan_offset.0;
+                    let mouse_canvas_y = self.render_state.mouse_position.y / old_zoom
+                        + self.render_state.pan_offset.1;
 
                     let new_pan_x = mouse_canvas_x - self.render_state.mouse_position.x / new_zoom;
                     let new_pan_y = mouse_canvas_y - self.render_state.mouse_position.y / new_zoom;
@@ -808,11 +836,19 @@ impl ApplicationHandler for WindowApp {
                                 color,
                                 self.render_state.brush_size,
                                 self.render_state.opacity,
+                                BrushType::default(),
                             );
                             println!(
                                 "Created {}stroke with color RGB({}, {}, {}) and width {}",
-                                if self.render_state.is_eraser { "eraser " } else { "" },
-                                color.r, color.g, color.b, self.render_state.brush_size
+                                if self.render_state.is_eraser {
+                                    "eraser "
+                                } else {
+                                    ""
+                                },
+                                color.r,
+                                color.g,
+                                color.b,
+                                self.render_state.brush_size
                             );
 
                             *self.active_stroke.borrow_mut() = Some(active_stroke);

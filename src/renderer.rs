@@ -419,7 +419,11 @@ impl Renderer {
         logger::info(&format!(
             "Using MSAA sample count: {}{}",
             sample_count,
-            if sample_count > 1 { " (with resolve target)" } else { " (swapchain rendering)" }
+            if sample_count > 1 {
+                " (with resolve target)"
+            } else {
+                " (swapchain rendering)"
+            }
         ));
 
         let (render_pipeline, ui_pipeline) = Self::create_pipelines(
@@ -488,8 +492,13 @@ impl Renderer {
             if let (Some(device), Some(pipeline_layout), Some(shader)) =
                 (&self.device, &self.pipeline_layout, &self.shader)
             {
-                let (render_pipeline, ui_pipeline) =
-                    Self::create_pipelines(device, shader, pipeline_layout, surface_format, self.sample_count);
+                let (render_pipeline, ui_pipeline) = Self::create_pipelines(
+                    device,
+                    shader,
+                    pipeline_layout,
+                    surface_format,
+                    self.sample_count,
+                );
                 self.render_pipeline = Some(render_pipeline);
                 self.ui_pipeline = Some(ui_pipeline);
             }
@@ -569,7 +578,10 @@ impl Renderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let msaa_view = self.msaa_texture.as_ref().map(|t| t.create_view(&wgpu::TextureViewDescriptor::default()));
+        let msaa_view = self
+            .msaa_texture
+            .as_ref()
+            .map(|t| t.create_view(&wgpu::TextureViewDescriptor::default()));
 
         let texture_width = output.texture.width() as f32;
         let texture_height = output.texture.height() as f32;
@@ -665,9 +677,7 @@ impl Renderer {
                 for stroke in &layer.strokes {
                     if stroke.points.len() >= 2 {
                         let start = all_stroke_vertices.len() as u32;
-                        all_stroke_vertices.extend(
-                            stroke_to_vertices_7(stroke, layer.opacity),
-                        );
+                        all_stroke_vertices.extend(stroke_to_vertices_7(stroke, layer.opacity));
                         let end = all_stroke_vertices.len() as u32;
                         stroke_ranges.push(start..end);
                     }
@@ -678,9 +688,8 @@ impl Renderer {
                         && active_stroke.points().len() >= 2
                     {
                         let start = all_stroke_vertices.len() as u32;
-                        all_stroke_vertices.extend(
-                            active_stroke_to_vertices_7(active_stroke, layer.opacity),
-                        );
+                        all_stroke_vertices
+                            .extend(active_stroke_to_vertices_7(active_stroke, layer.opacity));
                         let end = all_stroke_vertices.len() as u32;
                         stroke_ranges.push(start..end);
                     }
@@ -726,25 +735,33 @@ impl Renderer {
                     frame.ui.custom_colors,
                     frame.ui.selected_custom_index as usize,
                 )));
-                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_brush_size_vertices(
-                    frame.ui.brush_size,
-                )));
-                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_eraser_button_vertices(
-                    frame.ui.is_eraser,
-                )));
-                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_clear_button_vertices()));
-                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_undo_button_vertices(
-                    frame.canvas.can_undo(),
-                )));
-                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_redo_button_vertices(
-                    frame.canvas.can_redo(),
-                )));
-                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_export_button_vertices()));
-                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_zoom_in_button_vertices()));
-                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_zoom_out_button_vertices()));
-                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_opacity_preset_vertices(
-                    frame.ui.opacity,
-                )));
+                all_ui_vertices.extend(flat_to_vertices_7(
+                    &geometry::generate_brush_size_vertices(frame.ui.brush_size),
+                ));
+                all_ui_vertices.extend(flat_to_vertices_7(
+                    &geometry::generate_eraser_button_vertices(frame.ui.is_eraser),
+                ));
+                all_ui_vertices.extend(flat_to_vertices_7(
+                    &geometry::generate_clear_button_vertices(),
+                ));
+                all_ui_vertices.extend(flat_to_vertices_7(
+                    &geometry::generate_undo_button_vertices(frame.canvas.can_undo()),
+                ));
+                all_ui_vertices.extend(flat_to_vertices_7(
+                    &geometry::generate_redo_button_vertices(frame.canvas.can_redo()),
+                ));
+                all_ui_vertices.extend(flat_to_vertices_7(
+                    &geometry::generate_export_button_vertices(),
+                ));
+                all_ui_vertices.extend(flat_to_vertices_7(
+                    &geometry::generate_zoom_in_button_vertices(),
+                ));
+                all_ui_vertices.extend(flat_to_vertices_7(
+                    &geometry::generate_zoom_out_button_vertices(),
+                ));
+                all_ui_vertices.extend(flat_to_vertices_7(
+                    &geometry::generate_opacity_preset_vertices(frame.ui.opacity),
+                ));
 
                 let layers: Vec<(String, bool, f32, bool)> = frame
                     .canvas
@@ -752,11 +769,13 @@ impl Renderer {
                     .iter()
                     .map(|l| (l.name.clone(), l.visible, l.opacity, l.locked))
                     .collect();
-                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_layer_panel_vertices(
-                    &layers,
-                    frame.canvas.active_layer(),
-                    self.window_size.0 as f32,
-                )));
+                all_ui_vertices.extend(flat_to_vertices_7(
+                    &geometry::generate_layer_panel_vertices(
+                        &layers,
+                        frame.canvas.active_layer(),
+                        self.window_size.0 as f32,
+                    ),
+                ));
 
                 if !all_ui_vertices.is_empty() {
                     let ui_vertex_buffer =
@@ -806,7 +825,10 @@ impl Renderer {
             }
         }
         logger::info(&format!("Window size: {:?}", self.window_size));
-        logger::info(&format!("MSAA samples (config): {}", self.config.msaa_samples));
+        logger::info(&format!(
+            "MSAA samples (config): {}",
+            self.config.msaa_samples
+        ));
         logger::info("======================");
     }
 }
@@ -814,7 +836,11 @@ impl Renderer {
 /// Convert flat vertex data (6 floats/vertex) to WGPU format (7 floats/vertex with line_width)
 fn flat_to_vertices_7(flat: &[f32]) -> Vec<[f32; 7]> {
     flat.chunks(6)
-        .map(|chunk| [chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], 0.0])
+        .map(|chunk| {
+            [
+                chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], 0.0,
+            ]
+        })
         .collect()
 }
 
@@ -822,7 +848,17 @@ fn flat_to_vertices_7(flat: &[f32]) -> Vec<[f32; 7]> {
 fn stroke_to_vertices_7(stroke: &Stroke, layer_opacity: f32) -> Vec<[f32; 7]> {
     let flat = geometry::generate_stroke_vertices_with_opacity(stroke, layer_opacity);
     flat.chunks(6)
-        .map(|chunk| [chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], stroke.width])
+        .map(|chunk| {
+            [
+                chunk[0],
+                chunk[1],
+                chunk[2],
+                chunk[3],
+                chunk[4],
+                chunk[5],
+                stroke.width,
+            ]
+        })
         .collect()
 }
 
@@ -830,7 +866,17 @@ fn stroke_to_vertices_7(stroke: &Stroke, layer_opacity: f32) -> Vec<[f32; 7]> {
 fn active_stroke_to_vertices_7(active: &ActiveStroke, layer_opacity: f32) -> Vec<[f32; 7]> {
     let flat = geometry::generate_active_stroke_vertices_with_opacity(active, layer_opacity);
     flat.chunks(6)
-        .map(|chunk| [chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], active.width()])
+        .map(|chunk| {
+            [
+                chunk[0],
+                chunk[1],
+                chunk[2],
+                chunk[3],
+                chunk[4],
+                chunk[5],
+                active.width(),
+            ]
+        })
         .collect()
 }
 
@@ -868,7 +914,12 @@ mod tests {
         };
         let stroke2 = Stroke {
             points: vec![Point { x: 100.0, y: 100.0 }, Point { x: 110.0, y: 110.0 }],
-            color: Color { r: 255, g: 0, b: 0, a: 255 },
+            color: Color {
+                r: 255,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
             width: 2.0,
             opacity: 1.0,
         };
@@ -880,7 +931,8 @@ mod tests {
         for (stroke, layer_opacity) in canvas.all_strokes() {
             if stroke.points.len() >= 2 {
                 let start = all_vertices.len() as u32;
-                let verts = crate::geometry::generate_stroke_vertices_with_opacity(stroke, layer_opacity);
+                let verts =
+                    crate::geometry::generate_stroke_vertices_with_opacity(stroke, layer_opacity);
                 let line_width = stroke.width;
                 for chunk in verts.chunks(6) {
                     all_vertices.push([
@@ -906,7 +958,8 @@ mod tests {
         for (stroke, layer_opacity) in canvas.all_strokes() {
             if stroke.points.len() >= 2 {
                 let start = all_vertices.len() as u32;
-                let verts = crate::geometry::generate_stroke_vertices_with_opacity(stroke, layer_opacity);
+                let verts =
+                    crate::geometry::generate_stroke_vertices_with_opacity(stroke, layer_opacity);
                 let line_width = stroke.width;
                 for chunk in verts.chunks(6) {
                     all_vertices.push([

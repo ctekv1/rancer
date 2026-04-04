@@ -85,7 +85,7 @@ pub fn generate_active_stroke_vertices_with_opacity(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::canvas::Color;
+    use crate::canvas::{BrushType, Color};
 
     #[test]
     fn test_stroke_two_points() {
@@ -224,7 +224,7 @@ mod tests {
 
     #[test]
     fn test_generate_active_stroke_vertices() {
-        let active = ActiveStroke::new(Color::WHITE, 5.0, 0.8);
+        let active = ActiveStroke::new(Color::WHITE, 5.0, 0.8, BrushType::default());
         let vertices = generate_active_stroke_vertices(&active);
         assert_eq!(vertices.len(), 0);
     }

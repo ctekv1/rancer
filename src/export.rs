@@ -181,7 +181,7 @@ fn render_triangle(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::canvas::{Canvas, Point};
+    use crate::canvas::{BrushType, Canvas, Point};
 
     #[test]
     fn test_export_creates_valid_png() {
@@ -210,12 +210,14 @@ mod tests {
     fn test_export_with_strokes() {
         let mut canvas = Canvas::new();
 
-        let mut s1 = canvas.begin_stroke(crate::canvas::Color::BLACK, 5.0, 1.0);
+        let mut s1 =
+            canvas.begin_stroke(crate::canvas::Color::BLACK, 5.0, 1.0, BrushType::default());
         s1.add_point(crate::canvas::Point { x: 10.0, y: 10.0 });
         s1.add_point(crate::canvas::Point { x: 100.0, y: 100.0 });
         canvas.commit_stroke(s1).unwrap();
 
-        let mut s2 = canvas.begin_stroke(crate::canvas::Color::BLACK, 3.0, 0.5);
+        let mut s2 =
+            canvas.begin_stroke(crate::canvas::Color::BLACK, 3.0, 0.5, BrushType::default());
         s2.add_point(crate::canvas::Point { x: 50.0, y: 20.0 });
         s2.add_point(crate::canvas::Point { x: 200.0, y: 30.0 });
         canvas.commit_stroke(s2).unwrap();
@@ -237,7 +239,8 @@ mod tests {
     fn test_export_single_point_stroke() {
         let mut canvas = Canvas::new();
 
-        let mut s1 = canvas.begin_stroke(crate::canvas::Color::BLACK, 5.0, 1.0);
+        let mut s1 =
+            canvas.begin_stroke(crate::canvas::Color::BLACK, 5.0, 1.0, BrushType::default());
         s1.add_point(crate::canvas::Point { x: 10.0, y: 10.0 });
         let result = canvas.commit_stroke(s1);
         assert!(result.is_ok(), "Single-point stroke commits successfully");
@@ -258,7 +261,8 @@ mod tests {
     fn test_export_captures_strokes_far_from_origin() {
         let mut canvas = Canvas::new();
 
-        let mut s1 = canvas.begin_stroke(crate::canvas::Color::BLACK, 5.0, 1.0);
+        let mut s1 =
+            canvas.begin_stroke(crate::canvas::Color::BLACK, 5.0, 1.0, BrushType::default());
         s1.add_point(Point {
             x: 5000.0,
             y: 5000.0,
@@ -286,7 +290,8 @@ mod tests {
     fn test_export_captures_negative_coordinates() {
         let mut canvas = Canvas::new();
 
-        let mut s1 = canvas.begin_stroke(crate::canvas::Color::BLACK, 5.0, 1.0);
+        let mut s1 =
+            canvas.begin_stroke(crate::canvas::Color::BLACK, 5.0, 1.0, BrushType::default());
         s1.add_point(Point {
             x: -200.0,
             y: -200.0,
@@ -322,12 +327,14 @@ mod tests {
     fn test_export_scattered_strokes_captures_all() {
         let mut canvas = Canvas::new();
 
-        let mut s1 = canvas.begin_stroke(crate::canvas::Color::BLACK, 5.0, 1.0);
+        let mut s1 =
+            canvas.begin_stroke(crate::canvas::Color::BLACK, 5.0, 1.0, BrushType::default());
         s1.add_point(Point { x: 0.0, y: 0.0 });
         s1.add_point(Point { x: 50.0, y: 50.0 });
         canvas.commit_stroke(s1).unwrap();
 
-        let mut s2 = canvas.begin_stroke(crate::canvas::Color::BLACK, 5.0, 1.0);
+        let mut s2 =
+            canvas.begin_stroke(crate::canvas::Color::BLACK, 5.0, 1.0, BrushType::default());
         s2.add_point(Point {
             x: 2000.0,
             y: 2000.0,
@@ -352,7 +359,8 @@ mod tests {
     #[test]
     fn test_compute_stroke_bounding_box_single_stroke() {
         let mut canvas = Canvas::new();
-        let mut s = canvas.begin_stroke(crate::canvas::Color::BLACK, 10.0, 1.0);
+        let mut s =
+            canvas.begin_stroke(crate::canvas::Color::BLACK, 10.0, 1.0, BrushType::default());
         s.add_point(Point { x: 100.0, y: 200.0 });
         s.add_point(Point { x: 300.0, y: 400.0 });
         canvas.commit_stroke(s).unwrap();
@@ -368,7 +376,8 @@ mod tests {
     fn test_export_capped_at_max_size() {
         let mut canvas = Canvas::new();
 
-        let mut s1 = canvas.begin_stroke(crate::canvas::Color::BLACK, 5.0, 1.0);
+        let mut s1 =
+            canvas.begin_stroke(crate::canvas::Color::BLACK, 5.0, 1.0, BrushType::default());
         s1.add_point(Point { x: 0.0, y: 0.0 });
         s1.add_point(Point {
             x: 5000.0,
