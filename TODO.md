@@ -76,7 +76,8 @@
     - [x] Test undo/redo with multiple layers
     - [x] Test layer visibility toggle
   - [ ] Known Issues
-    - [ ] Layer rendering order inverted — bottom of list renders on top, needs `.rev()` in `all_strokes()`
+    - [x] ~~Layer rendering order inverted — bottom of list renders on top, needs `.rev()` in `all_strokes()`~~ (fixed v0.0.7)
+    - [x] ~~Active stroke renders on top of all layers instead of only the active layer~~ (fixed v0.0.7)
 - [ ] Selection Tool - Rectangular selection with move/copy
 - [ ] Transform Tools - Scale, rotate, flip canvas/strokes
 
@@ -97,11 +98,12 @@
 
 ## Technical Debt & Known Issues
 
-- [ ] **MSAA not functional** - `sample_count` hardcoded to 1 in both renderers despite config being 4
-  - Windows: `Renderer::new()` ignores `config.msaa_samples`
-  - Linux: GLArea not configured for multisampling, no FBO setup in GlRenderer
+- [x] ~~**MSAA not functional**~~ — Fixed: MSAA now uses a resolve texture. `config.msaa_samples` (default 4) is respected. Renders to multisampled texture, resolves to swapchain.
+  - Linux: GLArea/OpenGL renderer still lacks multisampling (separate issue)
 - [ ] **Windows high-DPI resize** - Black space/content shift on window resize (upstream wgpu issue)
   - Workaround attempted: triple `request_redraw()` + `force_window_repaint()` in `window_winit.rs`
   - See `docs/window-resize-issue.md` for full investigation
 - [ ] **Export UX** - Saves silently to Pictures directory with no file picker or confirmation toast
   - Consider using `rfd` crate for native file dialog
+- [ ] **Export captures only window area** - After zooming out, export only captures the original window-sized region, not the full canvas
+  - `export.rs` uses `canvas.size()` which is tied to window dimensions, not canvas content bounds

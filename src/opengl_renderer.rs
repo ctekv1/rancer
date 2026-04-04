@@ -216,21 +216,34 @@ impl GlRenderer {
 
             self.gl.bind_vertex_array(Some(self.vao));
 
-            // Draw committed strokes (with zoom/pan transform)
-            for (stroke, layer_opacity) in canvas.all_strokes() {
-                let vertices = Self::generate_stroke_vertices_with_opacity(stroke, layer_opacity);
-                if !vertices.is_empty() {
-                    self.upload_and_draw(&vertices, glow::TRIANGLE_STRIP);
+            // Draw committed strokes per-layer, inserting active stroke
+            // at the active layer position so it renders in correct order.
+            let active_layer_idx = canvas.active_layer();
+            let layers = canvas.layers();
+            for (layer_idx, layer) in layers.iter().enumerate().rev() {
+                if !layer.visible {
+                    continue;
                 }
-            }
-
-            // Draw active stroke (with zoom/pan transform)
-            if let Some(active) = active_stroke {
-                let layer_opacity = canvas.layers()[canvas.active_layer()].opacity;
-                let vertices =
-                    Self::generate_active_stroke_vertices_with_opacity(active, layer_opacity);
-                if !vertices.is_empty() {
-                    self.upload_and_draw(&vertices, glow::TRIANGLE_STRIP);
+                for stroke in &layer.strokes {
+                    if stroke.points.len() >= 2 {
+                        let vertices =
+                            Self::generate_stroke_vertices_with_opacity(stroke, layer.opacity);
+                        if !vertices.is_empty() {
+                            self.upload_and_draw(&vertices, glow::TRIANGLE_STRIP);
+                        }
+                    }
+                }
+                // Draw active stroke at the active layer position
+                if layer_idx == active_layer_idx {
+                    if let Some(active) = active_stroke {
+                        let vertices = Self::generate_active_stroke_vertices_with_opacity(
+                            active,
+                            layer.opacity,
+                        );
+                        if !vertices.is_empty() {
+                            self.upload_and_draw(&vertices, glow::TRIANGLE_STRIP);
+                        }
+                    }
                 }
             }
 

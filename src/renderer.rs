@@ -94,6 +94,10 @@ pub struct Renderer {
     shader: Option<wgpu::ShaderModule>,
     /// Window reference for pre_present_notify
     window: Option<std::sync::Arc<winit::window::Window>>,
+    /// Multisampled texture for MSAA (only when sample_count > 1)
+    msaa_texture: Option<wgpu::Texture>,
+    /// Actual sample count in use
+    sample_count: u32,
 }
 
 impl Renderer {
@@ -116,6 +120,8 @@ impl Renderer {
                 ui_pipeline,
                 pipeline_layout,
                 shader,
+                msaa_texture,
+                sample_count,
             )) => {
                 logger::info("✅ WGPU initialized successfully!");
                 logger::info("   - Backend: GPU (WGPU)");
@@ -134,6 +140,8 @@ impl Renderer {
                     pipeline_layout: Some(pipeline_layout),
                     shader: Some(shader),
                     window: Some(window),
+                    msaa_texture,
+                    sample_count,
                 })
             }
             Err(e) => {
@@ -155,6 +163,8 @@ impl Renderer {
                         pipeline_layout: None,
                         shader: None,
                         window: Some(window),
+                        msaa_texture: None,
+                        sample_count: 1,
                     })
                 }
                 #[cfg(target_os = "windows")]
@@ -302,7 +312,7 @@ impl Renderer {
     async fn init_wgpu(
         window: &(impl raw_window_handle::HasWindowHandle + raw_window_handle::HasDisplayHandle + Sync),
         window_size: (u32, u32),
-        _config: &RendererConfig,
+        config: &RendererConfig,
     ) -> Result<
         (
             wgpu::Device,
@@ -313,6 +323,8 @@ impl Renderer {
             wgpu::RenderPipeline,
             wgpu::PipelineLayout,
             wgpu::ShaderModule,
+            Option<wgpu::Texture>,
+            u32,
         ),
         Box<dyn std::error::Error>,
     > {
@@ -403,10 +415,11 @@ impl Renderer {
             immediate_size: 0,
         });
 
-        let sample_count = 1;
+        let sample_count = config.msaa_samples;
         logger::info(&format!(
-            "Using MSAA sample count: {} (swapchain rendering)",
-            sample_count
+            "Using MSAA sample count: {}{}",
+            sample_count,
+            if sample_count > 1 { " (with resolve target)" } else { " (swapchain rendering)" }
         ));
 
         let (render_pipeline, ui_pipeline) = Self::create_pipelines(
@@ -417,6 +430,27 @@ impl Renderer {
             sample_count,
         );
 
+        let msaa_texture = if sample_count > 1 {
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("MSAA Texture"),
+                size: wgpu::Extent3d {
+                    width: surface_config.width,
+                    height: surface_config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count,
+                dimension: wgpu::TextureDimension::D2,
+                format: surface_format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            logger::info("Created MSAA resolve texture");
+            Some(texture)
+        } else {
+            None
+        };
+
         Ok((
             device,
             queue,
@@ -426,6 +460,8 @@ impl Renderer {
             ui_pipeline,
             pipeline_layout,
             shader,
+            msaa_texture,
+            sample_count,
         ))
     }
 
@@ -453,9 +489,27 @@ impl Renderer {
                 (&self.device, &self.pipeline_layout, &self.shader)
             {
                 let (render_pipeline, ui_pipeline) =
-                    Self::create_pipelines(device, shader, pipeline_layout, surface_format, 1);
+                    Self::create_pipelines(device, shader, pipeline_layout, surface_format, self.sample_count);
                 self.render_pipeline = Some(render_pipeline);
                 self.ui_pipeline = Some(ui_pipeline);
+            }
+
+            if self.sample_count > 1 {
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("MSAA Texture"),
+                    size: wgpu::Extent3d {
+                        width: surface_width,
+                        height: surface_height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: self.sample_count,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: surface_format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                });
+                self.msaa_texture = Some(texture);
             }
         }
     }
@@ -515,6 +569,8 @@ impl Renderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
+        let msaa_view = self.msaa_texture.as_ref().map(|t| t.create_view(&wgpu::TextureViewDescriptor::default()));
+
         let texture_width = output.texture.width() as f32;
         let texture_height = output.texture.height() as f32;
 
@@ -546,11 +602,17 @@ impl Renderer {
         });
 
         {
+            let (color_view, resolve_target) = if let Some(ref msaa_view) = msaa_view {
+                (msaa_view, Some(&view))
+            } else {
+                (&view, None)
+            };
+
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
+                    view: color_view,
+                    resolve_target,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             r: self.config.clear_color.r as f64 / 255.0,
@@ -589,29 +651,40 @@ impl Renderer {
             render_pass.set_bind_group(0, &bind_group, &[]);
 
             // Combine all stroke vertices into a single buffer,
-            // but draw each stroke separately to avoid connecting them
+            // but draw each stroke separately to avoid connecting them.
+            // Active stroke is inserted at the active layer position.
             let mut all_stroke_vertices = Vec::new();
             let mut stroke_ranges = Vec::new();
-            for (stroke, layer_opacity) in frame.canvas.all_strokes() {
-                if stroke.points.len() >= 2 {
-                    let start = all_stroke_vertices.len() as u32;
-                    all_stroke_vertices.extend(
-                        stroke_to_vertices_7(stroke, layer_opacity),
-                    );
-                    let end = all_stroke_vertices.len() as u32;
-                    stroke_ranges.push(start..end);
+            let active_layer_idx = frame.canvas.active_layer();
+            let layers = frame.canvas.layers();
+
+            for (layer_idx, layer) in layers.iter().enumerate().rev() {
+                if !layer.visible {
+                    continue;
                 }
-            }
-            if let Some(active_stroke) = frame.active_stroke
-                && active_stroke.points().len() >= 2
-            {
-                let layer_opacity = frame.canvas.layers()[frame.canvas.active_layer()].opacity;
-                let start = all_stroke_vertices.len() as u32;
-                all_stroke_vertices.extend(
-                    active_stroke_to_vertices_7(active_stroke, layer_opacity),
-                );
-                let end = all_stroke_vertices.len() as u32;
-                stroke_ranges.push(start..end);
+                for stroke in &layer.strokes {
+                    if stroke.points.len() >= 2 {
+                        let start = all_stroke_vertices.len() as u32;
+                        all_stroke_vertices.extend(
+                            stroke_to_vertices_7(stroke, layer.opacity),
+                        );
+                        let end = all_stroke_vertices.len() as u32;
+                        stroke_ranges.push(start..end);
+                    }
+                }
+                // Insert active stroke at the active layer position
+                if layer_idx == active_layer_idx {
+                    if let Some(active_stroke) = frame.active_stroke
+                        && active_stroke.points().len() >= 2
+                    {
+                        let start = all_stroke_vertices.len() as u32;
+                        all_stroke_vertices.extend(
+                            active_stroke_to_vertices_7(active_stroke, layer.opacity),
+                        );
+                        let end = all_stroke_vertices.len() as u32;
+                        stroke_ranges.push(start..end);
+                    }
+                }
             }
             if !all_stroke_vertices.is_empty() {
                 let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -725,6 +798,7 @@ impl Renderer {
                 logger::info(&format!("Device: {:?}", self.device.is_some()));
                 logger::info(&format!("Surface: {:?}", self.surface.is_some()));
                 logger::info(&format!("Pipeline: {:?}", self.render_pipeline.is_some()));
+                logger::info(&format!("MSAA samples: {}", self.sample_count));
             }
             RenderBackend::Cairo => {
                 logger::info("Backend: CPU (Cairo)");
@@ -732,7 +806,7 @@ impl Renderer {
             }
         }
         logger::info(&format!("Window size: {:?}", self.window_size));
-        logger::info(&format!("MSAA samples: {}", self.config.msaa_samples));
+        logger::info(&format!("MSAA samples (config): {}", self.config.msaa_samples));
         logger::info("======================");
     }
 }

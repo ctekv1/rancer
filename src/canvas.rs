@@ -424,9 +424,10 @@ impl Canvas {
     }
 
     /// Get all strokes from all visible layers (for rendering)
+    /// Layers are rendered back-to-front (bottom layer first, top layer last)
     pub fn all_strokes(&self) -> Vec<(&Stroke, f32)> {
         let mut result = Vec::new();
-        for layer in &self.layers {
+        for layer in self.layers.iter().rev() {
             if layer.visible {
                 for stroke in &layer.strokes {
                     if stroke.points.len() >= 2 {
