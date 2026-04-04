@@ -6,6 +6,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Instant;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -75,6 +76,12 @@ struct WinitRenderState {
     mouse_position: Point,
     active_layer: usize,
     brush_type: BrushType,
+    selection_tool_active: bool,
+    selection_drawing: bool,
+    selection_start: Point,
+    selection_dragging: bool,
+    selection_drag_offset: (f32, f32),
+    selection_time: f32,
 }
 
 /// Window application state using winit
@@ -95,12 +102,16 @@ pub struct WindowApp {
     scale_factor: f64,
     /// Consolidated UI/render state
     render_state: WinitRenderState,
+    /// Time tracking for animations
+    start_time: Instant,
 }
 
 impl WindowApp {
     /// Create a new window application
     pub fn new(preferences: Preferences) -> Self {
         logger::info("Creating winit window application...");
+
+        let brush_type = preferences.brush.default_type.parse().unwrap_or_default();
 
         Self {
             window: None,
@@ -127,8 +138,15 @@ impl WindowApp {
                 mouse_state: MouseState::Idle,
                 mouse_position: Point { x: 0.0, y: 0.0 },
                 active_layer: 0,
-                brush_type: BrushType::Square,
+                brush_type,
+                selection_tool_active: false,
+                selection_drawing: false,
+                selection_start: Point { x: 0.0, y: 0.0 },
+                selection_dragging: false,
+                selection_drag_offset: (0.0, 0.0),
+                selection_time: 0.0,
             },
+            start_time: Instant::now(),
         }
     }
 
@@ -362,6 +380,19 @@ impl WindowApp {
                     self.render_state.active_layer = canvas.active_layer();
                 }
             }
+            ui::UiElement::SelectionTool => {
+                self.render_state.selection_tool_active = !self.render_state.selection_tool_active;
+                if !self.render_state.selection_tool_active {
+                    self.canvas.borrow_mut().clear_selection();
+                }
+                self.request_redraw();
+            }
+            ui::UiElement::SelectionRect => {
+                // Move/copy selection — handled in cursor_moved
+            }
+            ui::UiElement::SelectionStart(_, _) => {
+                // Start drawing selection rect — handled in cursor_moved
+            }
             ui::UiElement::Canvas => return false,
         }
         true
@@ -441,6 +472,17 @@ impl WindowApp {
                     .contains(winit::keyboard::ModifiersState::CONTROL)
                 {
                     match c_str {
+                        "c" | "C" => {
+                            if self.canvas.borrow().has_selection() {
+                                self.canvas.borrow_mut().copy_selection();
+                                logger::info("Selection copied");
+                                self.request_redraw();
+                            }
+                        }
+                        "d" | "D" => {
+                            self.canvas.borrow_mut().clear_selection();
+                            self.request_redraw();
+                        }
                         "z" | "Z" => {
                             let mut canvas = self.canvas.borrow_mut();
                             if canvas.can_undo() {
@@ -505,7 +547,16 @@ impl WindowApp {
                     self.canvas.borrow_mut().clear();
                     logger::info("Canvas cleared");
                     self.request_redraw();
+                } else if self.canvas.borrow().has_selection() {
+                    self.canvas.borrow_mut().commit_selection();
+                    logger::info("Selection committed");
+                    self.request_redraw();
                 }
+            }
+            winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape) => {
+                self.canvas.borrow_mut().clear_selection();
+                self.render_state.selection_tool_active = false;
+                self.request_redraw();
             }
             winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) => {
                 if key_event.state == winit::event::ElementState::Released {
@@ -537,6 +588,14 @@ impl WindowApp {
         }
 
         self.render_state.last_mouse_position = screen_point;
+
+        // Selection rect drawing
+        if self.render_state.selection_drawing {
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+            return;
+        }
 
         // Drawing
         if self.render_state.mouse_state == MouseState::Drawing {
@@ -751,6 +810,37 @@ impl ApplicationHandler for WindowApp {
                 self.request_redraw();
             }
             WindowEvent::RedrawRequested => {
+                let has_selection = self.canvas.borrow().selection().is_some() 
+                    || self.render_state.selection_drawing;
+
+                // Request another redraw for animation if selection is active
+                // This creates a continuous loop when combined with ControlFlow::Poll
+                if has_selection {
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                }
+
+                let selection_rect = {
+                    let canvas_rect = self.canvas.borrow().selection().map(|s| s.rect);
+                    if self.render_state.selection_drawing {
+                        let start = self.render_state.selection_start;
+                        let zoom = self.render_state.zoom;
+                        let pan = self.render_state.pan_offset;
+                        let mx = self.render_state.mouse_position.x;
+                        let my = self.render_state.mouse_position.y;
+                        let end_x = mx / zoom + pan.0;
+                        let end_y = my / zoom + pan.1;
+                        Some(crate::canvas::Rect::new(
+                            start.x, start.y,
+                            end_x - start.x,
+                            end_y - start.y,
+                        ))
+                    } else {
+                        canvas_rect
+                    }
+                };
+
                 if let Some(renderer) = &mut self.renderer {
                     let canvas = self.canvas.borrow();
                     let active_stroke = self.active_stroke.borrow();
@@ -768,6 +858,9 @@ impl ApplicationHandler for WindowApp {
                             opacity: self.render_state.opacity,
                             is_eraser: self.render_state.is_eraser,
                             brush_type: self.render_state.brush_type,
+                            selection_tool_active: self.render_state.selection_tool_active,
+                            selection_rect,
+                            selection_time: self.start_time.elapsed().as_secs_f32(),
                         },
                         viewport: ViewportState {
                             zoom: self.render_state.zoom,
@@ -823,10 +916,19 @@ impl ApplicationHandler for WindowApp {
                                 layer_count,
                                 active_layer,
                                 window_width,
+                                None,
                             );
 
                             if self.handle_ui_click(hit) {
                                 self.request_redraw();
+                                return;
+                            }
+
+                            // If selection tool is active and we clicked on canvas, start drawing selection rect
+                            if self.render_state.selection_tool_active {
+                                let canvas_point = self.screen_to_canvas(x, y);
+                                self.render_state.selection_drawing = true;
+                                self.render_state.selection_start = canvas_point;
                                 return;
                             }
 
@@ -878,6 +980,23 @@ impl ApplicationHandler for WindowApp {
                         winit::event::ElementState::Released => {
                             self.render_state.mouse_state = MouseState::Idle;
                             self.render_state.slider_drag = None;
+
+                            // If we were drawing a selection rect, commit it
+                            if self.render_state.selection_drawing {
+                                self.render_state.selection_drawing = false;
+                                let start = self.render_state.selection_start;
+                                let end = self.screen_to_canvas(
+                                    self.render_state.mouse_position.x,
+                                    self.render_state.mouse_position.y,
+                                );
+                                let rect = crate::canvas::Rect::new(
+                                    start.x, start.y,
+                                    end.x - start.x,
+                                    end.y - start.y,
+                                );
+                                self.canvas.borrow_mut().begin_selection(rect);
+                                self.request_redraw();
+                            }
 
                             if let Some(active_stroke) = self.active_stroke.borrow_mut().take() {
                                 let mut canvas = self.canvas.borrow_mut();

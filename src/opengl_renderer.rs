@@ -44,6 +44,9 @@ pub struct GlUiState {
     pub opacity: f32,
     pub is_eraser: bool,
     pub brush_type: BrushType,
+    pub selection_tool_active: bool,
+    pub selection_rect: Option<crate::canvas::Rect>,
+    pub selection_time: f32,
 }
 
 /// Viewport state for canvas transform
@@ -272,6 +275,10 @@ impl GlRenderer {
             all_ui_vertices.extend(geometry::generate_zoom_out_button_vertices());
             all_ui_vertices.extend(geometry::generate_opacity_preset_vertices(frame.ui.opacity));
             all_ui_vertices.extend(geometry::generate_brush_type_vertices(frame.ui.brush_type));
+            all_ui_vertices.extend(geometry::generate_selection_tool_button(
+                frame.ui.selection_tool_active,
+            ));
+            // Selection rect is rendered in a separate overlay pass (render_selection_overlay)
 
             let layer_data: Vec<(String, bool, f32, bool)> = frame
                 .canvas
@@ -288,6 +295,38 @@ impl GlRenderer {
             if !all_ui_vertices.is_empty() {
                 self.upload_and_draw(&all_ui_vertices, glow::TRIANGLES);
             }
+
+            self.gl.bind_vertex_array(None);
+        }
+    }
+
+    /// Render selection rectangle as a separate overlay pass.
+    /// This is called after the main render to ensure the marching ants
+    /// are always drawn on top with fresh time-based vertex data.
+    pub fn render_selection_overlay(
+        &self,
+        rect: crate::canvas::Rect,
+        time_offset: f32,
+        width: u32,
+        height: u32,
+    ) {
+        unsafe {
+            self.gl.viewport(0, 0, width as i32, height as i32);
+
+            // Reset zoom/pan for UI space
+            self.gl.uniform_1_f32(Some(&self.zoom_uniform), 1.0);
+            self.gl
+                .uniform_2_f32(Some(&self.pan_offset_uniform), 0.0, 0.0);
+
+            self.gl.bind_vertex_array(Some(self.vao));
+
+            let vertices = geometry::generate_selection_rect_vertices(rect, time_offset);
+            if !vertices.is_empty() {
+                self.upload_and_draw(&vertices, glow::TRIANGLES);
+            }
+
+            // Force GPU to complete the draw
+            self.gl.finish();
 
             self.gl.bind_vertex_array(None);
         }

@@ -4,7 +4,7 @@
 //! eliminating duplication between winit and GTK4 backends.
 //! All coordinate constants match the vertex positions in geometry.rs.
 
-use crate::canvas::{BrushType, Color};
+use crate::canvas::{BrushType, Color, Rect};
 
 /// UI element that was hit by a mouse click
 #[derive(Debug, Clone, PartialEq)]
@@ -39,6 +39,12 @@ pub enum UiElement {
     Opacity(f32),
     /// Brush type button clicked
     BrushType(BrushType),
+    /// Selection tool button clicked
+    SelectionTool,
+    /// Clicked inside active selection rect (move/copy)
+    SelectionRect,
+    /// Clicked on canvas to start drawing selection rect
+    SelectionStart(f32, f32),
     /// Layer row clicked (select layer)
     LayerRow(usize),
     /// Layer visibility toggle clicked
@@ -80,7 +86,16 @@ pub fn hit_test(
     layer_count: usize,
     _active_layer: usize,
     window_width: f32,
+    selection_rect: Option<Rect>,
 ) -> UiElement {
+    // Selection rect hit test (if selection is active) — checked first so it takes priority
+    if let Some(rect) = selection_rect {
+        let (rx, ry, rw, rh) = rect.normalized();
+        if x >= rx && x <= rx + rw && y >= ry && y <= ry + rh {
+            return UiElement::SelectionRect;
+        }
+    }
+
     // HSV Sliders area (y=5-80)
     if (5.0..=80.0).contains(&y) {
         let slider_x = 10.0;
@@ -196,6 +211,11 @@ pub fn hit_test(
                 return UiElement::BrushType(brush_type);
             }
         }
+    }
+
+    // Selection tool button (y=265-295)
+    if (265.0..=295.0).contains(&y) && x >= 10.0 && x <= 40.0 {
+        return UiElement::SelectionTool;
     }
 
     // Layer panel (right side)
@@ -326,7 +346,7 @@ mod tests {
 
     #[test]
     fn test_hit_test_hue_slider() {
-        let result = hit_test(110.0, 15.0, &[], 0, 0, 1280.0);
+        let result = hit_test(110.0, 15.0, &[], 0, 0, 1280.0, None);
         match result {
             UiElement::HueSlider(val) => assert!((val - 180.0).abs() < 1.0),
             _ => panic!("Expected HueSlider, got {:?}", result),
@@ -335,7 +355,7 @@ mod tests {
 
     #[test]
     fn test_hit_test_saturation_slider() {
-        let result = hit_test(110.0, 40.0, &[], 0, 0, 1280.0);
+        let result = hit_test(110.0, 40.0, &[], 0, 0, 1280.0, None);
         match result {
             UiElement::SaturationSlider(val) => assert!((val - 50.0).abs() < 1.0),
             _ => panic!("Expected SaturationSlider, got {:?}", result),
@@ -344,7 +364,7 @@ mod tests {
 
     #[test]
     fn test_hit_test_value_slider() {
-        let result = hit_test(110.0, 65.0, &[], 0, 0, 1280.0);
+        let result = hit_test(110.0, 65.0, &[], 0, 0, 1280.0, None);
         match result {
             UiElement::ValueSlider(val) => assert!((val - 50.0).abs() < 1.0),
             _ => panic!("Expected ValueSlider, got {:?}", result),
@@ -353,43 +373,43 @@ mod tests {
 
     #[test]
     fn test_hit_test_canvas_area() {
-        let result = hit_test(500.0, 500.0, &[], 0, 0, 1280.0);
+        let result = hit_test(500.0, 500.0, &[], 0, 0, 1280.0, None);
         assert_eq!(result, UiElement::Canvas);
     }
 
     #[test]
     fn test_hit_test_eraser_button() {
-        let result = hit_test(25.0, 170.0, &[], 0, 0, 1280.0);
+        let result = hit_test(25.0, 170.0, &[], 0, 0, 1280.0, None);
         assert_eq!(result, UiElement::Eraser);
     }
 
     #[test]
     fn test_hit_test_clear_button() {
-        let result = hit_test(65.0, 170.0, &[], 0, 0, 1280.0);
+        let result = hit_test(65.0, 170.0, &[], 0, 0, 1280.0, None);
         assert_eq!(result, UiElement::Clear);
     }
 
     #[test]
     fn test_hit_test_undo_button() {
-        let result = hit_test(105.0, 170.0, &[], 0, 0, 1280.0);
+        let result = hit_test(105.0, 170.0, &[], 0, 0, 1280.0, None);
         assert_eq!(result, UiElement::Undo);
     }
 
     #[test]
     fn test_hit_test_redo_button() {
-        let result = hit_test(145.0, 170.0, &[], 0, 0, 1280.0);
+        let result = hit_test(145.0, 170.0, &[], 0, 0, 1280.0, None);
         assert_eq!(result, UiElement::Redo);
     }
 
     #[test]
     fn test_hit_test_export_button() {
-        let result = hit_test(185.0, 170.0, &[], 0, 0, 1280.0);
+        let result = hit_test(185.0, 170.0, &[], 0, 0, 1280.0, None);
         assert_eq!(result, UiElement::Export);
     }
 
     #[test]
     fn test_hit_test_brush_size() {
-        let result = hit_test(25.0, 135.0, &[], 0, 0, 1280.0);
+        let result = hit_test(25.0, 135.0, &[], 0, 0, 1280.0, None);
         match result {
             UiElement::BrushSize(size) => assert_eq!(size, 3.0),
             _ => panic!("Expected BrushSize, got {:?}", result),
@@ -398,7 +418,7 @@ mod tests {
 
     #[test]
     fn test_hit_test_opacity() {
-        let result = hit_test(27.0, 200.0, &[], 0, 0, 1280.0);
+        let result = hit_test(27.0, 200.0, &[], 0, 0, 1280.0, None);
         match result {
             UiElement::Opacity(val) => assert!((val - 0.25).abs() < 0.01),
             _ => panic!("Expected Opacity, got {:?}", result),
@@ -407,32 +427,32 @@ mod tests {
 
     #[test]
     fn test_hit_test_brush_type_square() {
-        let result = hit_test(25.0, 240.0, &[], 0, 0, 1280.0);
+        let result = hit_test(25.0, 240.0, &[], 0, 0, 1280.0, None);
         assert_eq!(result, UiElement::BrushType(BrushType::Square));
     }
 
     #[test]
     fn test_hit_test_brush_type_round() {
-        let result = hit_test(65.0, 240.0, &[], 0, 0, 1280.0);
+        let result = hit_test(65.0, 240.0, &[], 0, 0, 1280.0, None);
         assert_eq!(result, UiElement::BrushType(BrushType::Round));
     }
 
     #[test]
     fn test_hit_test_brush_type_spray() {
-        let result = hit_test(105.0, 240.0, &[], 0, 0, 1280.0);
+        let result = hit_test(105.0, 240.0, &[], 0, 0, 1280.0, None);
         assert_eq!(result, UiElement::BrushType(BrushType::Spray));
     }
 
     #[test]
     fn test_hit_test_brush_type_calligraphy() {
-        let result = hit_test(145.0, 240.0, &[], 0, 0, 1280.0);
+        let result = hit_test(145.0, 240.0, &[], 0, 0, 1280.0, None);
         assert_eq!(result, UiElement::BrushType(BrushType::Calligraphy));
     }
 
     #[test]
     fn test_hit_test_custom_color() {
         let colors: [[u8; 3]; 3] = [[255, 0, 0], [0, 255, 0], [0, 0, 255]];
-        let result = hit_test(20.0, 100.0, &colors, 0, 0, 1280.0);
+        let result = hit_test(20.0, 100.0, &colors, 0, 0, 1280.0, None);
         match result {
             UiElement::CustomColor(idx) => assert_eq!(idx, 0),
             _ => panic!("Expected CustomColor, got {:?}", result),
@@ -442,7 +462,7 @@ mod tests {
     #[test]
     fn test_hit_test_save_color_button() {
         let colors: [[u8; 3]; 2] = [[255, 0, 0], [0, 255, 0]];
-        let result = hit_test(70.0, 100.0, &colors, 0, 0, 1280.0);
+        let result = hit_test(70.0, 100.0, &colors, 0, 0, 1280.0, None);
         assert_eq!(result, UiElement::SaveColor);
     }
 
@@ -478,13 +498,33 @@ mod tests {
 
     #[test]
     fn test_hit_test_zoom_in_button() {
-        let result = hit_test(225.0, 170.0, &[], 0, 0, 1280.0);
+        let result = hit_test(225.0, 170.0, &[], 0, 0, 1280.0, None);
         assert_eq!(result, UiElement::ZoomIn);
     }
 
     #[test]
     fn test_hit_test_zoom_out_button() {
-        let result = hit_test(265.0, 170.0, &[], 0, 0, 1280.0);
+        let result = hit_test(265.0, 170.0, &[], 0, 0, 1280.0, None);
         assert_eq!(result, UiElement::ZoomOut);
+    }
+
+    #[test]
+    fn test_hit_test_selection_tool() {
+        let result = hit_test(25.0, 280.0, &[], 0, 0, 1280.0, None);
+        assert_eq!(result, UiElement::SelectionTool);
+    }
+
+    #[test]
+    fn test_hit_test_selection_rect() {
+        let rect = Rect::new(100.0, 100.0, 200.0, 150.0);
+        let result = hit_test(150.0, 150.0, &[], 0, 0, 1280.0, Some(rect));
+        assert_eq!(result, UiElement::SelectionRect);
+    }
+
+    #[test]
+    fn test_hit_test_selection_rect_outside() {
+        let rect = Rect::new(100.0, 100.0, 200.0, 150.0);
+        let result = hit_test(500.0, 500.0, &[], 0, 0, 1280.0, Some(rect));
+        assert_eq!(result, UiElement::Canvas);
     }
 }

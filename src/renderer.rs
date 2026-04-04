@@ -50,6 +50,9 @@ pub struct UiRenderState<'a> {
     pub opacity: f32,
     pub is_eraser: bool,
     pub brush_type: BrushType,
+    pub selection_tool_active: bool,
+    pub selection_rect: Option<crate::canvas::Rect>,
+    pub selection_time: f32,
 }
 
 /// Viewport state for canvas transform
@@ -868,6 +871,16 @@ impl Renderer {
                 all_ui_vertices.extend(flat_to_vertices_7(
                     &geometry::generate_brush_type_vertices(frame.ui.brush_type),
                 ));
+                all_ui_vertices.extend(flat_to_vertices_7(
+                    &geometry::generate_selection_tool_button(frame.ui.selection_tool_active),
+                ));
+
+                // Selection rect uses Triangles mode (dashes are independent quads)
+                let mut selection_rect_vertices: Vec<[f32; 7]> = Vec::new();
+                if let Some(rect) = frame.ui.selection_rect {
+                    let flat = geometry::generate_selection_rect_vertices(rect, frame.ui.selection_time);
+                    selection_rect_vertices.extend(flat_to_vertices_7(&flat));
+                }
 
                 let layers: Vec<(String, bool, f32, bool)> = frame
                     .canvas
@@ -894,6 +907,21 @@ impl Renderer {
                     render_pass.set_bind_group(0, &ui_bind_group, &[]);
                     render_pass.set_vertex_buffer(0, ui_vertex_buffer.slice(..));
                     render_pass.draw(0..all_ui_vertices.len() as u32, 0..1);
+                }
+
+                if !selection_rect_vertices.is_empty() {
+                    if let Some(spray_pipeline) = &self.spray_render_pipeline {
+                        let sr_vertex_buffer =
+                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("Selection Rect Vertex Buffer"),
+                                contents: bytemuck::cast_slice(&selection_rect_vertices),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
+                        render_pass.set_pipeline(spray_pipeline);
+                        render_pass.set_bind_group(0, &bind_group, &[]);
+                        render_pass.set_vertex_buffer(0, sr_vertex_buffer.slice(..));
+                        render_pass.draw(0..selection_rect_vertices.len() as u32, 0..1);
+                    }
                 }
             }
         }

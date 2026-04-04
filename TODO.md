@@ -46,15 +46,57 @@
     - [x] Add brush_type: BrushType to app state
     - [x] Handle UiElement::BrushType clicks
     - [x] Pass brush_type through begin_stroke() calls
-    - [x] Persist to preferences on click (saves but not loaded on startup)
-  - [ ] Phase 7: Testing
+    - [x] Persist to preferences on click (saves and loads on startup)
+  - [x] Phase 7: Testing
     - [x] Each brush type generates non-empty vertices
     - [x] Spray produces scattered vertices (Triangles mode)
     - [x] Calligraphy width varies with stroke angle
     - [x] Hit-test for each brush type button
-    - [ ] BrushType serialization round-trip
-    - [ ] Brush type preference loaded on startup
+    - [x] BrushType serialization round-trip
+    - [x] Brush type preference loaded on startup
 - [ ] Selection Tool - Rectangular selection with move/copy
+  - [ ] Phase 1: Data Model (canvas.rs)
+    - [ ] Add Selection struct (rect, strokes, original_layer_indices)
+    - [ ] Add selection: Option<Selection> to Canvas
+    - [ ] Add begin_selection(rect) — captures stroke points within rect
+    - [ ] Add move_selection(dx, dy) — offsets selected stroke points
+    - [ ] Add copy_selection() — duplicates selected strokes to active layer
+    - [ ] Add commit_selection() — removes originals, commits moved strokes
+    - [ ] Add clear_selection() — discards selection without changes
+    - [ ] Add is_selecting: bool to track rect drawing state
+  - [ ] Phase 2: UI (geometry/ui_elements.rs)
+    - [ ] Selection tool toggle button at y=265 (below brush types)
+    - [ ] generate_selection_rect_vertices(rect, time_offset) — dashed rectangle
+    - [ ] Marching ants animation via time-based offset
+  - [ ] Phase 3: Hit Testing (ui.rs)
+    - [ ] SelectionTool variant in UiElement (tool button)
+    - [ ] SelectionRect variant (clicked inside selection = move/copy)
+    - [ ] SelectionArea variant (clicked on canvas = draw new selection rect)
+    - [ ] Hit test regions: button y=265-295, rect bounds
+  - [ ] Phase 4: Backend Integration (window_winit.rs, window_gtk4.rs)
+    - [ ] Add selection_tool_active: bool toggle state
+    - [ ] Add selection_drawing: bool + selection_start: Point
+    - [ ] Add selection_dragging: bool for move/copy
+    - [ ] Handle: tool toggle, rect drawing, move (Ctrl = copy), deselect
+    - [ ] Keyboard: Delete (remove), Ctrl+D (deselect), Ctrl+C (copy), Esc (clear)
+  - [ ] Phase 5: Rendering
+    - [ ] Add selection + selection_time to UiRenderState / GlUiState
+    - [ ] Render selection overlay on WGPU (Triangles pipeline)
+    - [ ] Render selection overlay on OpenGL
+    - [ ] Time-based marching ants animation
+  - [ ] Phase 6: Testing
+    - [ ] Selection captures correct points within rect
+    - [ ] Moving selection offsets all points correctly
+    - [ ] Copy duplicates without removing originals
+    - [ ] Deselect after move commits changes
+    - [ ] Hit testing for selection tool and selection rect
+    - [ ] Selection respects layer visibility
+  - [ ] Phase 7: Raster Pixel-Edge Selection (final refinement)
+    - [ ] Replace point-based selection with true pixel-level raster selection
+    - [ ] Render strokes to offscreen texture, extract pixels within rect
+    - [ ] Selected pixels become movable bitmap overlay
+    - [ ] On deselect: convert bitmap back to strokes or keep as layer
+    - [ ] Handles partial strokes at boundary with pixel precision
 - [ ] Transform Tools - Scale, rotate, flip canvas/strokes
 
 ## Tier 3 - File Management (v0.0.9)

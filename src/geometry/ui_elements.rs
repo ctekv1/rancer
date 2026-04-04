@@ -629,6 +629,201 @@ pub fn generate_brush_type_vertices(selected_type: crate::canvas::BrushType) -> 
     vertices
 }
 
+/// Generate vertices for the selection tool toggle button
+pub fn generate_selection_tool_button(is_active: bool) -> Vec<f32> {
+    let mut vertices = Vec::new();
+    let btn_x = 10.0;
+    let btn_y = 265.0;
+    let button_size = 30.0;
+    let border_width = 2.0;
+
+    // Button background
+    vertices.extend(generate_rect(
+        btn_x,
+        btn_y,
+        button_size,
+        button_size,
+        0.85,
+        0.85,
+        0.85,
+        1.0,
+    ));
+
+    // Dashed rectangle icon (smaller, centered)
+    let icon_x = btn_x + 7.0;
+    let icon_y = btn_y + 7.0;
+    let icon_w = 16.0;
+    let icon_h = 16.0;
+    let dash_len: f32 = 3.0;
+    let gap_len: f32 = 2.0;
+
+    // Top edge
+    let mut x = icon_x;
+    while x < icon_x + icon_w {
+        let seg_w = dash_len.min(icon_x + icon_w - x);
+        vertices.extend(generate_rect(x, icon_y, seg_w, 2.0, 0.0, 0.0, 0.0, 1.0));
+        x += dash_len + gap_len;
+    }
+    // Bottom edge
+    x = icon_x;
+    while x < icon_x + icon_w {
+        let seg_w = dash_len.min(icon_x + icon_w - x);
+        vertices.extend(generate_rect(
+            x,
+            icon_y + icon_h - 2.0,
+            seg_w,
+            2.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ));
+        x += dash_len + gap_len;
+    }
+    // Left edge
+    let mut y = icon_y;
+    while y < icon_y + icon_h {
+        let seg_h = dash_len.min(icon_y + icon_h - y);
+        vertices.extend(generate_rect(icon_x, y, 2.0, seg_h, 0.0, 0.0, 0.0, 1.0));
+        y += dash_len + gap_len;
+    }
+    // Right edge
+    y = icon_y;
+    while y < icon_y + icon_h {
+        let seg_h = dash_len.min(icon_y + icon_h - y);
+        vertices.extend(generate_rect(
+            icon_x + icon_w - 2.0,
+            y,
+            2.0,
+            seg_h,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ));
+        y += dash_len + gap_len;
+    }
+
+    // Blue selection border when active
+    if is_active {
+        vertices.extend(generate_rect(
+            btn_x - border_width,
+            btn_y - border_width,
+            button_size + border_width * 2.0,
+            border_width,
+            0.0,
+            0.5,
+            1.0,
+            1.0,
+        ));
+        vertices.extend(generate_rect(
+            btn_x - border_width,
+            btn_y + button_size,
+            button_size + border_width * 2.0,
+            border_width,
+            0.0,
+            0.5,
+            1.0,
+            1.0,
+        ));
+        vertices.extend(generate_rect(
+            btn_x - border_width,
+            btn_y - border_width,
+            border_width,
+            button_size + border_width * 2.0,
+            0.0,
+            0.5,
+            1.0,
+            1.0,
+        ));
+        vertices.extend(generate_rect(
+            btn_x + button_size,
+            btn_y - border_width,
+            border_width,
+            button_size + border_width * 2.0,
+            0.0,
+            0.5,
+            1.0,
+            1.0,
+        ));
+    }
+
+    vertices
+}
+
+/// Generate vertices for a dashed selection rectangle with marching ants animation.
+/// `time_offset` (0.0..dash_len+gap_len) shifts the dashes for animation.
+pub fn generate_selection_rect_vertices(rect: crate::canvas::Rect, time_offset: f32) -> Vec<f32> {
+    let mut vertices = Vec::new();
+
+    let (rx, ry, rw, rh) = rect.normalized();
+    let dash_len: f32 = 8.0;
+    let gap_len: f32 = 6.0;
+    let period = dash_len + gap_len;
+    let line_w: f32 = 3.0;
+    let speed: f32 = 30.0;
+
+    // Use modulo to create wrapping animation
+    let offset = (time_offset * speed) % period;
+
+    // Top edge
+    let mut x = rx + offset;
+    while x < rx + rw {
+        let seg_w = dash_len.min(rx + rw - x);
+        if seg_w > 0.1 {
+            vertices.extend(generate_rect(x, ry, seg_w, line_w, 0.0, 0.0, 0.0, 0.8));
+        }
+        x += period;
+    }
+    // Bottom edge
+    x = rx + offset;
+    while x < rx + rw {
+        let seg_w = dash_len.min(rx + rw - x);
+        if seg_w > 0.1 {
+            vertices.extend(generate_rect(
+                x,
+                ry + rh - line_w,
+                seg_w,
+                line_w,
+                0.0,
+                0.0,
+                0.0,
+                0.8,
+            ));
+        }
+        x += period;
+    }
+    // Left edge
+    let mut y = ry + offset;
+    while y < ry + rh {
+        let seg_h = dash_len.min(ry + rh - y);
+        if seg_h > 0.1 {
+            vertices.extend(generate_rect(rx, y, line_w, seg_h, 0.0, 0.0, 0.0, 0.8));
+        }
+        y += period;
+    }
+    // Right edge
+    y = ry + offset;
+    while y < ry + rh {
+        let seg_h = dash_len.min(ry + rh - y);
+        if seg_h > 0.1 {
+            vertices.extend(generate_rect(
+                rx + rw - line_w,
+                y,
+                line_w,
+                seg_h,
+                0.0,
+                0.0,
+                0.0,
+                0.8,
+            ));
+        }
+        y += period;
+    }
+
+    vertices
+}
+
 /// Generate vertices for the clear canvas button
 pub fn generate_clear_button_vertices() -> Vec<f32> {
     let mut vertices = Vec::new();

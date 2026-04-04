@@ -212,6 +212,48 @@ pub struct Canvas {
     active_layer: usize,
     /// Undo stack: stores (layer_index, stroke) tuples
     undo_stack: Vec<(usize, Stroke)>,
+    /// Active selection (rectangular, point-based)
+    selection: Option<Selection>,
+}
+
+/// Represents a rectangular selection of stroke segments
+#[derive(Debug, Clone)]
+pub struct Selection {
+    /// Selection rectangle in canvas coordinates
+    pub rect: Rect,
+    /// Selected stroke segments (copies from original strokes)
+    pub strokes: Vec<Stroke>,
+    /// Original layer index for each selected stroke
+    pub original_layer_indices: Vec<usize>,
+}
+
+/// Represents a rectangle in canvas space
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+impl Rect {
+    pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
+        Self { x, y, w, h }
+    }
+
+    pub fn contains(&self, px: f32, py: f32) -> bool {
+        let (rx, ry, rw, rh) = self.normalized();
+        px >= rx && px <= rx + rw && py >= ry && py <= ry + rh
+    }
+
+    /// Returns (x, y, w, h) with w and h always positive
+    pub fn normalized(&self) -> (f32, f32, f32, f32) {
+        let x = if self.w < 0.0 { self.x + self.w } else { self.x };
+        let y = if self.h < 0.0 { self.y + self.h } else { self.y };
+        let w = self.w.abs();
+        let h = self.h.abs();
+        (x, y, w, h)
+    }
 }
 
 impl Default for Canvas {
@@ -223,6 +265,7 @@ impl Default for Canvas {
             layers: vec![Layer::new("Background".to_string())],
             active_layer: 0,
             undo_stack: Vec::new(),
+            selection: None,
         }
     }
 }
@@ -447,6 +490,144 @@ impl Canvas {
     pub fn is_active_layer_locked(&self) -> bool {
         self.layers[self.active_layer].locked
     }
+
+    // ─── Selection ──────────────────────────────────────────────
+
+    /// Create a selection from all stroke points within the given rectangle.
+    /// For each stroke, consecutive point sequences inside the rect become
+    /// separate selected strokes.
+    pub fn begin_selection(&mut self, rect: Rect) {
+        let mut strokes = Vec::new();
+        let mut original_layer_indices = Vec::new();
+
+        for (layer_idx, layer) in self.layers.iter().enumerate() {
+            if !layer.visible {
+                continue;
+            }
+            for stroke in &layer.strokes {
+                let selected_segments = extract_segments_in_rect(stroke, rect);
+                for segment in selected_segments {
+                    strokes.push(segment);
+                    original_layer_indices.push(layer_idx);
+                }
+            }
+        }
+
+        if strokes.is_empty() {
+            self.selection = None;
+        } else {
+            self.selection = Some(Selection {
+                rect,
+                strokes,
+                original_layer_indices,
+            });
+        }
+    }
+
+    /// Offset all selected stroke points by the given delta.
+    pub fn move_selection(&mut self, dx: f32, dy: f32) {
+        if let Some(ref mut selection) = self.selection {
+            for stroke in &mut selection.strokes {
+                for point in &mut stroke.points {
+                    point.x += dx;
+                    point.y += dy;
+                }
+            }
+            selection.rect = Rect::new(
+                selection.rect.x + dx,
+                selection.rect.y + dy,
+                selection.rect.w,
+                selection.rect.h,
+            );
+        }
+    }
+
+    /// Duplicate the current selection and add the copies to the active layer.
+    /// The original strokes remain unchanged.
+    pub fn copy_selection(&mut self) {
+        if let Some(ref selection) = self.selection {
+            for stroke in &selection.strokes {
+                self.layers[self.active_layer].strokes.push(stroke.clone());
+            }
+        }
+    }
+
+    /// Commit the selection: remove original strokes and add the (possibly moved)
+    /// selected strokes to their original layers. Clears the selection afterward.
+    pub fn commit_selection(&mut self) {
+        if let Some(selection) = self.selection.take() {
+            // Track which (layer_index, stroke_index) pairs to remove
+            // We need to find the original strokes in each layer and remove them
+            for (i, &orig_layer) in selection.original_layer_indices.iter().enumerate() {
+                if orig_layer < self.layers.len() {
+                    let selected_stroke = &selection.strokes[i];
+                    // Find and remove the original stroke that matches this selection
+                    if let Some(pos) = self.layers[orig_layer].strokes.iter().position(|s| {
+                        s.points == selected_stroke.points
+                            && s.color == selected_stroke.color
+                            && (s.width - selected_stroke.width).abs() < f32::EPSILON
+                    }) {
+                        self.layers[orig_layer].strokes.remove(pos);
+                    }
+                    // Add the moved/copied stroke to the original layer
+                    self.layers[orig_layer].strokes.push(selected_stroke.clone());
+                }
+            }
+        }
+    }
+
+    /// Discard the selection without committing any changes.
+    pub fn clear_selection(&mut self) {
+        self.selection = None;
+    }
+
+    /// Returns a reference to the active selection, if any.
+    pub fn selection(&self) -> Option<&Selection> {
+        self.selection.as_ref()
+    }
+
+    /// Returns true if there is an active selection.
+    pub fn has_selection(&self) -> bool {
+        self.selection.is_some()
+    }
+}
+
+/// Extract consecutive point sequences from a stroke that fall within the rect.
+/// Each sequence of 2+ consecutive points becomes a new Stroke.
+fn extract_segments_in_rect(stroke: &Stroke, rect: Rect) -> Vec<Stroke> {
+    let mut segments = Vec::new();
+    let mut current_segment: Vec<Point> = Vec::new();
+
+    for point in &stroke.points {
+        if rect.contains(point.x, point.y) {
+            current_segment.push(*point);
+        } else {
+            if current_segment.len() >= 2 {
+                segments.push(Stroke {
+                    points: std::mem::take(&mut current_segment),
+                    color: stroke.color,
+                    width: stroke.width,
+                    opacity: stroke.opacity,
+                    brush_type: stroke.brush_type,
+                });
+            } else {
+                current_segment.clear();
+            }
+        }
+    }
+
+    // Handle trailing segment
+    if current_segment.len() >= 2 {
+        segments.push(Stroke {
+            points: current_segment,
+            color: stroke.color,
+            width: stroke.width,
+            opacity: stroke.opacity,
+            brush_type: stroke.brush_type,
+        });
+    }
+
+    segments
 }
 
 /// Default brush sizes available in the application
@@ -460,6 +641,20 @@ pub enum BrushType {
     Round,
     Spray,
     Calligraphy,
+}
+
+impl std::str::FromStr for BrushType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Square" => Ok(BrushType::Square),
+            "Round" => Ok(BrushType::Round),
+            "Spray" => Ok(BrushType::Spray),
+            "Calligraphy" => Ok(BrushType::Calligraphy),
+            _ => Err(()),
+        }
+    }
 }
 
 /// Cycle brush size up (larger) - returns new size

@@ -15,6 +15,7 @@ use gtk4::{
 };
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Instant;
 
 use crate::canvas::{ActiveStroke, BrushType, Canvas, Point};
 use crate::logger;
@@ -42,6 +43,9 @@ struct GlRenderState {
     mouse_state: MouseState,
     mouse_position: Point,
     brush_type: BrushType,
+    selection_tool_active: bool,
+    selection_drawing: bool,
+    selection_start: Point,
 }
 
 /// Represents the current state of mouse interaction
@@ -98,6 +102,8 @@ pub struct WindowApp {
     active_layer: usize,
     /// Current brush type
     brush_type: BrushType,
+    /// Time tracking for animations
+    start_time: Instant,
 }
 
 impl WindowApp {
@@ -124,6 +130,7 @@ impl WindowApp {
             mouse_position: Point { x: 0.0, y: 0.0 },
             brush_size: preferences.brush.default_size,
             opacity: preferences.brush.default_opacity,
+            brush_type: preferences.brush.default_type.parse().unwrap_or_default(),
             is_eraser: false,
             slider_drag: None,
             preferences,
@@ -132,7 +139,7 @@ impl WindowApp {
             is_panning: false,
             last_mouse_position: Point { x: 0.0, y: 0.0 },
             active_layer: 0,
-            brush_type: BrushType::Square,
+            start_time: Instant::now(),
         }
     }
 
@@ -180,6 +187,9 @@ impl WindowBackend for WindowApp {
             mouse_state: MouseState::Idle,
             mouse_position: Point { x: 0.0, y: 0.0 },
             brush_type: self.brush_type,
+            selection_tool_active: false,
+            selection_drawing: false,
+            selection_start: Point { x: 0.0, y: 0.0 },
         }));
 
         self.app.connect_activate({
@@ -187,6 +197,7 @@ impl WindowBackend for WindowApp {
             let active_stroke = active_stroke.clone();
             let render_state = render_state.clone();
             let preferences = preferences.clone();
+            let start_time = self.start_time;
 
             move |app| {
                 let prefs = preferences.borrow();
@@ -211,6 +222,13 @@ impl WindowBackend for WindowApp {
                 gl_area.set_focusable(true);
                 window.set_child(Some(&gl_area));
 
+                // Use GTK4's tick callback for smooth animation - fires every frame synced to display refresh
+                let gl_area_anim = gl_area.clone();
+                gl_area.add_tick_callback(move |_widget, _frame_clock| {
+                    gl_area_anim.queue_render();
+                    glib::ControlFlow::Continue
+                });
+
                 let gl_renderer: Rc<RefCell<Option<GlRenderer>>> = Rc::new(RefCell::new(None));
 
                 setup_mouse_events(
@@ -218,6 +236,7 @@ impl WindowBackend for WindowApp {
                     &canvas,
                     &active_stroke,
                     &render_state,
+                    &preferences,
                 );
 
                 // Keyboard handler
@@ -429,9 +448,11 @@ impl WindowBackend for WindowApp {
                 let canvas_render = canvas.clone();
                 let active_stroke_render = active_stroke.clone();
                 let render_state_render = render_state.clone();
+                let start_time_render = start_time;
 
                 gl_area.connect_render(move |gl_area, _context| {
-                    gl_area.make_current();
+                    // Attach buffers to ensure proper framebuffer state
+                    gl_area.attach_buffers();
 
                     let _gl_context = match gl_area.context() {
                         Some(ctx) => ctx,
@@ -472,17 +493,33 @@ impl WindowBackend for WindowApp {
                         let frame = GlRenderFrame {
                             canvas: &canvas_ref,
                             active_stroke: &active_ref,
-                            ui: GlUiState {
-                                hue: state.hue,
-                                saturation: state.saturation,
-                                value: state.value,
-                                custom_colors: state.custom_colors.clone(),
-                                selected_custom_index: state.selected_custom_index,
-                                brush_size: state.brush_size,
-                                opacity: state.opacity,
-                                is_eraser: state.is_eraser,
-                                brush_type: state.brush_type,
-                            },
+                                ui: GlUiState {
+                                    hue: state.hue,
+                                    saturation: state.saturation,
+                                    value: state.value,
+                                    custom_colors: state.custom_colors.clone(),
+                                    selected_custom_index: state.selected_custom_index,
+                                    brush_size: state.brush_size,
+                                    opacity: state.opacity,
+                                    is_eraser: state.is_eraser,
+                                    brush_type: state.brush_type,
+                                    selection_tool_active: state.selection_tool_active,
+                                    selection_rect: {
+                                        let canvas_rect = canvas_ref.selection().map(|s| s.rect);
+                                        if state.selection_drawing {
+                                            let start = state.selection_start;
+                                            let end = state.mouse_position;
+                                            Some(crate::canvas::Rect::new(
+                                                start.x, start.y,
+                                                end.x - start.x,
+                                                end.y - start.y,
+                                            ))
+                                        } else {
+                                            canvas_rect
+                                        }
+                                    },
+                                    selection_time: start_time_render.elapsed().as_secs_f32(),
+                                },
                             viewport: GlViewportState {
                                 zoom: state.zoom,
                                 pan_offset: state.pan_offset,
@@ -490,6 +527,19 @@ impl WindowBackend for WindowApp {
                             window_size: (width, height),
                         };
                         renderer.render(&frame);
+
+                        // Render selection rect as a separate overlay pass
+                        if let Some(rect) = &frame.ui.selection_rect {
+                            renderer.render_selection_overlay(
+                                *rect,
+                                frame.ui.selection_time,
+                                width as u32,
+                                height as u32,
+                            );
+                        }
+                    } else {
+                        // No renderer yet - queue render to try again
+                        gl_area.queue_render();
                     }
 
                     glib::Propagation::Proceed
@@ -507,6 +557,7 @@ impl WindowBackend for WindowApp {
                     prefs.palette.custom_colors = state.custom_colors.clone();
                     prefs.brush.default_size = state.brush_size;
                     prefs.brush.default_opacity = state.opacity;
+                    prefs.brush.default_type = format!("{:?}", state.brush_type);
                     drop(state);
 
                     if let Err(e) = crate::preferences::save(&prefs) {
@@ -563,6 +614,7 @@ fn setup_mouse_events(
     canvas: &Rc<RefCell<Canvas>>,
     active_stroke: &Rc<RefCell<Option<ActiveStroke>>>,
     render_state: &Rc<RefCell<GlRenderState>>,
+    preferences: &Rc<RefCell<Preferences>>,
 ) {
     // Mouse click handler
     let click_gesture = GestureClick::new();
@@ -571,6 +623,7 @@ fn setup_mouse_events(
     let canvas_click = canvas.clone();
     let active_stroke_click = active_stroke.clone();
     let render_state_click = render_state.clone();
+    let preferences_click = preferences.clone();
 
     click_gesture.connect_pressed(move |gesture, _n_press, x, y| {
         let point = Point {
@@ -601,6 +654,7 @@ fn setup_mouse_events(
             layer_count,
             active_layer,
             window_width,
+            None,
         );
 
         match hit {
@@ -701,6 +755,14 @@ fn setup_mouse_events(
             ui::UiElement::BrushType(brush_type) => {
                 let mut state = render_state_click.borrow_mut();
                 state.brush_type = brush_type;
+                drop(state);
+                {
+                    let mut prefs = preferences_click.borrow_mut();
+                    prefs.brush.default_type = format!("{:?}", brush_type);
+                    if let Err(e) = crate::preferences::save(&prefs) {
+                        logger::error(&format!("Failed to save brush type: {e}"));
+                    }
+                }
                 if let Some(widget) = gesture.widget()
                     && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                 {
@@ -883,12 +945,43 @@ fn setup_mouse_events(
                 }
                 return;
             }
+            ui::UiElement::SelectionTool => {
+                let mut state = render_state_click.borrow_mut();
+                state.selection_tool_active = !state.selection_tool_active;
+                if !state.selection_tool_active {
+                    canvas_click.borrow_mut().clear_selection();
+                }
+                drop(state);
+                if let Some(widget) = gesture.widget()
+                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                {
+                    gl_area.queue_render();
+                }
+                return;
+            }
+            ui::UiElement::SelectionRect => {
+                // Move/copy selection — handled in motion
+            }
+            ui::UiElement::SelectionStart(_, _) => {
+                // Start drawing selection rect — handled in motion
+            }
             ui::UiElement::Canvas => {
                 // Not on any UI element — start drawing
             }
         }
 
         // If not on UI, start drawing
+        let is_selection_active = render_state_click.borrow().selection_tool_active;
+        if is_selection_active {
+            let mut state = render_state_click.borrow_mut();
+            state.selection_drawing = true;
+            let canvas_point = Point {
+                x: x as f32,
+                y: y as f32,
+            };
+            state.selection_start = canvas_point;
+            return;
+        }
         if canvas_click.borrow().is_active_layer_locked() {
             return;
         }
@@ -958,11 +1051,31 @@ fn setup_mouse_events(
     let canvas_release = canvas.clone();
     let render_state_release = render_state.clone();
 
-    click_gesture_release.connect_released(move |_gesture, _n_press, _x, _y| {
+    click_gesture_release.connect_released(move |gesture, _n_press, x, y| {
         let mut state = render_state_release.borrow_mut();
         state.mouse_state = MouseState::Idle;
         state.slider_drag = None;
-        drop(state);
+
+        // If we were drawing a selection rect, commit it
+        if state.selection_drawing {
+            state.selection_drawing = false;
+            let start = state.selection_start;
+            let end = Point { x: x as f32, y: y as f32 };
+            let rect = crate::canvas::Rect::new(
+                start.x, start.y,
+                end.x - start.x,
+                end.y - start.y,
+            );
+            drop(state);
+            canvas_release.borrow_mut().begin_selection(rect);
+            if let Some(widget) = gesture.widget()
+                && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+            {
+                gl_area.queue_render();
+            }
+        } else {
+            drop(state);
+        }
 
         if let Some(active_stroke) = active_stroke_release.borrow_mut().take() {
             let mut canvas = canvas_release.borrow_mut();
@@ -1009,6 +1122,17 @@ fn setup_mouse_events(
         }
 
         state.last_mouse_position = point;
+
+        // Selection rect drawing
+        if state.selection_drawing {
+            drop(state);
+            if let Some(widget) = controller.widget()
+                && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+            {
+                gl_area.queue_render();
+            }
+            return;
+        }
 
         if state.mouse_state == MouseState::Drawing {
             if let Some(active_stroke) = &mut *active_stroke_motion.borrow_mut() {
