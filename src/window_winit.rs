@@ -25,23 +25,23 @@ fn force_window_repaint(window: &Window) {
     use raw_window_handle::HasWindowHandle;
     use raw_window_handle::RawWindowHandle;
 
-    if let Ok(handle) = window.window_handle() {
-        if let RawWindowHandle::Win32(h) = handle.as_raw() {
-            let hwnd_val = h.hwnd.get();
-            if hwnd_val != 0 {
-                let hwnd = hwnd_val as *mut std::ffi::c_void;
-                unsafe {
-                    unsafe extern "system" {
-                        fn InvalidateRect(
-                            hWnd: *mut std::ffi::c_void,
-                            lpRect: *const std::ffi::c_void,
-                            bErase: i32,
-                        ) -> i32;
-                        fn UpdateWindow(hWnd: *mut std::ffi::c_void) -> i32;
-                    }
-                    InvalidateRect(hwnd, std::ptr::null(), 0);
-                    UpdateWindow(hwnd);
+    if let Ok(handle) = window.window_handle()
+        && let RawWindowHandle::Win32(h) = handle.as_raw()
+    {
+        let hwnd_val = h.hwnd.get();
+        if hwnd_val != 0 {
+            let hwnd = hwnd_val as *mut std::ffi::c_void;
+            unsafe {
+                unsafe extern "system" {
+                    fn InvalidateRect(
+                        hWnd: *mut std::ffi::c_void,
+                        lpRect: *const std::ffi::c_void,
+                        bErase: i32,
+                    ) -> i32;
+                    fn UpdateWindow(hWnd: *mut std::ffi::c_void) -> i32;
                 }
+                InvalidateRect(hwnd, std::ptr::null(), 0);
+                UpdateWindow(hwnd);
             }
         }
     }
