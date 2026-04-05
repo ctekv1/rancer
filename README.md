@@ -13,6 +13,7 @@ A digital art application built in Rust with cross-platform support.
 - **HSV color picker** — Three sliders with click-and-drag, custom saved colors palette (FIFO, max 10)
 - **Brush types** — Square, Round (soft-edged), Spray (scattered dots), Calligraphy (45° broad-nib)
 - **Brush tools** — Adjustable size (3/5/10/25/50px), opacity presets (25%/50%/75%/100%), eraser toggle
+- **Selection tool** — Rectangular selection with move/copy, marching ants animation, whole-stroke capture
 - **Undo/Redo** — Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y
 - **Native export** — File save dialog, OS notifications, stroke bounding box export (up to 4096×4096)
 - **Cross-platform** — winit/WGPU for Windows, GTK4/OpenGL for Linux
@@ -41,6 +42,11 @@ cargo run
 | Zoom | Mouse wheel (toward cursor), or +/− buttons |
 | Brush size | Click size boxes, or +/− keys |
 | Brush type | Click type buttons (square, round, spray, calligraphy) |
+| Selection tool | Click tool button, drag on canvas to select |
+| Move selection | Click and drag inside selection |
+| Copy selection | Ctrl+drag inside selection |
+| Commit selection | Delete key |
+| Clear selection | Escape or Ctrl+D |
 | Undo | Ctrl+Z |
 | Redo | Ctrl+Y or Ctrl+Shift+Z |
 | Clear canvas | Ctrl+Delete |

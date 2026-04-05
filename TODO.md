@@ -54,45 +54,50 @@
     - [x] Hit-test for each brush type button
     - [x] BrushType serialization round-trip
     - [x] Brush type preference loaded on startup
-- [ ] Selection Tool - Rectangular selection with move/copy
-  - [ ] Phase 1: Data Model (canvas.rs)
-    - [ ] Add Selection struct (rect, strokes, original_layer_indices)
-    - [ ] Add selection: Option<Selection> to Canvas
-    - [ ] Add begin_selection(rect) — captures stroke points within rect
-    - [ ] Add move_selection(dx, dy) — offsets selected stroke points
-    - [ ] Add copy_selection() — duplicates selected strokes to active layer
-    - [ ] Add commit_selection() — removes originals, commits moved strokes
-    - [ ] Add clear_selection() — discards selection without changes
-    - [ ] Add is_selecting: bool to track rect drawing state
-  - [ ] Phase 2: UI (geometry/ui_elements.rs)
-    - [ ] Selection tool toggle button at y=265 (below brush types)
-    - [ ] generate_selection_rect_vertices(rect, time_offset) — dashed rectangle
-    - [ ] Marching ants animation via time-based offset
-  - [ ] Phase 3: Hit Testing (ui.rs)
-    - [ ] SelectionTool variant in UiElement (tool button)
-    - [ ] SelectionRect variant (clicked inside selection = move/copy)
-    - [ ] SelectionArea variant (clicked on canvas = draw new selection rect)
-    - [ ] Hit test regions: button y=265-295, rect bounds
-  - [ ] Phase 4: Backend Integration (window_winit.rs, window_gtk4.rs)
-    - [ ] Add selection_tool_active: bool toggle state
-    - [ ] Add selection_drawing: bool + selection_start: Point
-    - [ ] Add selection_dragging: bool for move/copy
-    - [ ] Handle: tool toggle, rect drawing, move (Ctrl = copy), deselect
-    - [ ] Keyboard: Delete (remove), Ctrl+D (deselect), Ctrl+C (copy), Esc (clear)
-  - [ ] Phase 5: Rendering
-    - [ ] Add selection + selection_time to UiRenderState / GlUiState
-    - [ ] Render selection overlay on WGPU (Triangles pipeline)
-    - [ ] Render selection overlay on OpenGL
-    - [ ] Time-based marching ants animation
-  - [ ] Phase 6: Testing
-    - [ ] Selection captures correct points within rect
-    - [ ] Moving selection offsets all points correctly
-    - [ ] Copy duplicates without removing originals
-    - [ ] Deselect after move commits changes
-    - [ ] Hit testing for selection tool and selection rect
-    - [ ] Selection respects layer visibility
+- [x] Selection Tool - Rectangular selection with move/copy
+  - [x] Phase 1: Data Model (canvas.rs)
+    - [x] Add Selection struct (rect, strokes, original_layer_indices, removed_strokes)
+    - [x] Add selection: Option<Selection> to Canvas
+    - [x] Add begin_selection(rect) — captures whole strokes within rect
+    - [x] Add move_selection(dx, dy) — offsets selected stroke points
+    - [x] Add copy_selection() — duplicates selected strokes to active layer
+    - [x] Add commit_selection() — adds moved strokes to active layer
+    - [x] Add clear_selection() — restores original strokes, discards selection
+    - [x] Selection state tracked via selection_drawing + selection_start
+  - [x] Phase 2: UI (geometry/ui_elements.rs)
+    - [x] Selection tool toggle button at y=265 (below brush types)
+    - [x] generate_selection_rect_vertices(rect, time_offset) — dashed rectangle
+    - [x] Marching ants animation via time-based offset
+  - [x] Phase 3: Hit Testing (ui.rs)
+    - [x] SelectionTool variant in UiElement (tool button)
+    - [x] SelectionRect variant (clicked inside selection = move/copy)
+    - [x] SelectionStart variant (clicked on canvas = draw new selection rect)
+    - [x] Hit test regions: button y=265-295, rect bounds
+  - [x] Phase 4: Backend Integration (window_winit.rs, window_gtk4.rs)
+    - [x] Add selection_tool_active: bool toggle state
+    - [x] Add selection_drawing: bool + selection_start: Point
+    - [x] Add selection_moving: bool + selection_move_offset for move/copy
+    - [x] Handle: tool toggle, rect drawing, move (Ctrl = copy), deselect
+    - [x] Keyboard: Delete (commit), Ctrl+D (deselect), Esc (clear), Ctrl+Delete (clear canvas)
+  - [x] Phase 5: Rendering
+    - [x] Add selection_time to UiRenderState / GlUiState
+    - [x] Render selection overlay on OpenGL (separate pass with gl.finish())
+    - [x] GTK4 tick callback (add_tick_callback) for continuous marching ants animation
+    - [x] Selection rect in canvas coordinates with proper zoom/pan transform
+    - [x] In-progress drawing rect rendered via overlay fallback
+  - [x] Phase 6: Testing
+    - [x] Selection captures correct strokes within rect (whole-stroke)
+    - [x] Moving selection offsets all points correctly
+    - [x] Copy duplicates without removing originals
+    - [x] Commit adds moved strokes to active layer
+    - [x] Clear restores original strokes to their layers
+    - [x] Hit testing for selection tool and selection rect
+    - [x] Selection respects layer visibility
+    - [x] Multiple strokes from same layer selected correctly
+    - [x] Empty rect creates no selection
+    - [x] Commit after copy works correctly
   - [ ] Phase 7: Raster Pixel-Edge Selection (final refinement)
-    - [ ] Replace point-based selection with true pixel-level raster selection
+    - [ ] Replace whole-stroke selection with true pixel-level raster selection
     - [ ] Render strokes to offscreen texture, extract pixels within rect
     - [ ] Selected pixels become movable bitmap overlay
     - [ ] On deselect: convert bitmap back to strokes or keep as layer

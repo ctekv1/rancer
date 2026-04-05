@@ -6,7 +6,14 @@
 - **Brush type hit testing**: Click to switch brush types, saves preference to TOML
 - **StrokeMesh abstraction**: `StrokeMesh` struct with `DrawMode` (TriangleStrip / Triangles) for flexible brush geometry
 - **WGPU spray pipeline**: Separate TriangleList render pipeline for spray brush (scattered quads)
-- **178 unit tests** (+10 from previous count) including brush type generation and hit testing
+- **188 unit tests** including brush type generation, hit testing, and selection tool
+- **Selection tool**: Rectangular selection with move/copy, marching ants animation, keyboard shortcuts
+- **Selection UI**: Toggle button at y=265, dashed rectangle with animated marching ants
+- **Selection hit testing**: Tool button, selection rect (move/copy), canvas area (draw new selection)
+- **Selection keyboard shortcuts**: Delete (commit), Escape (clear), Ctrl+D (deselect), Ctrl+Delete (clear canvas)
+- **Selection rendering**: Separate overlay pass with `gl.finish()` for proper presentation
+- **GTK4 tick callback**: `add_tick_callback` for continuous marching ants animation synced to display refresh
+- **10 selection unit tests**: Capture, move, copy, commit, clear, layer visibility, multi-stroke, empty rect, commit after copy
 
 ### Changed
 - **Added `brush_type` field to `Stroke` struct** — committed strokes retain their brush type for correct re-rendering
@@ -16,9 +23,18 @@
 - **Refactored `export.rs`**: Handles both TriangleStrip and Triangles draw modes in rasterization
 - **Round brush**: Replaced dotted-line approach with soft-edged 4-vertex ribbon (inner/outer alpha gradient)
 - **Added `default_type` field to `BrushPreferences`** (saves on click, not loaded on startup yet)
+- **Selection uses whole-stroke capture**: If any point of a stroke is inside the rect, the entire stroke is selected (no segment splitting, no data loss)
+- **Selection removes originals on begin**: Original strokes removed from layers, stored in `removed_strokes` for clear/restore
+- **Selection rect in canvas coordinates**: Proper zoom/pan transform for both drawing and rendering
 
 ### Fixed
 - **GTK4 eraser hotkey crash**: Fixed double `RefCell` borrow panic on 'E' key press
+- **Selection rect coordinate space**: Fixed screen-to-canvas coordinate conversion during drawing
+- **Selection hit test**: Fixed `selection_rect` being passed as `None` to hit test (never returned `SelectionRect`)
+- **Selection overlay rendering**: Fixed zoom/pan uniforms not being set for selection stroke rendering
+- **Marching ants only animating on mouse move**: Fixed by using GTK4's `add_tick_callback` for continuous frame-synced animation
+- **Selection strokes disappearing on commit**: Fixed `commit_selection` to properly add moved strokes to active layer
+- **Clicking off selection loses data**: Fixed to clear selection and restore original strokes when clicking outside
 
 ## [0.0.6] - 2026-03-30
 
