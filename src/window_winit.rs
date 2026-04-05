@@ -79,9 +79,6 @@ struct WinitRenderState {
     selection_tool_active: bool,
     selection_drawing: bool,
     selection_start: Point,
-    selection_dragging: bool,
-    selection_drag_offset: (f32, f32),
-    selection_time: f32,
 }
 
 /// Window application state using winit
@@ -142,9 +139,6 @@ impl WindowApp {
                 selection_tool_active: false,
                 selection_drawing: false,
                 selection_start: Point { x: 0.0, y: 0.0 },
-                selection_dragging: false,
-                selection_drag_offset: (0.0, 0.0),
-                selection_time: 0.0,
             },
             start_time: Instant::now(),
         }

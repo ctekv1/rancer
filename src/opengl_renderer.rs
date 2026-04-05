@@ -302,24 +302,42 @@ impl GlRenderer {
 
     /// Render selection rectangle as a separate overlay pass.
     /// This is called after the main render to ensure the marching ants
-    /// are always drawn on top with fresh time-based vertex data.
+    /// and moved selection strokes are always drawn on top.
     pub fn render_selection_overlay(
         &self,
         rect: crate::canvas::Rect,
         time_offset: f32,
         width: u32,
         height: u32,
+        selection_strokes: &[(crate::canvas::Stroke, f32)],
+        zoom: f32,
+        pan_offset: (f32, f32),
     ) {
         unsafe {
             self.gl.viewport(0, 0, width as i32, height as i32);
 
-            // Reset zoom/pan for UI space
-            self.gl.uniform_1_f32(Some(&self.zoom_uniform), 1.0);
+            // Set canvas-space transform for both strokes and rect
+            self.gl.uniform_1_f32(Some(&self.zoom_uniform), zoom);
             self.gl
-                .uniform_2_f32(Some(&self.pan_offset_uniform), 0.0, 0.0);
+                .uniform_2_f32(Some(&self.pan_offset_uniform), pan_offset.0, pan_offset.1);
 
             self.gl.bind_vertex_array(Some(self.vao));
 
+            // Draw moved selection strokes in canvas space
+            for (stroke, opacity) in selection_strokes {
+                if stroke.points.len() >= 2 {
+                    let mesh = geometry::generate_stroke_vertices_with_opacity(stroke, *opacity);
+                    if !mesh.is_empty() {
+                        let mode = match mesh.mode {
+                            DrawMode::TriangleStrip => glow::TRIANGLE_STRIP,
+                            DrawMode::Triangles => glow::TRIANGLES,
+                        };
+                        self.upload_and_draw(&mesh.vertices, mode);
+                    }
+                }
+            }
+
+            // Draw marching ants rect in canvas space
             let vertices = geometry::generate_selection_rect_vertices(rect, time_offset);
             if !vertices.is_empty() {
                 self.upload_and_draw(&vertices, glow::TRIANGLES);

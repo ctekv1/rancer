@@ -46,6 +46,10 @@ struct GlRenderState {
     selection_tool_active: bool,
     selection_drawing: bool,
     selection_start: Point,
+    selection_moving: bool,
+    selection_move_offset: (f32, f32),
+    selection_copy_mode: bool,
+    ctrl_pressed: bool,
 }
 
 /// Represents the current state of mouse interaction
@@ -190,6 +194,10 @@ impl WindowBackend for WindowApp {
             selection_tool_active: false,
             selection_drawing: false,
             selection_start: Point { x: 0.0, y: 0.0 },
+            selection_moving: false,
+            selection_move_offset: (0.0, 0.0),
+            selection_copy_mode: false,
+            ctrl_pressed: false,
         }));
 
         self.app.connect_activate({
@@ -247,6 +255,9 @@ impl WindowBackend for WindowApp {
                 let render_state_kb = render_state.clone();
 
                 key_controller.connect_key_pressed(move |_controller, key, _keycode, state| {
+                    let is_ctrl = state.contains(ModifierType::CONTROL_MASK);
+                    render_state_kb.borrow_mut().ctrl_pressed = is_ctrl;
+
                     if key == gtk4::gdk::Key::space {
                         render_state_kb.borrow_mut().is_panning = true;
                     }
@@ -360,8 +371,38 @@ impl WindowBackend for WindowApp {
                                 canvas.clear();
                                 logger::info("Canvas cleared");
                                 gl_area_kb.queue_render();
+                            } else {
+                                // Commit selection
+                                let mut canvas = canvas_kb.borrow_mut();
+                                if canvas.has_selection() {
+                                    canvas.commit_selection();
+                                    logger::info("Selection committed");
+                                    gl_area_kb.queue_render();
+                                }
                             }
                             glib::Propagation::Stop
+                        }
+                        gtk4::gdk::Key::Escape => {
+                            let mut canvas = canvas_kb.borrow_mut();
+                            if canvas.has_selection() {
+                                canvas.clear_selection();
+                                logger::info("Selection cleared");
+                                gl_area_kb.queue_render();
+                            }
+                            glib::Propagation::Stop
+                        }
+                        gtk4::gdk::Key::d | gtk4::gdk::Key::D => {
+                            if state.contains(ModifierType::CONTROL_MASK) {
+                                let mut canvas = canvas_kb.borrow_mut();
+                                if canvas.has_selection() {
+                                    canvas.clear_selection();
+                                    logger::info("Selection deselected (Ctrl+D)");
+                                    gl_area_kb.queue_render();
+                                }
+                                glib::Propagation::Stop
+                            } else {
+                                glib::Propagation::Proceed
+                            }
                         }
                         gtk4::gdk::Key::e | gtk4::gdk::Key::E => {
                             let is_drawing = active_stroke_kb.borrow().is_some();
@@ -507,12 +548,19 @@ impl WindowBackend for WindowApp {
                                     selection_rect: {
                                         let canvas_rect = canvas_ref.selection().map(|s| s.rect);
                                         if state.selection_drawing {
+                                            let zoom = state.zoom;
+                                            let pan = state.pan_offset;
                                             let start = state.selection_start;
                                             let end = state.mouse_position;
+                                            // Convert screen coords to canvas coords
+                                            let cx1 = start.x / zoom + pan.0;
+                                            let cy1 = start.y / zoom + pan.1;
+                                            let cx2 = end.x / zoom + pan.0;
+                                            let cy2 = end.y / zoom + pan.1;
                                             Some(crate::canvas::Rect::new(
-                                                start.x, start.y,
-                                                end.x - start.x,
-                                                end.y - start.y,
+                                                cx1, cy1,
+                                                cx2 - cx1,
+                                                cy2 - cy1,
                                             ))
                                         } else {
                                             canvas_rect
@@ -528,13 +576,25 @@ impl WindowBackend for WindowApp {
                         };
                         renderer.render(&frame);
 
-                        // Render selection rect as a separate overlay pass
-                        if let Some(rect) = &frame.ui.selection_rect {
+                        // Render selection overlay (moved strokes + marching ants)
+                        // Use canvas selection if exists, otherwise fall back to in-progress drawing rect
+                        let selection_rect = canvas_ref.selection()
+                            .map(|s| s.rect)
+                            .or(frame.ui.selection_rect);
+
+                        if let Some(rect) = selection_rect {
+                            let selection_strokes: Vec<(crate::canvas::Stroke, f32)> = canvas_ref
+                                .selection()
+                                .map(|s| s.strokes.iter().map(|s| (s.clone(), 1.0)).collect())
+                                .unwrap_or_default();
                             renderer.render_selection_overlay(
-                                *rect,
+                                rect,
                                 frame.ui.selection_time,
                                 width as u32,
                                 height as u32,
+                                &selection_strokes,
+                                state.zoom,
+                                state.pan_offset,
                             );
                         }
                     } else {
@@ -640,7 +700,20 @@ fn setup_mouse_events(
         let canvas_hit = canvas_click.borrow();
         let layer_count = canvas_hit.layer_count();
         let active_layer = canvas_hit.active_layer();
+        let selection_rect_hit = canvas_hit.selection().map(|s| s.rect);
+        let zoom = render_state_click.borrow().zoom;
+        let pan = render_state_click.borrow().pan_offset;
         drop(canvas_hit);
+
+        // Convert canvas-space selection rect to screen coordinates for hit testing
+        let selection_rect_screen = selection_rect_hit.map(|r| {
+            crate::canvas::Rect::new(
+                (r.x + pan.0) * zoom,
+                (r.y + pan.1) * zoom,
+                r.w * zoom,
+                r.h * zoom,
+            )
+        });
 
         let window_width = if let Some(widget) = gesture.widget() {
             widget.allocated_width() as f32
@@ -654,7 +727,7 @@ fn setup_mouse_events(
             layer_count,
             active_layer,
             window_width,
-            None,
+            selection_rect_screen,
         );
 
         match hit {
@@ -960,7 +1033,14 @@ fn setup_mouse_events(
                 return;
             }
             ui::UiElement::SelectionRect => {
-                // Move/copy selection — handled in motion
+                // Start moving/copying selection
+                let mut state = render_state_click.borrow_mut();
+                let copy_mode = state.ctrl_pressed;
+                state.selection_moving = true;
+                state.selection_copy_mode = copy_mode;
+                state.selection_move_offset = (x as f32, y as f32);
+                drop(state);
+                return;
             }
             ui::UiElement::SelectionStart(_, _) => {
                 // Start drawing selection rect — handled in motion
@@ -970,10 +1050,23 @@ fn setup_mouse_events(
             }
         }
 
-        // If not on UI, start drawing
+        // If selection tool is active, handle selection logic
         let is_selection_active = render_state_click.borrow().selection_tool_active;
         if is_selection_active {
             let mut state = render_state_click.borrow_mut();
+            // If there's an existing selection and we're not clicking on it, clear it first
+            if state.selection_drawing || canvas_click.borrow().has_selection() {
+                if canvas_click.borrow().has_selection() {
+                    drop(state);
+                    canvas_click.borrow_mut().clear_selection();
+                    if let Some(widget) = gesture.widget()
+                        && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                    {
+                        gl_area.queue_render();
+                    }
+                    state = render_state_click.borrow_mut();
+                }
+            }
             state.selection_drawing = true;
             let canvas_point = Point {
                 x: x as f32,
@@ -1059,12 +1152,19 @@ fn setup_mouse_events(
         // If we were drawing a selection rect, commit it
         if state.selection_drawing {
             state.selection_drawing = false;
+            let zoom = state.zoom;
+            let pan = state.pan_offset;
             let start = state.selection_start;
             let end = Point { x: x as f32, y: y as f32 };
+            // Convert screen coords to canvas coords
+            let canvas_start_x = start.x / zoom + pan.0;
+            let canvas_start_y = start.y / zoom + pan.1;
+            let canvas_end_x = end.x / zoom + pan.0;
+            let canvas_end_y = end.y / zoom + pan.1;
             let rect = crate::canvas::Rect::new(
-                start.x, start.y,
-                end.x - start.x,
-                end.y - start.y,
+                canvas_start_x, canvas_start_y,
+                canvas_end_x - canvas_start_x,
+                canvas_end_y - canvas_start_y,
             );
             drop(state);
             canvas_release.borrow_mut().begin_selection(rect);
@@ -1073,6 +1173,15 @@ fn setup_mouse_events(
             {
                 gl_area.queue_render();
             }
+        } else if state.selection_moving {
+            state.selection_moving = false;
+            let copy_mode = state.selection_copy_mode;
+            drop(state);
+            if copy_mode {
+                canvas_release.borrow_mut().copy_selection();
+            }
+            // Keep selection active after move (don't commit)
+            // User can press Delete to commit or Esc to clear
         } else {
             drop(state);
         }
@@ -1093,6 +1202,7 @@ fn setup_mouse_events(
     let motion_controller = EventControllerMotion::new();
 
     let active_stroke_motion = active_stroke.clone();
+    let canvas_motion = canvas.clone();
     let render_state_motion = render_state.clone();
 
     motion_controller.connect_motion(move |controller, x, y| {
@@ -1126,6 +1236,24 @@ fn setup_mouse_events(
         // Selection rect drawing
         if state.selection_drawing {
             drop(state);
+            if let Some(widget) = controller.widget()
+                && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+            {
+                gl_area.queue_render();
+            }
+            return;
+        }
+
+        // Selection moving
+        if state.selection_moving {
+            let dx = point.x - state.selection_move_offset.0;
+            let dy = point.y - state.selection_move_offset.1;
+            state.selection_move_offset = (point.x, point.y);
+            let zoom = state.zoom;
+            let canvas_dx = dx / zoom;
+            let canvas_dy = dy / zoom;
+            drop(state);
+            canvas_motion.borrow_mut().move_selection(canvas_dx, canvas_dy);
             if let Some(widget) = controller.widget()
                 && let Some(gl_area) = widget.downcast_ref::<GLArea>()
             {

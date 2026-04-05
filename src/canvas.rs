@@ -221,10 +221,13 @@ pub struct Canvas {
 pub struct Selection {
     /// Selection rectangle in canvas coordinates
     pub rect: Rect,
-    /// Selected stroke segments (copies from original strokes)
+    /// Selected stroke segments (moved versions)
     pub strokes: Vec<Stroke>,
     /// Original layer index for each selected stroke
     pub original_layer_indices: Vec<usize>,
+    /// Original stroke data for each layer (stored for clear/commit)
+    /// Each entry: (layer_index, Vec<Stroke>) — the strokes that were removed from that layer
+    pub removed_strokes: Vec<(usize, Vec<Stroke>)>,
 }
 
 /// Represents a rectangle in canvas space
@@ -493,23 +496,37 @@ impl Canvas {
 
     // ─── Selection ──────────────────────────────────────────────
 
-    /// Create a selection from all stroke points within the given rectangle.
-    /// For each stroke, consecutive point sequences inside the rect become
-    /// separate selected strokes.
+    /// Create a selection from all strokes that have at least one point
+    /// within the given rectangle. Entire strokes are selected (not partial).
     pub fn begin_selection(&mut self, rect: Rect) {
         let mut strokes = Vec::new();
         let mut original_layer_indices = Vec::new();
+        let mut removed_strokes: Vec<(usize, Vec<Stroke>)> = Vec::new();
 
-        for (layer_idx, layer) in self.layers.iter().enumerate() {
+        for (layer_idx, layer) in self.layers.iter_mut().enumerate() {
             if !layer.visible {
                 continue;
             }
-            for stroke in &layer.strokes {
-                let selected_segments = extract_segments_in_rect(stroke, rect);
-                for segment in selected_segments {
-                    strokes.push(segment);
+            let mut layer_removed: Vec<Stroke> = Vec::new();
+            let mut kept_strokes: Vec<Stroke> = Vec::new();
+
+            for stroke in layer.strokes.drain(..) {
+                // Check if any point of this stroke is inside the rect
+                let has_point_in_rect = stroke.points.iter().any(|p| rect.contains(p.x, p.y));
+                if has_point_in_rect {
+                    // Select the entire stroke
+                    layer_removed.push(stroke.clone());
+                    strokes.push(stroke);
                     original_layer_indices.push(layer_idx);
+                } else {
+                    // Keep this stroke in the layer
+                    kept_strokes.push(stroke);
                 }
+            }
+
+            layer.strokes = kept_strokes;
+            if !layer_removed.is_empty() {
+                removed_strokes.push((layer_idx, layer_removed));
             }
         }
 
@@ -520,6 +537,7 @@ impl Canvas {
                 rect,
                 strokes,
                 original_layer_indices,
+                removed_strokes,
             });
         }
     }
@@ -552,33 +570,27 @@ impl Canvas {
         }
     }
 
-    /// Commit the selection: remove original strokes and add the (possibly moved)
-    /// selected strokes to their original layers. Clears the selection afterward.
+    /// Commit the selection: add the (possibly moved) selected strokes
+    /// to the active layer. Originals were already removed on begin_selection.
     pub fn commit_selection(&mut self) {
         if let Some(selection) = self.selection.take() {
-            // Track which (layer_index, stroke_index) pairs to remove
-            // We need to find the original strokes in each layer and remove them
-            for (i, &orig_layer) in selection.original_layer_indices.iter().enumerate() {
-                if orig_layer < self.layers.len() {
-                    let selected_stroke = &selection.strokes[i];
-                    // Find and remove the original stroke that matches this selection
-                    if let Some(pos) = self.layers[orig_layer].strokes.iter().position(|s| {
-                        s.points == selected_stroke.points
-                            && s.color == selected_stroke.color
-                            && (s.width - selected_stroke.width).abs() < f32::EPSILON
-                    }) {
-                        self.layers[orig_layer].strokes.remove(pos);
-                    }
-                    // Add the moved/copied stroke to the original layer
-                    self.layers[orig_layer].strokes.push(selected_stroke.clone());
-                }
+            for stroke in &selection.strokes {
+                self.layers[self.active_layer].strokes.push(stroke.clone());
             }
+            // removed_strokes are NOT restored — the moved strokes replace them
         }
     }
 
     /// Discard the selection without committing any changes.
+    /// Restores the original strokes to their layers.
     pub fn clear_selection(&mut self) {
-        self.selection = None;
+        if let Some(selection) = self.selection.take() {
+            for (layer_idx, removed) in selection.removed_strokes {
+                if layer_idx < self.layers.len() {
+                    self.layers[layer_idx].strokes.extend(removed);
+                }
+            }
+        }
     }
 
     /// Returns a reference to the active selection, if any.
@@ -590,44 +602,6 @@ impl Canvas {
     pub fn has_selection(&self) -> bool {
         self.selection.is_some()
     }
-}
-
-/// Extract consecutive point sequences from a stroke that fall within the rect.
-/// Each sequence of 2+ consecutive points becomes a new Stroke.
-fn extract_segments_in_rect(stroke: &Stroke, rect: Rect) -> Vec<Stroke> {
-    let mut segments = Vec::new();
-    let mut current_segment: Vec<Point> = Vec::new();
-
-    for point in &stroke.points {
-        if rect.contains(point.x, point.y) {
-            current_segment.push(*point);
-        } else {
-            if current_segment.len() >= 2 {
-                segments.push(Stroke {
-                    points: std::mem::take(&mut current_segment),
-                    color: stroke.color,
-                    width: stroke.width,
-                    opacity: stroke.opacity,
-                    brush_type: stroke.brush_type,
-                });
-            } else {
-                current_segment.clear();
-            }
-        }
-    }
-
-    // Handle trailing segment
-    if current_segment.len() >= 2 {
-        segments.push(Stroke {
-            points: current_segment,
-            color: stroke.color,
-            width: stroke.width,
-            opacity: stroke.opacity,
-            brush_type: stroke.brush_type,
-        });
-    }
-
-    segments
 }
 
 /// Default brush sizes available in the application
@@ -1587,5 +1561,276 @@ mod tests {
         assert_eq!(original.r, roundtrip.r);
         assert_eq!(original.g, roundtrip.g);
         assert_eq!(original.b, roundtrip.b);
+    }
+
+    // ─── Selection Tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_selection_captures_strokes_in_rect() {
+        let mut canvas = Canvas::new();
+        // Add a stroke fully inside the selection rect
+        let stroke1 = Stroke {
+            points: vec![Point { x: 50.0, y: 50.0 }, Point { x: 60.0, y: 60.0 }],
+            color: RED,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        // Add a stroke outside the selection rect
+        let stroke2 = Stroke {
+            points: vec![Point { x: 200.0, y: 200.0 }, Point { x: 210.0, y: 210.0 }],
+            color: BLUE,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        canvas.add_stroke_to_layer(stroke1, 0);
+        canvas.add_stroke_to_layer(stroke2, 0);
+
+        let rect = Rect::new(0.0, 0.0, 100.0, 100.0);
+        canvas.begin_selection(rect);
+
+        assert!(canvas.has_selection());
+        let selection = canvas.selection().unwrap();
+        assert_eq!(selection.strokes.len(), 1);
+        assert_eq!(selection.strokes[0].color, RED);
+        // stroke2 should remain in the layer
+        assert_eq!(canvas.layers()[0].strokes.len(), 1);
+        assert_eq!(canvas.layers()[0].strokes[0].color, BLUE);
+    }
+
+    #[test]
+    fn test_selection_captures_partial_overlap() {
+        let mut canvas = Canvas::new();
+        // Stroke with one point inside rect, one outside — entire stroke should be selected
+        let stroke = Stroke {
+            points: vec![Point { x: 50.0, y: 50.0 }, Point { x: 150.0, y: 150.0 }],
+            color: GREEN,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        canvas.add_stroke_to_layer(stroke, 0);
+
+        let rect = Rect::new(0.0, 0.0, 100.0, 100.0);
+        canvas.begin_selection(rect);
+
+        assert!(canvas.has_selection());
+        let selection = canvas.selection().unwrap();
+        assert_eq!(selection.strokes.len(), 1);
+        assert_eq!(selection.strokes[0].color, GREEN);
+        // Layer should be empty (entire stroke was selected)
+        assert_eq!(canvas.layers()[0].strokes.len(), 0);
+    }
+
+    #[test]
+    fn test_selection_move_offsets_points() {
+        let mut canvas = Canvas::new();
+        let stroke = Stroke {
+            points: vec![Point { x: 50.0, y: 50.0 }, Point { x: 60.0, y: 60.0 }],
+            color: RED,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        canvas.add_stroke_to_layer(stroke, 0);
+
+        let rect = Rect::new(0.0, 0.0, 100.0, 100.0);
+        canvas.begin_selection(rect);
+        canvas.move_selection(10.0, 20.0);
+
+        let selection = canvas.selection().unwrap();
+        assert_eq!(selection.strokes[0].points[0].x, 60.0);
+        assert_eq!(selection.strokes[0].points[0].y, 70.0);
+        assert_eq!(selection.strokes[0].points[1].x, 70.0);
+        assert_eq!(selection.strokes[0].points[1].y, 80.0);
+        // Rect should also be offset
+        assert_eq!(selection.rect.x, 10.0);
+        assert_eq!(selection.rect.y, 20.0);
+    }
+
+    #[test]
+    fn test_selection_copy_duplicates_strokes() {
+        let mut canvas = Canvas::new();
+        let stroke = Stroke {
+            points: vec![Point { x: 50.0, y: 50.0 }, Point { x: 60.0, y: 60.0 }],
+            color: RED,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        canvas.add_stroke_to_layer(stroke, 0);
+
+        let rect = Rect::new(0.0, 0.0, 100.0, 100.0);
+        canvas.begin_selection(rect);
+        canvas.copy_selection();
+
+        // Original stroke was removed from layer, copy added to active layer
+        assert_eq!(canvas.layers()[0].strokes.len(), 1);
+        assert_eq!(canvas.layers()[0].strokes[0].color, RED);
+        // Selection still active
+        assert!(canvas.has_selection());
+    }
+
+    #[test]
+    fn test_selection_commit_adds_moved_strokes() {
+        let mut canvas = Canvas::new();
+        let stroke = Stroke {
+            points: vec![Point { x: 50.0, y: 50.0 }, Point { x: 60.0, y: 60.0 }],
+            color: RED,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        canvas.add_stroke_to_layer(stroke, 0);
+
+        let rect = Rect::new(0.0, 0.0, 100.0, 100.0);
+        canvas.begin_selection(rect);
+        canvas.move_selection(100.0, 100.0);
+        canvas.commit_selection();
+
+        // Selection cleared after commit
+        assert!(!canvas.has_selection());
+        // Moved stroke added to active layer
+        assert_eq!(canvas.layers()[0].strokes.len(), 1);
+        assert_eq!(canvas.layers()[0].strokes[0].points[0].x, 150.0);
+        assert_eq!(canvas.layers()[0].strokes[0].points[0].y, 150.0);
+    }
+
+    #[test]
+    fn test_selection_clear_restores_originals() {
+        let mut canvas = Canvas::new();
+        let stroke = Stroke {
+            points: vec![Point { x: 50.0, y: 50.0 }, Point { x: 60.0, y: 60.0 }],
+            color: RED,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        canvas.add_stroke_to_layer(stroke, 0);
+
+        let rect = Rect::new(0.0, 0.0, 100.0, 100.0);
+        canvas.begin_selection(rect);
+        canvas.move_selection(10.0, 10.0);
+        canvas.clear_selection();
+
+        // Selection cleared
+        assert!(!canvas.has_selection());
+        // Original stroke restored
+        assert_eq!(canvas.layers()[0].strokes.len(), 1);
+        assert_eq!(canvas.layers()[0].strokes[0].points[0].x, 50.0);
+        assert_eq!(canvas.layers()[0].strokes[0].points[0].y, 50.0);
+    }
+
+    #[test]
+    fn test_selection_respects_layer_visibility() {
+        let mut canvas = Canvas::new();
+        let stroke1 = Stroke {
+            points: vec![Point { x: 50.0, y: 50.0 }, Point { x: 60.0, y: 60.0 }],
+            color: RED,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        let stroke2 = Stroke {
+            points: vec![Point { x: 50.0, y: 50.0 }, Point { x: 60.0, y: 60.0 }],
+            color: BLUE,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        canvas.add_stroke_to_layer(stroke1, 0);
+        canvas.add_stroke_to_layer(stroke2, 0);
+
+        // Make layer invisible
+        canvas.toggle_layer_visibility(0).unwrap();
+
+        let rect = Rect::new(0.0, 0.0, 100.0, 100.0);
+        canvas.begin_selection(rect);
+
+        // No selection because layer is invisible
+        assert!(!canvas.has_selection());
+        // Both strokes remain in layer
+        assert_eq!(canvas.layers()[0].strokes.len(), 2);
+    }
+
+    #[test]
+    fn test_selection_empty_rect_creates_no_selection() {
+        let mut canvas = Canvas::new();
+        let stroke = Stroke {
+            points: vec![Point { x: 200.0, y: 200.0 }, Point { x: 210.0, y: 210.0 }],
+            color: RED,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        canvas.add_stroke_to_layer(stroke, 0);
+
+        let rect = Rect::new(0.0, 0.0, 10.0, 10.0);
+        canvas.begin_selection(rect);
+
+        assert!(!canvas.has_selection());
+        assert_eq!(canvas.layers()[0].strokes.len(), 1);
+    }
+
+    #[test]
+    fn test_selection_multiple_strokes_from_same_layer() {
+        let mut canvas = Canvas::new();
+        let stroke1 = Stroke {
+            points: vec![Point { x: 10.0, y: 10.0 }, Point { x: 20.0, y: 20.0 }],
+            color: RED,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        let stroke2 = Stroke {
+            points: vec![Point { x: 30.0, y: 30.0 }, Point { x: 40.0, y: 40.0 }],
+            color: BLUE,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        let stroke3 = Stroke {
+            points: vec![Point { x: 200.0, y: 200.0 }, Point { x: 210.0, y: 210.0 }],
+            color: GREEN,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        canvas.add_stroke_to_layer(stroke1, 0);
+        canvas.add_stroke_to_layer(stroke2, 0);
+        canvas.add_stroke_to_layer(stroke3, 0);
+
+        let rect = Rect::new(0.0, 0.0, 100.0, 100.0);
+        canvas.begin_selection(rect);
+
+        assert!(canvas.has_selection());
+        let selection = canvas.selection().unwrap();
+        assert_eq!(selection.strokes.len(), 2);
+        // stroke3 should remain in layer
+        assert_eq!(canvas.layers()[0].strokes.len(), 1);
+        assert_eq!(canvas.layers()[0].strokes[0].color, GREEN);
+    }
+
+    #[test]
+    fn test_selection_commit_after_copy() {
+        let mut canvas = Canvas::new();
+        let stroke = Stroke {
+            points: vec![Point { x: 50.0, y: 50.0 }, Point { x: 60.0, y: 60.0 }],
+            color: RED,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        canvas.add_stroke_to_layer(stroke, 0);
+
+        let rect = Rect::new(0.0, 0.0, 100.0, 100.0);
+        canvas.begin_selection(rect);
+        canvas.copy_selection();
+        canvas.commit_selection();
+
+        // After copy + commit: original was restored, then moved stroke added
+        assert!(!canvas.has_selection());
+        assert_eq!(canvas.layers()[0].strokes.len(), 2);
     }
 }
