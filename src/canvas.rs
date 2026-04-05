@@ -251,8 +251,16 @@ impl Rect {
 
     /// Returns (x, y, w, h) with w and h always positive
     pub fn normalized(&self) -> (f32, f32, f32, f32) {
-        let x = if self.w < 0.0 { self.x + self.w } else { self.x };
-        let y = if self.h < 0.0 { self.y + self.h } else { self.y };
+        let x = if self.w < 0.0 {
+            self.x + self.w
+        } else {
+            self.x
+        };
+        let y = if self.h < 0.0 {
+            self.y + self.h
+        } else {
+            self.y
+        };
         let w = self.w.abs();
         let h = self.h.abs();
         (x, y, w, h)

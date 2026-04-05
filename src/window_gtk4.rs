@@ -1155,14 +1155,18 @@ fn setup_mouse_events(
             let zoom = state.zoom;
             let pan = state.pan_offset;
             let start = state.selection_start;
-            let end = Point { x: x as f32, y: y as f32 };
+            let end = Point {
+                x: x as f32,
+                y: y as f32,
+            };
             // Convert screen coords to canvas coords
             let canvas_start_x = start.x / zoom + pan.0;
             let canvas_start_y = start.y / zoom + pan.1;
             let canvas_end_x = end.x / zoom + pan.0;
             let canvas_end_y = end.y / zoom + pan.1;
             let rect = crate::canvas::Rect::new(
-                canvas_start_x, canvas_start_y,
+                canvas_start_x,
+                canvas_start_y,
                 canvas_end_x - canvas_start_x,
                 canvas_end_y - canvas_start_y,
             );
@@ -1253,7 +1257,9 @@ fn setup_mouse_events(
             let canvas_dx = dx / zoom;
             let canvas_dy = dy / zoom;
             drop(state);
-            canvas_motion.borrow_mut().move_selection(canvas_dx, canvas_dy);
+            canvas_motion
+                .borrow_mut()
+                .move_selection(canvas_dx, canvas_dy);
             if let Some(widget) = controller.widget()
                 && let Some(gl_area) = widget.downcast_ref::<GLArea>()
             {

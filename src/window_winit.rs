@@ -804,7 +804,7 @@ impl ApplicationHandler for WindowApp {
                 self.request_redraw();
             }
             WindowEvent::RedrawRequested => {
-                let has_selection = self.canvas.borrow().selection().is_some() 
+                let has_selection = self.canvas.borrow().selection().is_some()
                     || self.render_state.selection_drawing;
 
                 // Request another redraw for animation if selection is active
@@ -826,7 +826,8 @@ impl ApplicationHandler for WindowApp {
                         let end_x = mx / zoom + pan.0;
                         let end_y = my / zoom + pan.1;
                         Some(crate::canvas::Rect::new(
-                            start.x, start.y,
+                            start.x,
+                            start.y,
                             end_x - start.x,
                             end_y - start.y,
                         ))
@@ -984,7 +985,8 @@ impl ApplicationHandler for WindowApp {
                                     self.render_state.mouse_position.y,
                                 );
                                 let rect = crate::canvas::Rect::new(
-                                    start.x, start.y,
+                                    start.x,
+                                    start.y,
                                     end.x - start.x,
                                     end.y - start.y,
                                 );

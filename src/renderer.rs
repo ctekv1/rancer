@@ -878,7 +878,8 @@ impl Renderer {
                 // Selection rect uses Triangles mode (dashes are independent quads)
                 let mut selection_rect_vertices: Vec<[f32; 7]> = Vec::new();
                 if let Some(rect) = frame.ui.selection_rect {
-                    let flat = geometry::generate_selection_rect_vertices(rect, frame.ui.selection_time);
+                    let flat =
+                        geometry::generate_selection_rect_vertices(rect, frame.ui.selection_time);
                     selection_rect_vertices.extend(flat_to_vertices_7(&flat));
                 }
 
