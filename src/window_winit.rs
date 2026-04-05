@@ -158,8 +158,6 @@ impl WindowApp {
     fn request_redraw(&self) {
         if let Some(window) = &self.window {
             window.request_redraw();
-            window.request_redraw();
-            window.request_redraw();
             force_window_repaint(window);
         }
     }
@@ -275,7 +273,7 @@ impl WindowApp {
                 self.render_state.brush_size = size;
                 self.preferences.brush.default_size = size;
                 let _ = crate::preferences::save(&self.preferences);
-                println!("Selected brush size: {}", size);
+                logger::info(&format!("Selected brush size: {size}"));
             }
             ui::UiElement::Eraser => {
                 self.render_state.is_eraser = !self.render_state.is_eraser;
@@ -482,7 +480,6 @@ impl WindowApp {
                             if canvas.can_undo() {
                                 canvas.undo();
                                 logger::info("Undo: removed last stroke");
-                                println!("Undo: removed last stroke");
                                 self.request_redraw();
                             }
                         }
@@ -491,7 +488,6 @@ impl WindowApp {
                             if canvas.can_redo() {
                                 canvas.redo();
                                 logger::info("Redo: restored last undone stroke");
-                                println!("Redo: restored last undone stroke");
                                 self.request_redraw();
                             }
                         }
@@ -596,10 +592,10 @@ impl WindowApp {
             if let Some(active_stroke) = &mut *self.active_stroke.borrow_mut() {
                 let canvas_point = self.screen_to_canvas(screen_point.x, screen_point.y);
                 active_stroke.add_point(canvas_point);
-                println!(
+                logger::debug(&format!(
                     "Active stroke now has {} points",
                     active_stroke.points().len()
-                );
+                ));
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }
@@ -689,7 +685,13 @@ impl ApplicationHandler for WindowApp {
                 ));
             }
 
-            let rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    logger::error(&format!("Failed to create tokio runtime: {e}"));
+                    return;
+                }
+            };
             match rt.block_on(Renderer::new(
                 config,
                 window.clone(),
@@ -809,10 +811,8 @@ impl ApplicationHandler for WindowApp {
 
                 // Request another redraw for animation if selection is active
                 // This creates a continuous loop when combined with ControlFlow::Poll
-                if has_selection {
-                    if let Some(window) = &self.window {
-                        window.request_redraw();
-                    }
+                if has_selection && let Some(window) = &self.window {
+                    window.request_redraw();
                 }
 
                 let selection_rect = {
@@ -866,8 +866,12 @@ impl ApplicationHandler for WindowApp {
                     match renderer.render(&frame) {
                         Ok(_) => {}
                         Err(wgpu::SurfaceError::Lost) => {
-                            let size = self.window.as_ref().unwrap().inner_size();
-                            renderer.resize((size.width, size.height));
+                            if let Some(window) = self.window.as_ref() {
+                                let size = window.inner_size();
+                                renderer.resize((size.width, size.height));
+                            } else {
+                                logger::warn("Window lost during SurfaceError::Lost recovery");
+                            }
                         }
                         Err(wgpu::SurfaceError::OutOfMemory) => {
                             logger::error("Out of memory!");
@@ -887,11 +891,11 @@ impl ApplicationHandler for WindowApp {
                 if button == winit::event::MouseButton::Left {
                     match button_state {
                         winit::event::ElementState::Pressed => {
-                            println!(
+                            logger::info(&format!(
                                 "Mouse button pressed at ({}, {})",
                                 self.render_state.mouse_position.x,
                                 self.render_state.mouse_position.y
-                            );
+                            ));
 
                             let x = self.render_state.mouse_position.x;
                             let y = self.render_state.mouse_position.y;
@@ -945,7 +949,7 @@ impl ApplicationHandler for WindowApp {
                                 self.render_state.opacity,
                                 self.render_state.brush_type,
                             );
-                            println!(
+                            logger::info(&format!(
                                 "Created {}stroke with color RGB({}, {}, {}) and width {}",
                                 if self.render_state.is_eraser {
                                     "eraser "
@@ -956,7 +960,7 @@ impl ApplicationHandler for WindowApp {
                                 color.g,
                                 color.b,
                                 self.render_state.brush_size
-                            );
+                            ));
 
                             *self.active_stroke.borrow_mut() = Some(active_stroke);
 
@@ -966,10 +970,10 @@ impl ApplicationHandler for WindowApp {
                                     self.render_state.mouse_position.y,
                                 );
                                 active_stroke.add_point(canvas_point);
-                                println!(
+                                logger::debug(&format!(
                                     "Active stroke now has {} points",
                                     active_stroke.points().len()
-                                );
+                                ));
                             }
                         }
                         winit::event::ElementState::Released => {
@@ -997,9 +1001,9 @@ impl ApplicationHandler for WindowApp {
                             if let Some(active_stroke) = self.active_stroke.borrow_mut().take() {
                                 let mut canvas = self.canvas.borrow_mut();
                                 if let Err(e) = canvas.commit_stroke(active_stroke) {
-                                    eprintln!("Failed to commit stroke: {}", e);
+                                    logger::error(&format!("Failed to commit stroke: {e}"));
                                 } else {
-                                    println!("Stroke committed successfully");
+                                    logger::info("Stroke committed successfully");
                                 }
                             }
                         }
@@ -1012,7 +1016,6 @@ impl ApplicationHandler for WindowApp {
                         winit::event::ElementState::Pressed => {
                             self.render_state.is_eraser = true;
                             logger::info("Eraser mode: ON (right-click held)");
-                            println!("Eraser mode: ON");
                             if let Some(window) = &self.window {
                                 window.request_redraw();
                             }
@@ -1020,7 +1023,6 @@ impl ApplicationHandler for WindowApp {
                         winit::event::ElementState::Released => {
                             self.render_state.is_eraser = false;
                             logger::info("Eraser mode: OFF (right-click released)");
-                            println!("Eraser mode: OFF");
                             if let Some(window) = &self.window {
                                 window.request_redraw();
                             }
@@ -1083,12 +1085,20 @@ impl WindowBackend for WindowApp {
 pub fn run_window_app(preferences: Preferences) {
     logger::info("Starting winit event loop...");
 
-    let event_loop = EventLoop::new().unwrap();
+    let event_loop = match EventLoop::new() {
+        Ok(el) => el,
+        Err(e) => {
+            logger::error(&format!("Failed to create event loop: {e}"));
+            return;
+        }
+    };
     let mut app = WindowApp::new(preferences);
 
     event_loop.set_control_flow(ControlFlow::Poll);
 
-    event_loop.run_app(&mut app).unwrap();
+    if let Err(e) = event_loop.run_app(&mut app) {
+        logger::error(&format!("Event loop exited with error: {e}"));
+    }
 
     logger::info("Rancer application closed successfully");
 }

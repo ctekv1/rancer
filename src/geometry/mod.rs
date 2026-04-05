@@ -152,24 +152,12 @@ pub fn generate_rotated_rect(
 
 /// Helper: Convert HSV (0-360, 0-100, 0-100) to RGB (0.0-1.0)
 pub fn hsv_to_rgb_f32(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
-    let s = s / 100.0;
-    let v = v / 100.0;
-
-    let h_norm = h / 60.0;
-    let i = h_norm.floor() as i32 % 6;
-    let f = h_norm - h_norm.floor();
-    let p = v * (1.0 - s);
-    let q = v * (1.0 - s * f);
-    let t = v * (1.0 - s * (1.0 - f));
-
-    match i {
-        0 => (v, t, p),
-        1 => (q, v, p),
-        2 => (p, v, t),
-        3 => (p, q, v),
-        4 => (t, p, v),
-        _ => (v, p, q),
-    }
+    let color = crate::canvas::hsv_to_rgb(h, s, v);
+    (
+        color.r as f32 / 255.0,
+        color.g as f32 / 255.0,
+        color.b as f32 / 255.0,
+    )
 }
 
 #[cfg(test)]

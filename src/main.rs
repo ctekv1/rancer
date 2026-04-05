@@ -13,8 +13,10 @@ use rancer::window_winit;
 use rancer::window_gtk4;
 
 fn main() {
-    // Initialize logger
-    logger::init().expect("Failed to initialize logger");
+    // Initialize logger (fall back to console-only if file logging fails)
+    if let Err(e) = logger::init() {
+        eprintln!("Warning: File logging failed ({e}), using console-only logging");
+    }
 
     // Load preferences
     let prefs = preferences::load();

@@ -61,11 +61,11 @@ pub enum UiElement {
     Canvas,
 }
 
-/// Available brush sizes (must match canvas::BRUSH_SIZES and geometry.rs)
-const BRUSH_SIZES: [f32; 5] = [3.0, 5.0, 10.0, 25.0, 50.0];
+/// Available brush sizes (re-exported from canvas)
+pub use crate::canvas::BRUSH_SIZES;
 
-/// Opacity preset values (must match canvas::OPACITY_PRESETS and geometry.rs)
-const OPACITY_PRESETS: [f32; 4] = [0.25, 0.5, 0.75, 1.0];
+/// Opacity preset values (re-exported from canvas)
+pub use crate::canvas::OPACITY_PRESETS;
 
 /// Brush types (must match geometry/ui_elements.rs order)
 const BRUSH_TYPES: [BrushType; 4] = [
@@ -214,7 +214,7 @@ pub fn hit_test(
     }
 
     // Selection tool button (y=265-295)
-    if (265.0..=295.0).contains(&y) && x >= 10.0 && x <= 40.0 {
+    if (265.0..=295.0).contains(&y) && (10.0..=40.0).contains(&x) {
         return UiElement::SelectionTool;
     }
 

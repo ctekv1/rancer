@@ -286,7 +286,7 @@ pub fn generate_custom_palette(custom_colors: &[[u8; 3]], selected_index: usize)
 /// Generate vertices for the brush size selector UI
 pub fn generate_brush_size_vertices(selected_size: f32) -> Vec<f32> {
     let mut vertices = Vec::new();
-    let brush_sizes: [f32; 5] = [3.0, 5.0, 10.0, 25.0, 50.0];
+    let brush_sizes = crate::canvas::BRUSH_SIZES;
 
     let selector_x = 10.0;
     let selector_y = 120.0;
@@ -520,7 +520,16 @@ pub fn generate_brush_type_vertices(selected_type: crate::canvas::BrushType) -> 
                 let center_y = selector_y + button_size / 2.0;
                 let dot = 3.0;
                 let radius = 7.0;
-                let angles: [f32; 8] = [0.0, 0.785, 1.571, 2.356, 3.142, 3.927, 4.712, 5.498];
+                let angles: [f32; 8] = [
+                    0.0,
+                    std::f32::consts::FRAC_PI_4,
+                    std::f32::consts::FRAC_PI_2,
+                    3.0 * std::f32::consts::FRAC_PI_4,
+                    std::f32::consts::PI,
+                    5.0 * std::f32::consts::FRAC_PI_4,
+                    3.0 * std::f32::consts::FRAC_PI_2,
+                    7.0 * std::f32::consts::FRAC_PI_4,
+                ];
                 for angle in angles {
                     let dx = angle.cos() * radius;
                     let dy = angle.sin() * radius;
@@ -1162,7 +1171,7 @@ pub fn generate_redo_button_vertices(can_redo: bool) -> Vec<f32> {
 /// Generate vertices for opacity preset buttons
 pub fn generate_opacity_preset_vertices(selected_opacity: f32) -> Vec<f32> {
     let mut vertices = Vec::new();
-    let opacity_presets: [f32; 4] = [0.25, 0.5, 0.75, 1.0];
+    let opacity_presets = crate::canvas::OPACITY_PRESETS;
 
     let selector_x = 10.0;
     let selector_y = 190.0;

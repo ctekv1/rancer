@@ -106,12 +106,16 @@ impl GlRenderer {
             let stride = (6 * std::mem::size_of::<f32>()) as i32;
 
             // position attribute (location 0): vec2
-            let pos_loc = gl.get_attrib_location(program, "position").unwrap();
+            let pos_loc = gl
+                .get_attrib_location(program, "position")
+                .ok_or_else(|| "Failed to get 'position' attribute location".to_string())?;
             gl.enable_vertex_attrib_array(pos_loc);
             gl.vertex_attrib_pointer_f32(pos_loc, 2, glow::FLOAT, false, stride, 0);
 
             // color attribute (location 1): vec4
-            let color_loc = gl.get_attrib_location(program, "color").unwrap();
+            let color_loc = gl
+                .get_attrib_location(program, "color")
+                .ok_or_else(|| "Failed to get 'color' attribute location".to_string())?;
             gl.enable_vertex_attrib_array(color_loc);
             gl.vertex_attrib_pointer_f32(color_loc, 4, glow::FLOAT, false, stride, 2 * 4);
 
@@ -225,19 +229,19 @@ impl GlRenderer {
                         }
                     }
                 }
-                if layer_idx == active_layer_idx {
-                    if let Some(active) = frame.active_stroke {
-                        let mesh = geometry::generate_active_stroke_vertices_with_opacity(
-                            active,
-                            layer.opacity,
-                        );
-                        if !mesh.is_empty() {
-                            let mode = match mesh.mode {
-                                DrawMode::TriangleStrip => glow::TRIANGLE_STRIP,
-                                DrawMode::Triangles => glow::TRIANGLES,
-                            };
-                            self.upload_and_draw(&mesh.vertices, mode);
-                        }
+                if layer_idx == active_layer_idx
+                    && let Some(active) = frame.active_stroke
+                {
+                    let mesh = geometry::generate_active_stroke_vertices_with_opacity(
+                        active,
+                        layer.opacity,
+                    );
+                    if !mesh.is_empty() {
+                        let mode = match mesh.mode {
+                            DrawMode::TriangleStrip => glow::TRIANGLE_STRIP,
+                            DrawMode::Triangles => glow::TRIANGLES,
+                        };
+                        self.upload_and_draw(&mesh.vertices, mode);
                     }
                 }
             }
@@ -303,6 +307,7 @@ impl GlRenderer {
     /// Render selection rectangle as a separate overlay pass.
     /// This is called after the main render to ensure the marching ants
     /// and moved selection strokes are always drawn on top.
+    #[allow(clippy::too_many_arguments)]
     pub fn render_selection_overlay(
         &self,
         rect: crate::canvas::Rect,

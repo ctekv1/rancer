@@ -209,7 +209,7 @@ impl Renderer {
                 module: shader,
                 entry_point: Some("vs_main"),
                 buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<[f32; 7]>() as wgpu::BufferAddress,
+                    array_stride: std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[
                         wgpu::VertexAttribute {
@@ -268,7 +268,7 @@ impl Renderer {
                     module: shader,
                     entry_point: Some("vs_main"),
                     buffers: &[wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<[f32; 7]>() as wgpu::BufferAddress,
+                        array_stride: std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
                         step_mode: wgpu::VertexStepMode::Vertex,
                         attributes: &[
                             wgpu::VertexAttribute {
@@ -280,11 +280,6 @@ impl Renderer {
                                 offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
                                 shader_location: 1,
                                 format: wgpu::VertexFormat::Float32x4,
-                            },
-                            wgpu::VertexAttribute {
-                                offset: std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
-                                shader_location: 2,
-                                format: wgpu::VertexFormat::Float32,
                             },
                         ],
                     }],
@@ -326,7 +321,7 @@ impl Renderer {
                 module: shader,
                 entry_point: Some("vs_main"),
                 buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<[f32; 7]>() as wgpu::BufferAddress,
+                    array_stride: std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[
                         wgpu::VertexAttribute {
@@ -338,11 +333,6 @@ impl Renderer {
                             offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
                             shader_location: 1,
                             format: wgpu::VertexFormat::Float32x4,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
-                            shader_location: 2,
-                            format: wgpu::VertexFormat::Float32,
                         },
                     ],
                 }],
@@ -406,8 +396,17 @@ impl Renderer {
             ..Default::default()
         });
 
+        // SAFETY: We transmute the surface to 'static lifetime because:
+        // 1. The Renderer stores an Arc<Window> (line 102) that keeps the window alive
+        // 2. The surface is dropped before the Arc<Window> in the Renderer's Drop impl
+        // 3. This is the documented workaround for wgpu's surface lifetime requirements
+        // See: https://github.com/gfx-rs/wgpu/issues/3123
         #[allow(clippy::missing_transmute_annotations)]
-        let surface = unsafe { std::mem::transmute(instance.create_surface(window)?) };
+        let surface = unsafe {
+            std::mem::transmute::<wgpu::Surface<'_>, wgpu::Surface<'static>>(
+                instance.create_surface(window)?,
+            )
+        };
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -739,9 +738,9 @@ impl Renderer {
 
             // Combine all stroke vertices into buffers, split by draw mode.
             // Active stroke is inserted at the active layer position.
-            let mut strip_vertices: Vec<[f32; 7]> = Vec::new();
+            let mut strip_vertices: Vec<[f32; 6]> = Vec::new();
             let mut strip_ranges: Vec<std::ops::Range<u32>> = Vec::new();
-            let mut tri_vertices: Vec<[f32; 7]> = Vec::new();
+            let mut tri_vertices: Vec<[f32; 6]> = Vec::new();
             let mut tri_ranges: Vec<std::ops::Range<u32>> = Vec::new();
 
             let active_layer_idx = frame.canvas.active_layer();
@@ -764,19 +763,18 @@ impl Renderer {
                     }
                 }
                 // Insert active stroke at the active layer position
-                if layer_idx == active_layer_idx {
-                    if let Some(active_stroke) = frame.active_stroke
-                        && active_stroke.points().len() >= 2
-                    {
-                        let mesh = active_stroke_to_mesh_7(active_stroke, layer.opacity);
-                        collect_mesh(
-                            &mesh,
-                            &mut strip_vertices,
-                            &mut strip_ranges,
-                            &mut tri_vertices,
-                            &mut tri_ranges,
-                        );
-                    }
+                if layer_idx == active_layer_idx
+                    && let Some(active_stroke) = frame.active_stroke
+                    && active_stroke.points().len() >= 2
+                {
+                    let mesh = active_stroke_to_mesh_7(active_stroke, layer.opacity);
+                    collect_mesh(
+                        &mesh,
+                        &mut strip_vertices,
+                        &mut strip_ranges,
+                        &mut tri_vertices,
+                        &mut tri_ranges,
+                    );
                 }
             }
 
@@ -796,20 +794,19 @@ impl Renderer {
             }
 
             // Draw triangle list strokes (spray, etc.)
-            if !tri_vertices.is_empty() {
-                if let Some(spray_pipeline) = &self.spray_render_pipeline {
-                    let vertex_buffer =
-                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("Combined Stroke Vertex Buffer (TriangleList)"),
-                            contents: bytemuck::cast_slice(&tri_vertices),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
-                    render_pass.set_pipeline(spray_pipeline);
-                    render_pass.set_bind_group(0, &bind_group, &[]);
-                    render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                    for range in &tri_ranges {
-                        render_pass.draw(range.clone(), 0..1);
-                    }
+            if !tri_vertices.is_empty()
+                && let Some(spray_pipeline) = &self.spray_render_pipeline
+            {
+                let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Combined Stroke Vertex Buffer (TriangleList)"),
+                    contents: bytemuck::cast_slice(&tri_vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                render_pass.set_pipeline(spray_pipeline);
+                render_pass.set_bind_group(0, &bind_group, &[]);
+                render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                for range in &tri_ranges {
+                    render_pass.draw(range.clone(), 0..1);
                 }
             }
 
@@ -830,57 +827,56 @@ impl Renderer {
             });
 
             if let Some(ui_pipeline) = &self.ui_pipeline {
-                let mut all_ui_vertices: Vec<[f32; 7]> = Vec::new();
+                let mut all_ui_vertices: Vec<[f32; 6]> = Vec::new();
 
-                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_hsv_sliders(
+                all_ui_vertices.extend(flat_to_vertices(&geometry::generate_hsv_sliders(
                     frame.ui.hue,
                     frame.ui.saturation,
                     frame.ui.value,
                 )));
-                all_ui_vertices.extend(flat_to_vertices_7(&geometry::generate_custom_palette(
+                all_ui_vertices.extend(flat_to_vertices(&geometry::generate_custom_palette(
                     frame.ui.custom_colors,
                     frame.ui.selected_custom_index as usize,
                 )));
-                all_ui_vertices.extend(flat_to_vertices_7(
-                    &geometry::generate_brush_size_vertices(frame.ui.brush_size),
-                ));
-                all_ui_vertices.extend(flat_to_vertices_7(
+                all_ui_vertices.extend(flat_to_vertices(&geometry::generate_brush_size_vertices(
+                    frame.ui.brush_size,
+                )));
+                all_ui_vertices.extend(flat_to_vertices(
                     &geometry::generate_eraser_button_vertices(frame.ui.is_eraser),
                 ));
-                all_ui_vertices.extend(flat_to_vertices_7(
-                    &geometry::generate_clear_button_vertices(),
-                ));
-                all_ui_vertices.extend(flat_to_vertices_7(
-                    &geometry::generate_undo_button_vertices(frame.canvas.can_undo()),
-                ));
-                all_ui_vertices.extend(flat_to_vertices_7(
-                    &geometry::generate_redo_button_vertices(frame.canvas.can_redo()),
-                ));
-                all_ui_vertices.extend(flat_to_vertices_7(
+                all_ui_vertices
+                    .extend(flat_to_vertices(&geometry::generate_clear_button_vertices()));
+                all_ui_vertices.extend(flat_to_vertices(&geometry::generate_undo_button_vertices(
+                    frame.canvas.can_undo(),
+                )));
+                all_ui_vertices.extend(flat_to_vertices(&geometry::generate_redo_button_vertices(
+                    frame.canvas.can_redo(),
+                )));
+                all_ui_vertices.extend(flat_to_vertices(
                     &geometry::generate_export_button_vertices(),
                 ));
-                all_ui_vertices.extend(flat_to_vertices_7(
+                all_ui_vertices.extend(flat_to_vertices(
                     &geometry::generate_zoom_in_button_vertices(),
                 ));
-                all_ui_vertices.extend(flat_to_vertices_7(
+                all_ui_vertices.extend(flat_to_vertices(
                     &geometry::generate_zoom_out_button_vertices(),
                 ));
-                all_ui_vertices.extend(flat_to_vertices_7(
+                all_ui_vertices.extend(flat_to_vertices(
                     &geometry::generate_opacity_preset_vertices(frame.ui.opacity),
                 ));
-                all_ui_vertices.extend(flat_to_vertices_7(
-                    &geometry::generate_brush_type_vertices(frame.ui.brush_type),
-                ));
-                all_ui_vertices.extend(flat_to_vertices_7(
+                all_ui_vertices.extend(flat_to_vertices(&geometry::generate_brush_type_vertices(
+                    frame.ui.brush_type,
+                )));
+                all_ui_vertices.extend(flat_to_vertices(
                     &geometry::generate_selection_tool_button(frame.ui.selection_tool_active),
                 ));
 
                 // Selection rect uses Triangles mode (dashes are independent quads)
-                let mut selection_rect_vertices: Vec<[f32; 7]> = Vec::new();
+                let mut selection_rect_vertices: Vec<[f32; 6]> = Vec::new();
                 if let Some(rect) = frame.ui.selection_rect {
                     let flat =
                         geometry::generate_selection_rect_vertices(rect, frame.ui.selection_time);
-                    selection_rect_vertices.extend(flat_to_vertices_7(&flat));
+                    selection_rect_vertices.extend(flat_to_vertices(&flat));
                 }
 
                 let layers: Vec<(String, bool, f32, bool)> = frame
@@ -889,13 +885,11 @@ impl Renderer {
                     .iter()
                     .map(|l| (l.name.clone(), l.visible, l.opacity, l.locked))
                     .collect();
-                all_ui_vertices.extend(flat_to_vertices_7(
-                    &geometry::generate_layer_panel_vertices(
-                        &layers,
-                        frame.canvas.active_layer(),
-                        self.window_size.0 as f32,
-                    ),
-                ));
+                all_ui_vertices.extend(flat_to_vertices(&geometry::generate_layer_panel_vertices(
+                    &layers,
+                    frame.canvas.active_layer(),
+                    self.window_size.0 as f32,
+                )));
 
                 if !all_ui_vertices.is_empty() {
                     let ui_vertex_buffer =
@@ -910,19 +904,19 @@ impl Renderer {
                     render_pass.draw(0..all_ui_vertices.len() as u32, 0..1);
                 }
 
-                if !selection_rect_vertices.is_empty() {
-                    if let Some(spray_pipeline) = &self.spray_render_pipeline {
-                        let sr_vertex_buffer =
-                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("Selection Rect Vertex Buffer"),
-                                contents: bytemuck::cast_slice(&selection_rect_vertices),
-                                usage: wgpu::BufferUsages::VERTEX,
-                            });
-                        render_pass.set_pipeline(spray_pipeline);
-                        render_pass.set_bind_group(0, &bind_group, &[]);
-                        render_pass.set_vertex_buffer(0, sr_vertex_buffer.slice(..));
-                        render_pass.draw(0..selection_rect_vertices.len() as u32, 0..1);
-                    }
+                if !selection_rect_vertices.is_empty()
+                    && let Some(spray_pipeline) = &self.spray_render_pipeline
+                {
+                    let sr_vertex_buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("Selection Rect Vertex Buffer"),
+                            contents: bytemuck::cast_slice(&selection_rect_vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    render_pass.set_pipeline(spray_pipeline);
+                    render_pass.set_bind_group(0, &bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, sr_vertex_buffer.slice(..));
+                    render_pass.draw(0..selection_rect_vertices.len() as u32, 0..1);
                 }
             }
         }
@@ -968,27 +962,19 @@ impl Renderer {
     }
 }
 
-/// Convert flat vertex data (6 floats/vertex) to WGPU format (7 floats/vertex with line_width)
-fn flat_to_vertices_7(flat: &[f32]) -> Vec<[f32; 7]> {
+/// Convert flat vertex data (6 floats/vertex) to WGPU format (6 floats/vertex)
+fn flat_to_vertices(flat: &[f32]) -> Vec<[f32; 6]> {
     flat.chunks(6)
-        .map(|chunk| {
-            [
-                chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], 0.0,
-            ]
-        })
+        .map(|chunk| [chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5]])
         .collect()
 }
 
 /// Convert a stroke mesh to WGPU vertex format with layer opacity,
 /// returning the vertices and the draw mode.
-fn mesh_to_vertices_7(mesh: &StrokeMesh, line_width: f32) -> Vec<[f32; 7]> {
+fn mesh_to_vertices(mesh: &StrokeMesh) -> Vec<[f32; 6]> {
     mesh.vertices
         .chunks(6)
-        .map(|chunk| {
-            [
-                chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], line_width,
-            ]
-        })
+        .map(|chunk| [chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5]])
         .collect()
 }
 
@@ -1005,13 +991,12 @@ fn active_stroke_to_mesh_7(active: &ActiveStroke, layer_opacity: f32) -> StrokeM
 /// Collect a mesh into the appropriate buffer (TriangleStrip or TriangleList)
 fn collect_mesh(
     mesh: &StrokeMesh,
-    strip_vertices: &mut Vec<[f32; 7]>,
+    strip_vertices: &mut Vec<[f32; 6]>,
     strip_ranges: &mut Vec<std::ops::Range<u32>>,
-    tri_vertices: &mut Vec<[f32; 7]>,
+    tri_vertices: &mut Vec<[f32; 6]>,
     tri_ranges: &mut Vec<std::ops::Range<u32>>,
 ) {
-    let line_width = mesh.vertices.get(6).copied().unwrap_or(0.0);
-    let converted = mesh_to_vertices_7(mesh, line_width);
+    let converted = mesh_to_vertices(mesh);
     let count = converted.len() as u32;
     match mesh.mode {
         DrawMode::TriangleStrip => {
@@ -1076,23 +1061,18 @@ mod tests {
         canvas.add_stroke_to_layer(stroke1, 0);
         canvas.add_stroke_to_layer(stroke2, 0);
 
-        let mut strip_vertices: Vec<[f32; 7]> = Vec::new();
+        let mut strip_vertices: Vec<[f32; 6]> = Vec::new();
         let mut strip_ranges: Vec<std::ops::Range<u32>> = Vec::new();
-        let mut tri_vertices: Vec<[f32; 7]> = Vec::new();
+        let mut tri_vertices: Vec<[f32; 6]> = Vec::new();
         let mut tri_ranges: Vec<std::ops::Range<u32>> = Vec::new();
         for (stroke, layer_opacity) in canvas.all_strokes() {
             if stroke.points.len() >= 2 {
                 let mesh =
                     crate::geometry::generate_stroke_vertices_with_opacity(stroke, layer_opacity);
-                let line_width = stroke.width;
                 let converted = mesh
                     .vertices
                     .chunks(6)
-                    .map(|chunk| {
-                        [
-                            chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], line_width,
-                        ]
-                    })
+                    .map(|chunk| [chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5]])
                     .collect::<Vec<_>>();
                 let count = converted.len() as u32;
                 match mesh.mode {
@@ -1119,23 +1099,18 @@ mod tests {
     #[test]
     fn test_combined_buffer_empty_canvas() {
         let canvas = Canvas::new();
-        let mut strip_vertices: Vec<[f32; 7]> = Vec::new();
+        let mut strip_vertices: Vec<[f32; 6]> = Vec::new();
         let mut strip_ranges: Vec<std::ops::Range<u32>> = Vec::new();
-        let mut tri_vertices: Vec<[f32; 7]> = Vec::new();
+        let mut tri_vertices: Vec<[f32; 6]> = Vec::new();
         let mut tri_ranges: Vec<std::ops::Range<u32>> = Vec::new();
         for (stroke, layer_opacity) in canvas.all_strokes() {
             if stroke.points.len() >= 2 {
                 let mesh =
                     crate::geometry::generate_stroke_vertices_with_opacity(stroke, layer_opacity);
-                let line_width = stroke.width;
                 let converted = mesh
                     .vertices
                     .chunks(6)
-                    .map(|chunk| {
-                        [
-                            chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], line_width,
-                        ]
-                    })
+                    .map(|chunk| [chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5]])
                     .collect::<Vec<_>>();
                 let count = converted.len() as u32;
                 match mesh.mode {

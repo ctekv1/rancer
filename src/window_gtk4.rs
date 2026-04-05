@@ -334,7 +334,6 @@ impl WindowBackend for WindowApp {
                                 if canvas.can_redo() {
                                     canvas.redo();
                                     logger::info("Redo: restored last undone stroke");
-                                    println!("Redo: restored last undone stroke");
                                     gl_area_kb.queue_render();
                                 }
                                 glib::Propagation::Stop
@@ -343,7 +342,6 @@ impl WindowBackend for WindowApp {
                                 if canvas.can_undo() {
                                     canvas.undo();
                                     logger::info("Undo: removed last stroke");
-                                    println!("Undo: removed last stroke");
                                     gl_area_kb.queue_render();
                                 }
                                 glib::Propagation::Stop
@@ -357,7 +355,6 @@ impl WindowBackend for WindowApp {
                                 if canvas.can_redo() {
                                     canvas.redo();
                                     logger::info("Redo: restored last undone stroke");
-                                    println!("Redo: restored last undone stroke");
                                     gl_area_kb.queue_render();
                                 }
                                 glib::Propagation::Stop
@@ -803,7 +800,7 @@ fn setup_mouse_events(
             }
             ui::UiElement::BrushSize(size) => {
                 render_state_click.borrow_mut().brush_size = size;
-                println!("Selected brush size: {size}");
+                logger::info(&format!("Selected brush size: {size}"));
                 if let Some(widget) = gesture.widget()
                     && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                 {
@@ -814,10 +811,10 @@ fn setup_mouse_events(
             ui::UiElement::Eraser => {
                 let mut state = render_state_click.borrow_mut();
                 state.is_eraser = !state.is_eraser;
-                println!(
+                logger::info(&format!(
                     "Eraser mode: {}",
                     if state.is_eraser { "ON" } else { "OFF" }
-                );
+                ));
                 if let Some(widget) = gesture.widget()
                     && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                 {
@@ -846,7 +843,6 @@ fn setup_mouse_events(
             ui::UiElement::Clear => {
                 canvas_click.borrow_mut().clear();
                 logger::info("Canvas cleared");
-                println!("Canvas cleared");
                 if let Some(widget) = gesture.widget()
                     && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                 {
@@ -859,7 +855,6 @@ fn setup_mouse_events(
                 if canvas.can_undo() {
                     canvas.undo();
                     logger::info("Undo: removed last stroke");
-                    println!("Undo: removed last stroke");
                     if let Some(widget) = gesture.widget()
                         && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                     {
@@ -873,7 +868,6 @@ fn setup_mouse_events(
                 if canvas.can_redo() {
                     canvas.redo();
                     logger::info("Redo: restored last stroke");
-                    println!("Redo: restored last stroke");
                     if let Some(widget) = gesture.widget()
                         && let Some(gl_area) = widget.downcast_ref::<GLArea>()
                     {
@@ -1055,17 +1049,17 @@ fn setup_mouse_events(
         if is_selection_active {
             let mut state = render_state_click.borrow_mut();
             // If there's an existing selection and we're not clicking on it, clear it first
-            if state.selection_drawing || canvas_click.borrow().has_selection() {
-                if canvas_click.borrow().has_selection() {
-                    drop(state);
-                    canvas_click.borrow_mut().clear_selection();
-                    if let Some(widget) = gesture.widget()
-                        && let Some(gl_area) = widget.downcast_ref::<GLArea>()
-                    {
-                        gl_area.queue_render();
-                    }
-                    state = render_state_click.borrow_mut();
+            if (state.selection_drawing || canvas_click.borrow().has_selection())
+                && canvas_click.borrow().has_selection()
+            {
+                drop(state);
+                canvas_click.borrow_mut().clear_selection();
+                if let Some(widget) = gesture.widget()
+                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+                {
+                    gl_area.queue_render();
                 }
+                state = render_state_click.borrow_mut();
             }
             state.selection_drawing = true;
             let canvas_point = Point {
@@ -1100,14 +1094,14 @@ fn setup_mouse_events(
             current_opacity,
             current_brush_type,
         );
-        println!(
+        logger::info(&format!(
             "Created {}stroke with color RGB({}, {}, {}) and width {}",
             if is_eraser { "eraser " } else { "" },
             color.r,
             color.g,
             color.b,
             current_brush_size
-        );
+        ));
 
         *active_stroke_click.borrow_mut() = Some(active_stroke);
 
@@ -1123,14 +1117,14 @@ fn setup_mouse_events(
                 x: canvas_x,
                 y: canvas_y,
             });
-            println!(
+            logger::debug(&format!(
                 "Added first point to active stroke: ({}, {})",
                 point.x, point.y
-            );
-            println!(
+            ));
+            logger::debug(&format!(
                 "Active stroke now has {} points",
                 active_stroke.points().len()
-            );
+            ));
         }
     });
 
@@ -1193,9 +1187,9 @@ fn setup_mouse_events(
         if let Some(active_stroke) = active_stroke_release.borrow_mut().take() {
             let mut canvas = canvas_release.borrow_mut();
             if let Err(e) = canvas.commit_stroke(active_stroke) {
-                eprintln!("Failed to commit stroke: {e}");
+                logger::error(&format!("Failed to commit stroke: {e}"));
             } else {
-                println!("Stroke committed successfully");
+                logger::info("Stroke committed successfully");
             }
         }
     });
@@ -1268,28 +1262,28 @@ fn setup_mouse_events(
             return;
         }
 
-        if state.mouse_state == MouseState::Drawing {
-            if let Some(active_stroke) = &mut *active_stroke_motion.borrow_mut() {
-                let zoom = state.zoom;
-                let pan = state.pan_offset;
-                let canvas_x = point.x / zoom + pan.0;
-                let canvas_y = point.y / zoom + pan.1;
-                active_stroke.add_point(Point {
-                    x: canvas_x,
-                    y: canvas_y,
-                });
-                println!(
-                    "Active stroke now has {} points",
-                    active_stroke.points().len()
-                );
-                drop(state);
-                if let Some(widget) = controller.widget()
-                    && let Some(gl_area) = widget.downcast_ref::<GLArea>()
-                {
-                    gl_area.queue_render();
-                }
-                return;
+        if state.mouse_state == MouseState::Drawing
+            && let Some(active_stroke) = &mut *active_stroke_motion.borrow_mut()
+        {
+            let zoom = state.zoom;
+            let pan = state.pan_offset;
+            let canvas_x = point.x / zoom + pan.0;
+            let canvas_y = point.y / zoom + pan.1;
+            active_stroke.add_point(Point {
+                x: canvas_x,
+                y: canvas_y,
+            });
+            logger::debug(&format!(
+                "Active stroke now has {} points",
+                active_stroke.points().len()
+            ));
+            drop(state);
+            if let Some(widget) = controller.widget()
+                && let Some(gl_area) = widget.downcast_ref::<GLArea>()
+            {
+                gl_area.queue_render();
             }
+            return;
         }
 
         // Handle slider dragging

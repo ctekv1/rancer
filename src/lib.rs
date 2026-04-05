@@ -12,6 +12,8 @@ pub mod preferences;
 pub mod renderer;
 pub mod ui;
 pub mod window_backend;
+
+#[cfg(target_os = "windows")]
 pub mod window_winit;
 
 #[cfg(target_os = "linux")]

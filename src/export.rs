@@ -60,31 +60,32 @@ fn compute_stroke_bounding_box(canvas: &Canvas) -> Option<(f32, f32, f32, f32)> 
 fn render_canvas_to_image(
     canvas: &Canvas,
 ) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, Box<dyn std::error::Error>> {
-    let (width, height) =
-        if let Some((min_x, min_y, max_x, max_y)) = compute_stroke_bounding_box(canvas) {
-            let content_w = max_x - min_x + EXPORT_PADDING * 2.0;
-            let content_h = max_y - min_y + EXPORT_PADDING * 2.0;
-            if content_w > MAX_EXPORT_SIZE as f32 || content_h > MAX_EXPORT_SIZE as f32 {
-                logger::warn(&format!(
-                    "Content exceeds max export size ({}x{}), export will be clipped to {}x{}",
-                    content_w.ceil() as u32,
-                    content_h.ceil() as u32,
-                    MAX_EXPORT_SIZE,
-                    MAX_EXPORT_SIZE,
-                ));
-            }
-            let w = content_w
-                .ceil()
-                .max(MIN_EXPORT_SIZE as f32)
-                .min(MAX_EXPORT_SIZE as f32) as u32;
-            let h = content_h
-                .ceil()
-                .max(MIN_EXPORT_SIZE as f32)
-                .min(MAX_EXPORT_SIZE as f32) as u32;
-            (w, h)
-        } else {
-            (MIN_EXPORT_SIZE, MIN_EXPORT_SIZE)
-        };
+    let bbox = compute_stroke_bounding_box(canvas);
+
+    let (width, height) = if let Some((min_x, min_y, max_x, max_y)) = bbox {
+        let content_w = max_x - min_x + EXPORT_PADDING * 2.0;
+        let content_h = max_y - min_y + EXPORT_PADDING * 2.0;
+        if content_w > MAX_EXPORT_SIZE as f32 || content_h > MAX_EXPORT_SIZE as f32 {
+            logger::warn(&format!(
+                "Content exceeds max export size ({}x{}), export will be clipped to {}x{}",
+                content_w.ceil() as u32,
+                content_h.ceil() as u32,
+                MAX_EXPORT_SIZE,
+                MAX_EXPORT_SIZE,
+            ));
+        }
+        let w = content_w
+            .ceil()
+            .max(MIN_EXPORT_SIZE as f32)
+            .min(MAX_EXPORT_SIZE as f32) as u32;
+        let h = content_h
+            .ceil()
+            .max(MIN_EXPORT_SIZE as f32)
+            .min(MAX_EXPORT_SIZE as f32) as u32;
+        (w, h)
+    } else {
+        (MIN_EXPORT_SIZE, MIN_EXPORT_SIZE)
+    };
 
     let mut image = ImageBuffer::new(width, height);
 
@@ -95,12 +96,11 @@ fn render_canvas_to_image(
     }
 
     // Compute offset: shift all strokes so the bounding box fits in the image
-    let (offset_x, offset_y) =
-        if let Some((min_x, min_y, _, _)) = compute_stroke_bounding_box(canvas) {
-            (min_x - EXPORT_PADDING, min_y - EXPORT_PADDING)
-        } else {
-            (0.0, 0.0)
-        };
+    let (offset_x, offset_y) = if let Some((min_x, min_y, _, _)) = bbox {
+        (min_x - EXPORT_PADDING, min_y - EXPORT_PADDING)
+    } else {
+        (0.0, 0.0)
+    };
 
     // Render each stroke from all visible layers
     for (stroke, layer_opacity) in canvas.all_strokes() {

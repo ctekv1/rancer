@@ -1,11 +1,12 @@
 //! Logger module for Rancer
 //!
 //! Provides file-based logging with timestamps and log levels.
-//! Writes to `rancer.log` in the project directory.
+//! Writes to `rancer.log` in the platform-specific data directory.
 
 use chrono::Local;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 /// Log levels
@@ -31,28 +32,43 @@ impl LogLevel {
 /// Global logger instance
 static LOGGER: Mutex<Option<File>> = Mutex::new(None);
 
+/// Get the platform-specific log file path
+fn get_log_path() -> PathBuf {
+    if let Some(data_dir) = dirs::data_local_dir() {
+        let rancer_dir = data_dir.join("rancer");
+        let _ = std::fs::create_dir_all(&rancer_dir);
+        rancer_dir.join("rancer.log")
+    } else {
+        // Fallback to CWD if platform directory unavailable
+        PathBuf::from("rancer.log")
+    }
+}
+
 /// Initialize the logger
 /// Creates or overwrites the `rancer.log` file
 pub fn init() -> Result<(), Box<dyn std::error::Error>> {
+    let log_path = get_log_path();
     let file = OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
-        .open("rancer.log")?;
+        .open(&log_path)?;
 
-    let mut logger = LOGGER.lock().unwrap();
+    let mut logger = LOGGER.lock().unwrap_or_else(|e| e.into_inner());
     *logger = Some(file);
 
-    // Write initialization message directly (don't call info() to avoid deadlock)
+    let log_path_str = log_path.display();
     let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S");
     let log_line = format!(
-        "[{}] INFO  - Logger initialized - writing to rancer.log\n",
-        timestamp
+        "[{}] INFO  - Logger initialized - writing to {}\n",
+        timestamp, log_path_str
     );
-    if let Some(file) = logger.as_mut() {
-        let _ = file.write_all(log_line.as_bytes());
-        let _ = file.flush();
+    if let Some(f) = logger.as_mut() {
+        let _ = f.write_all(log_line.as_bytes());
+        let _ = f.flush();
     }
+    // Drop the lock before printing to stdout
+    drop(logger);
     print!("{}", log_line);
 
     Ok(())
@@ -70,7 +86,6 @@ fn write_log(level: LogLevel, msg: &str) {
         let _ = file.flush();
     }
 
-    // Also print to console for immediate feedback
     print!("{}", log_line);
 }
 

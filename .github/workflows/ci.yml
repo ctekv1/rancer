@@ -9,15 +9,16 @@ on:
 env:
   RUST_BACKTRACE: 1
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 jobs:
-  test-linux:
+  build-and-test-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.94
         with:
           components: rustfmt, clippy
 
@@ -33,14 +34,7 @@ jobs:
             libgles2-mesa-dev
 
       - name: Cache dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+        uses: Swatinem/rust-cache@v2
 
       - name: Format check
         run: cargo fmt --check
@@ -51,31 +45,27 @@ jobs:
       - name: Build release
         run: cargo build --release
 
-      - name: Test (146 tests)
+      - name: Run tests
         run: cargo test
 
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
 
-  test-windows:
+      - name: Check documentation
+        run: cargo doc --no-deps
+
+  build-and-test-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.94
         with:
           components: rustfmt, clippy
 
       - name: Cache dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+        uses: Swatinem/rust-cache@v2
 
       - name: Format check
         run: cargo fmt --check
@@ -83,8 +73,58 @@ jobs:
       - name: Build debug
         run: cargo build
 
-      - name: Test (146 tests)
+      - name: Build release
+        run: cargo build --release
+
+      - name: Run tests
         run: cargo test
 
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
+
+      - name: Check documentation
+        run: cargo doc --no-deps
+
+  verify-msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.94 (MSRV)
+        uses: dtolnay/rust-toolchain@1.94
+
+      - name: Install GTK4 dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-4-dev \
+            libgdk-pixbuf-2.0-dev \
+            libcairo2-dev \
+            libpango1.0-dev \
+            libglib2.0-dev \
+            libgles2-mesa-dev
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build with MSRV
+        run: cargo build
+
+      - name: Test with MSRV
+        run: cargo test
+
+  ci-status:
+    name: CI Status
+    needs: [build-and-test-linux, build-and-test-windows, verify-msrv]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [ "${{ needs.build-and-test-linux.result }}" != "success" ] || \
+             [ "${{ needs.build-and-test-windows.result }}" != "success" ] || \
+             [ "${{ needs.verify-msrv.result }}" != "success" ]; then
+            echo "One or more CI jobs failed"
+            exit 1
+          fi
+          echo "All CI jobs passed"

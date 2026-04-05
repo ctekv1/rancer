@@ -476,8 +476,8 @@ mod tests {
         assert!(!mesh.is_empty());
         assert_eq!(mesh.mode, DrawMode::Triangles);
         assert!(
-            mesh.vertices.len() % 36 == 0,
-            "Spray vertices should be multiples of 6 vertices per triangle (6 floats * 6 = 36 per quad)"
+            mesh.vertices.len().is_multiple_of(36),
+            "Spray vertex should be multiples of 6 vertices per triangle (6 floats * 6 = 36 per quad)"
         );
     }
 

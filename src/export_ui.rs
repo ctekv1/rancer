@@ -29,7 +29,7 @@ pub async fn show_save_dialog() -> Option<PathBuf> {
 /// Send an OS-native notification after export completes.
 /// On Linux, uses `notify-send` if available.
 /// On Windows, uses the `rfd` notification or falls back to console.
-pub fn notify_export_result(success: bool, path: &PathBuf, error: Option<&str>) {
+pub fn notify_export_result(success: bool, path: &std::path::Path, error: Option<&str>) {
     if success {
         let msg = format!("Canvas exported to {}", path.display());
         crate::logger::info(&msg);
