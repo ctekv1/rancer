@@ -1,8 +1,7 @@
 //! OpenGL renderer module for GTK4 GLArea
 //!
 //! Provides GPU-accelerated rendering for the canvas using OpenGL ES 2.0.
-//! Used by the GTK4 backend on Linux as a replacement for Cairo software rendering.
-//! The renderer is stateless — all render data is passed via `GlRenderFrame`.
+//! Used by the GTK4 backend on Linux for GPU-accelerated rendering.
 
 use glow::HasContext;
 use std::rc::Rc;

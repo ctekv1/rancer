@@ -58,8 +58,8 @@ cargo run
 ```
 src/
 ├── canvas.rs          — Core data model: Stroke, Layer, Canvas, ActiveStroke, BrushType
-├── renderer.rs        — WGPU rendering (Windows): stateless, uses RenderFrame
-├── opengl_renderer.rs — OpenGL rendering (Linux): stateless, uses GlRenderFrame
+├── renderer.rs        — WGPU rendering (Windows): uses RenderFrame pattern
+├── opengl_renderer.rs — OpenGL rendering (Linux): uses GlRenderFrame pattern
 ├── geometry/          — Vertex generation for strokes and UI elements
 │   ├── mod.rs         — Shared utilities (hex_to_color, generate_rect, hsv_to_rgb)
 │   ├── stroke.rs      — Stroke vertex generation (Square, Round, Spray, Calligraphy)
@@ -109,10 +109,9 @@ src/
 - [x] Layer system (visibility, opacity, lock, reorder)
 - [x] MSAA (WGPU backend)
 - [x] Export captures full canvas content (bounding box)
-- [x] Brush types (square, round, spray, calligraphy) — vertex generation, UI, hit testing, backend integration
-- [ ] Brush type preference persistence (saves to TOML, not loaded on startup)
-- [ ] Selection tool
-- [ ] Transform tools
+- [x] Brush types (square, round, spray, calligraphy) with preference persistence
+- [x] Selection tool (rectangular selection with move/copy, marching ants animation)
+- [ ] Transform tools (scale, rotate, flip)
 
 ## License
 

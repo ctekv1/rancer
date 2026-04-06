@@ -47,11 +47,11 @@
 - **168 unit tests** across canvas, geometry, export, preferences, renderer, and UI modules
 
 ### Changed
-- **Refactored `geometry.rs`** (2095 → 3 files): Split into `geometry/mod.rs`, `geometry/stroke.rs`, `geometry/ui_elements.rs`
-- **Refactored `renderer.rs`** (1129 → 477 lines): Introduced `RenderFrame` pattern, eliminated duplicated state, removed 12 setter methods and 12 proxy vertex methods
-- **Refactored `opengl_renderer.rs`** (444 → 276 lines): Introduced `GlRenderFrame` pattern, batched UI rendering (12 GPU uploads → 1)
-- **Refactored `window_gtk4.rs`** (1222 → ~1030 lines): Consolidated ~20 `Rc<RefCell<...>>` into single `GlRenderState`, debounced preference saves
-- **Refactored `window_winit.rs`** (~1180 → ~1035 lines): Extracted `handle_ui_click()`, `handle_keyboard()`, `handle_cursor_moved()` methods, consolidated state into `WinitRenderState`
+- **Refactored `geometry.rs`**: Split into `geometry/mod.rs`, `geometry/stroke.rs`, `geometry/ui_elements.rs`
+- **Refactored `renderer.rs`**: Introduced `RenderFrame` pattern, eliminated duplicated state, removed 12 setter methods and 12 proxy vertex methods
+- **Refactored `opengl_renderer.rs`**: Introduced `GlRenderFrame` pattern, batched UI rendering (12 GPU uploads → 1)
+- **Refactored `window_gtk4.rs`**: Consolidated ~20 `Rc<RefCell<...>>` into single `GlRenderState`, debounced preference saves
+- **Refactored `window_winit.rs`**: Extracted `handle_ui_click()`, `handle_keyboard()`, `handle_cursor_moved()` methods, consolidated state into `WinitRenderState`
 - **Export UX**: Replaced silent auto-save with native file dialog, added OS notifications
 
 ### Fixed

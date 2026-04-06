@@ -1,6 +1,6 @@
 # Rancer Build Guide
 
-## Version 0.0.6
+## Version 0.0.7
 
 ### Building for Windows (Native)
 
@@ -69,7 +69,7 @@ cargo build --release
 
 **Linux:**
 - GTK4 0.9 (window management)
-- Cairo-rs 0.20 (rendering)
+- OpenGL/glow 0.14 (GPU rendering)
 
 ### Platform-specific Notes
 
@@ -80,7 +80,7 @@ cargo build --release
 
 **Linux:**
 - Uses GTK4 for window management (Wayland compatible)
-- Uses Cairo for rendering
+- Uses OpenGL for GPU-accelerated rendering
 - Requires GTK4 development libraries
 
 ### Troubleshooting
