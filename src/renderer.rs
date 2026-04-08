@@ -843,20 +843,20 @@ impl Renderer {
                     }
                 }
 
-                if !selected_tri_vertices.is_empty() {
-                    if let Some(spray_pipeline) = &self.spray_render_pipeline {
-                        let vertex_buffer =
-                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("Selected Stroke Vertex Buffer (TriangleList)"),
-                                contents: bytemuck::cast_slice(&selected_tri_vertices),
-                                usage: wgpu::BufferUsages::VERTEX,
-                            });
-                        render_pass.set_pipeline(spray_pipeline);
-                        render_pass.set_bind_group(0, &bind_group, &[]);
-                        render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                        for range in &selected_tri_ranges {
-                            render_pass.draw(range.clone(), 0..1);
-                        }
+                if !selected_tri_vertices.is_empty()
+                    && let Some(spray_pipeline) = &self.spray_render_pipeline
+                {
+                    let vertex_buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("Selected Stroke Vertex Buffer (TriangleList)"),
+                            contents: bytemuck::cast_slice(&selected_tri_vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    render_pass.set_pipeline(spray_pipeline);
+                    render_pass.set_bind_group(0, &bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                    for range in &selected_tri_ranges {
+                        render_pass.draw(range.clone(), 0..1);
                     }
                 }
             }
