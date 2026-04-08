@@ -829,11 +829,12 @@ impl Renderer {
                 }
 
                 if !selected_strip_vertices.is_empty() {
-                    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Selected Stroke Vertex Buffer (TriangleStrip)"),
-                        contents: bytemuck::cast_slice(&selected_strip_vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
+                    let vertex_buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("Selected Stroke Vertex Buffer (TriangleStrip)"),
+                            contents: bytemuck::cast_slice(&selected_strip_vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
                     render_pass.set_pipeline(pipeline);
                     render_pass.set_bind_group(0, &bind_group, &[]);
                     render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
@@ -844,11 +845,12 @@ impl Renderer {
 
                 if !selected_tri_vertices.is_empty() {
                     if let Some(spray_pipeline) = &self.spray_render_pipeline {
-                        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("Selected Stroke Vertex Buffer (TriangleList)"),
-                            contents: bytemuck::cast_slice(&selected_tri_vertices),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
+                        let vertex_buffer =
+                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("Selected Stroke Vertex Buffer (TriangleList)"),
+                                contents: bytemuck::cast_slice(&selected_tri_vertices),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
                         render_pass.set_pipeline(spray_pipeline);
                         render_pass.set_bind_group(0, &bind_group, &[]);
                         render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));

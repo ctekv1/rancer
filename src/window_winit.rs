@@ -935,7 +935,7 @@ impl ApplicationHandler for WindowApp {
                             let active_layer = canvas.active_layer();
                             let selection_rect_hit = canvas.selection().map(|s| s.rect);
                             drop(canvas);
-                            
+
                             let zoom = self.render_state.zoom;
                             let pan = self.render_state.pan_offset;
                             let selection_rect_screen = selection_rect_hit.map(|r| {
@@ -946,7 +946,7 @@ impl ApplicationHandler for WindowApp {
                                     r.h * zoom,
                                 )
                             });
-                            
+
                             let hit = ui::hit_test(
                                 x,
                                 y,
