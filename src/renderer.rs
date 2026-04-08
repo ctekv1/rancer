@@ -53,6 +53,7 @@ pub struct UiRenderState<'a> {
     pub selection_tool_active: bool,
     pub selection_rect: Option<crate::canvas::Rect>,
     pub selection_time: f32,
+    pub selected_strokes: Option<&'a [crate::canvas::Stroke]>,
 }
 
 /// Viewport state for canvas transform
@@ -221,11 +222,6 @@ impl Renderer {
                             offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
                             shader_location: 1,
                             format: wgpu::VertexFormat::Float32x4,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
-                            shader_location: 2,
-                            format: wgpu::VertexFormat::Float32,
                         },
                     ],
                 }],
@@ -666,6 +662,7 @@ impl Renderer {
             frame.viewport.zoom,
             frame.viewport.pan_offset.0,
             frame.viewport.pan_offset.1,
+            0.0,
         ];
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Uniform Buffer"),
@@ -810,8 +807,60 @@ impl Renderer {
                 }
             }
 
+            // Render selected strokes (overlay) - use same transform as canvas
+            if let Some(selected_strokes) = frame.ui.selected_strokes {
+                let mut selected_strip_vertices: Vec<[f32; 6]> = Vec::new();
+                let mut selected_strip_ranges: Vec<std::ops::Range<u32>> = Vec::new();
+                let mut selected_tri_vertices: Vec<[f32; 6]> = Vec::new();
+                let mut selected_tri_ranges: Vec<std::ops::Range<u32>> = Vec::new();
+
+                for stroke in selected_strokes {
+                    if stroke.points.len() < 2 {
+                        continue;
+                    }
+                    let mesh = geometry::generate_stroke_vertices_with_opacity(stroke, 1.0);
+                    collect_mesh(
+                        &mesh,
+                        &mut selected_strip_vertices,
+                        &mut selected_strip_ranges,
+                        &mut selected_tri_vertices,
+                        &mut selected_tri_ranges,
+                    );
+                }
+
+                if !selected_strip_vertices.is_empty() {
+                    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Selected Stroke Vertex Buffer (TriangleStrip)"),
+                        contents: bytemuck::cast_slice(&selected_strip_vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                    render_pass.set_pipeline(pipeline);
+                    render_pass.set_bind_group(0, &bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                    for range in &selected_strip_ranges {
+                        render_pass.draw(range.clone(), 0..1);
+                    }
+                }
+
+                if !selected_tri_vertices.is_empty() {
+                    if let Some(spray_pipeline) = &self.spray_render_pipeline {
+                        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("Selected Stroke Vertex Buffer (TriangleList)"),
+                            contents: bytemuck::cast_slice(&selected_tri_vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                        render_pass.set_pipeline(spray_pipeline);
+                        render_pass.set_bind_group(0, &bind_group, &[]);
+                        render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                        for range in &selected_tri_ranges {
+                            render_pass.draw(range.clone(), 0..1);
+                        }
+                    }
+                }
+            }
+
             // Reset zoom to 1.0 and pan to (0,0) for UI (UI stays fixed on screen)
-            let ui_uniform_data = [uniform_data[0], uniform_data[1], 1.0, 0.0, 0.0];
+            let ui_uniform_data = [uniform_data[0], uniform_data[1], 1.0, 0.0, 0.0, 0.0];
             let ui_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("UI Uniform Buffer"),
                 contents: bytemuck::cast_slice(&ui_uniform_data),
