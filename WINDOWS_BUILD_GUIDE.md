@@ -69,7 +69,7 @@ Ensure these are set in your PATH:
 cd target\release
 
 # Run the application
-rancher.exe
+rancer.exe
 ```
 
 ## Support
