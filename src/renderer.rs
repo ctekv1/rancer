@@ -637,7 +637,8 @@ impl Renderer {
         if canvas.version() != self.canvas_version_cached {
             let layer_count = canvas.layers().len();
             self.layer_stroke_cache.clear();
-            self.layer_stroke_cache.resize(layer_count, LayerStrokeCache::new());
+            self.layer_stroke_cache
+                .resize(layer_count, LayerStrokeCache::new());
 
             for (layer_idx, layer) in canvas.layers().iter().enumerate() {
                 if !layer.visible {
