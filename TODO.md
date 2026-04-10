@@ -57,6 +57,16 @@
 - [ ] **UI vertex caching** — Cache UI element vertices (palette, sliders, buttons). Currently regenerates every frame but UI rarely changes.
 - [ ] **Profiling instrumentation** — Add timing to measure render pipeline bottlenecks and verify optimization impact
 
+## Future Performance (v0.0.8+)
+
+Note: Unlike professional tools like Krita (which use CPU for brush rendering), Rancer uses GPU-accelerated rendering. This is ideal for vector-style drawing but may need different strategies for complex procedural brushes.
+
+- [ ] **Level of Detail (LOD) rendering** — When zoomed out significantly, reduce stroke detail to improve performance. Store multiple detail levels per stroke for fast LOD switching.
+- [ ] **Multithreaded stroke generation** — Parallelize geometry generation for complex brush types using Rayon or similar. Useful if future brush types become more CPU-intensive.
+- [ ] **Stroke LOD cache** — Store multiple detail levels per stroke for fast LOD switching without regeneration.
+- [ ] **Frame rate limiter option** — User-configurable FPS cap for lower-end hardware. Rancer is already GPU-efficient but frame limiting can reduce power consumption.
+- [ ] **Brush type architecture** — If adding complex brushes (particle effects, procedural textures), consider separating GPU-friendly brushes from CPU-parallelized brushes.
+
 ## Technical Debt & Known Issues
 
 - [x] ~~**MSAA not functional**~~ — Fixed v0.0.7: MSAA now uses a resolve texture. `config.msaa_samples` (default 4) is respected.
