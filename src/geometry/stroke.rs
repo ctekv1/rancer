@@ -121,7 +121,14 @@ fn generate_round_stroke(points: &[Point], color: [f32; 4], half_width: f32) -> 
     let mut vertices = Vec::new();
 
     // Stamp at the first point.
-    stamp_disc(&mut vertices, points[0].x, points[0].y, half_width, color, SEGMENTS);
+    stamp_disc(
+        &mut vertices,
+        points[0].x,
+        points[0].y,
+        half_width,
+        color,
+        SEGMENTS,
+    );
 
     // Walk each path segment, stamping discs at `step`-pixel intervals.
     // `dist_to_next` carries leftover distance across segment boundaries so
@@ -182,13 +189,19 @@ fn stamp_disc(
         vertices.extend_from_slice(&[
             cx + radius * a0.cos(),
             cy + radius * a0.sin(),
-            color[0], color[1], color[2], 0.0,
+            color[0],
+            color[1],
+            color[2],
+            0.0,
         ]);
         // Edge 1 — transparent for soft falloff
         vertices.extend_from_slice(&[
             cx + radius * a1.cos(),
             cy + radius * a1.sin(),
-            color[0], color[1], color[2], 0.0,
+            color[0],
+            color[1],
+            color[2],
+            0.0,
         ]);
     }
 }

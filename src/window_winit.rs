@@ -187,7 +187,9 @@ impl WindowApp {
     /// Export canvas to PNG file using a native save dialog
     #[cfg(target_os = "windows")]
     fn export_canvas_to_file(&self) {
-        let Some(path) = crate::export_ui::show_save_dialog() else { return };
+        let Some(path) = crate::export_ui::show_save_dialog() else {
+            return;
+        };
 
         let canvas = self.canvas.borrow();
         match crate::export::export_to_png(&canvas, &path) {
@@ -399,8 +401,7 @@ impl WindowApp {
     fn handle_keyboard(&mut self, key_event: &winit::event::KeyEvent) {
         // Space toggles panning — handle both press and release before the
         // pressed-only guard below.
-        if let winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) =
-            key_event.logical_key
+        if let winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) = key_event.logical_key
         {
             if key_event.state == winit::event::ElementState::Pressed {
                 // Sync last_mouse_position so the first panning delta is zero.

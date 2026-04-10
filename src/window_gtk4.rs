@@ -146,8 +146,6 @@ impl WindowApp {
             start_time: Instant::now(),
         }
     }
-
-
 }
 
 impl WindowBackend for WindowApp {
