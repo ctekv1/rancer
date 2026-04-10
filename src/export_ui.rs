@@ -1,8 +1,4 @@
 //! Export UI helpers for showing save dialogs and notifications.
-//!
-//! Platform-specific implementations:
-//! - Linux (GTK4): Uses `gtk4::FileDialog` for native GTK save dialog
-//! - Windows (winit): Uses `rfd` for native Windows save dialog
 
 use std::path::PathBuf;
 
@@ -14,16 +10,12 @@ pub fn default_export_filename() -> String {
 
 /// Show a native save file dialog and return the chosen path.
 /// Returns `None` if the user cancelled.
-///
-/// This is a placeholder — the actual implementation is platform-specific
-/// and lives in the respective window backend modules.
-/// Each backend calls its own native dialog directly.
-pub async fn show_save_dialog() -> Option<PathBuf> {
-    // This function exists for documentation purposes.
-    // The actual dialogs are implemented in:
-    // - window_gtk4.rs: show_gtk_save_dialog()
-    // - window_winit.rs: show_rfd_save_dialog() (Windows only)
-    None
+pub fn show_save_dialog() -> Option<PathBuf> {
+    let filename = default_export_filename();
+    rfd::FileDialog::new()
+        .set_file_name(&filename)
+        .add_filter("PNG Image", &["png"])
+        .save_file()
 }
 
 /// Send an OS-native notification after export completes.

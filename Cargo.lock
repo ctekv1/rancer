@@ -2612,7 +2612,6 @@ name = "rancer"
 version = "0.0.7"
 dependencies = [
  "bytemuck",
- "cairo-rs",
  "chrono",
  "dirs",
  "env_logger",

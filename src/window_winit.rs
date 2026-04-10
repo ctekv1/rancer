@@ -187,13 +187,7 @@ impl WindowApp {
     /// Export canvas to PNG file using a native save dialog
     #[cfg(target_os = "windows")]
     fn export_canvas_to_file(&self) {
-        let filename = crate::export_ui::default_export_filename();
-        let handle = rfd::FileDialog::new()
-            .set_file_name(&filename)
-            .add_filter("PNG Image", &["png"])
-            .save_file();
-
-        let Some(path) = handle else { return };
+        let Some(path) = crate::export_ui::show_save_dialog() else { return };
 
         let canvas = self.canvas.borrow();
         match crate::export::export_to_png(&canvas, &path) {
@@ -403,14 +397,22 @@ impl WindowApp {
 
     /// Handle keyboard input
     fn handle_keyboard(&mut self, key_event: &winit::event::KeyEvent) {
-        if key_event.state != winit::event::ElementState::Pressed {
+        // Space toggles panning — handle both press and release before the
+        // pressed-only guard below.
+        if let winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) =
+            key_event.logical_key
+        {
+            if key_event.state == winit::event::ElementState::Pressed {
+                // Sync last_mouse_position so the first panning delta is zero.
+                self.render_state.last_mouse_position = self.render_state.mouse_position;
+                self.render_state.is_panning = true;
+            } else {
+                self.render_state.is_panning = false;
+            }
             return;
         }
 
-        // Space key for panning
-        if let winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) = key_event.logical_key
-        {
-            self.render_state.is_panning = true;
+        if key_event.state != winit::event::ElementState::Pressed {
             return;
         }
 
@@ -559,11 +561,6 @@ impl WindowApp {
                 self.render_state.selection_tool_active = false;
                 self.request_redraw();
             }
-            winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) => {
-                if key_event.state == winit::event::ElementState::Released {
-                    self.render_state.is_panning = false;
-                }
-            }
             _ => {}
         }
     }
@@ -661,21 +658,42 @@ impl ApplicationHandler for WindowApp {
         if self.window.is_none() {
             logger::info("=== WINDOW CREATION ===");
 
+            // Determine window size: use saved preferences if valid, otherwise
+            // fill the primary monitor's full resolution.
+            let saved_w = self.preferences.window.width;
+            let saved_h = self.preferences.window.height;
+            let (window_width, window_height) = if saved_w > 0 && saved_h > 0 {
+                (saved_w, saved_h)
+            } else if let Some(monitor) = event_loop.primary_monitor() {
+                let size = monitor.size();
+                let scale = monitor.scale_factor();
+                (
+                    (size.width as f64 / scale) as u32,
+                    (size.height as f64 / scale) as u32,
+                )
+            } else {
+                (1280, 720)
+            };
+
             let attributes = Window::default_attributes()
                 .with_title(&self.preferences.window.title)
-                .with_inner_size(winit::dpi::LogicalSize::new(
-                    self.preferences.window.width,
-                    self.preferences.window.height,
-                ));
+                .with_inner_size(winit::dpi::LogicalSize::new(window_width, window_height));
 
-            let window = event_loop.create_window(attributes).unwrap();
+            let window = match event_loop.create_window(attributes) {
+                Ok(w) => w,
+                Err(e) => {
+                    logger::error(&format!("Failed to create window: {}", e));
+                    event_loop.exit();
+                    return;
+                }
+            };
             let window = std::sync::Arc::new(window);
 
             self.scale_factor = window.scale_factor();
             logger::info("winit window created successfully");
             logger::info(&format!(
                 "Window size: {}x{} (logical)",
-                self.preferences.window.width, self.preferences.window.height
+                window_width, window_height
             ));
             logger::info(&format!(
                 "Window physical size: {}x{} (with DPI scaling)",
@@ -812,6 +830,9 @@ impl ApplicationHandler for WindowApp {
                     logical_width, logical_height
                 ));
 
+                if logical_width == 0 || logical_height == 0 {
+                    return;
+                }
                 self.preferences.window.width = logical_width;
                 self.preferences.window.height = logical_height;
                 self.preferences.canvas.width = logical_width;

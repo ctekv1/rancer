@@ -108,59 +108,89 @@ fn generate_square_stroke(points: &[Point], color: [f32; 4], half_width: f32) ->
     )
 }
 
-/// Round brush: soft-edged ribbon with alpha falloff at edges
-/// Generates 4 vertices per cross-section for smooth feathered edges.
+/// Round brush: filled disc stamps with feathered (soft) edges.
+///
+/// Stamps circles at regular intervals along the path so the result looks
+/// the same regardless of how fast the stroke is drawn.  Each disc is a
+/// triangle fan: a fully-opaque centre vertex surrounded by zero-opacity
+/// edge vertices so the GPU interpolates a smooth falloff.
 fn generate_round_stroke(points: &[Point], color: [f32; 4], half_width: f32) -> StrokeMesh {
+    const SEGMENTS: usize = 16;
+    let step = (half_width * 0.5).max(1.0);
+
     let mut vertices = Vec::new();
 
-    if points.len() < 2 {
-        return StrokeMesh::empty();
-    }
+    // Stamp at the first point.
+    stamp_disc(&mut vertices, points[0].x, points[0].y, half_width, color, SEGMENTS);
 
-    let inner_ratio = 0.6;
+    // Walk each path segment, stamping discs at `step`-pixel intervals.
+    // `dist_to_next` carries leftover distance across segment boundaries so
+    // gaps never form when consecutive points are closer together than `step`.
+    let mut dist_to_next = step;
 
-    for i in 0..points.len() {
-        let p = &points[i];
+    for i in 1..points.len() {
+        let prev = &points[i - 1];
+        let curr = &points[i];
+        let dx = curr.x - prev.x;
+        let dy = curr.y - prev.y;
+        let seg_len = (dx * dx + dy * dy).sqrt();
 
-        let (dx, dy) = if i == 0 {
-            let next = &points[i + 1];
-            (next.x - p.x, next.y - p.y)
-        } else if i == points.len() - 1 {
-            let prev = &points[i - 1];
-            (p.x - prev.x, p.y - prev.y)
-        } else {
-            let prev = &points[i - 1];
-            let next = &points[i + 1];
-            (next.x - prev.x, next.y - prev.y)
-        };
-
-        let len = (dx * dx + dy * dy).sqrt();
-        if len < 0.001 {
+        if seg_len < 0.001 {
             continue;
         }
 
-        let nx = -dy / len;
-        let ny = dx / len;
+        let mut pos = dist_to_next;
+        while pos <= seg_len {
+            let ratio = pos / seg_len;
+            stamp_disc(
+                &mut vertices,
+                prev.x + dx * ratio,
+                prev.y + dy * ratio,
+                half_width,
+                color,
+                SEGMENTS,
+            );
+            pos += step;
+        }
 
-        let outer_hw = half_width;
-        let inner_hw = half_width * inner_ratio;
-
-        let lo_x = p.x + nx * outer_hw;
-        let lo_y = p.y + ny * outer_hw;
-        let li_x = p.x + nx * inner_hw;
-        let li_y = p.y + ny * inner_hw;
-        let ri_x = p.x - nx * inner_hw;
-        let ri_y = p.y - ny * inner_hw;
-        let ro_x = p.x - nx * outer_hw;
-        let ro_y = p.y - ny * outer_hw;
-
-        vertices.extend_from_slice(&[lo_x, lo_y, color[0], color[1], color[2], 0.0]);
-        vertices.extend_from_slice(&[li_x, li_y, color[0], color[1], color[2], color[3]]);
-        vertices.extend_from_slice(&[ri_x, ri_y, color[0], color[1], color[2], color[3]]);
-        vertices.extend_from_slice(&[ro_x, ro_y, color[0], color[1], color[2], 0.0]);
+        // Carry the unused portion into the next segment.
+        dist_to_next = pos - seg_len;
     }
 
-    StrokeMesh::new(vertices, DrawMode::TriangleStrip)
+    StrokeMesh::new(vertices, DrawMode::Triangles)
+}
+
+/// Emit a single feathered disc as a triangle fan into `vertices`.
+///
+/// Each triangle: centre (full alpha) → edge[i] (zero alpha) → edge[i+1] (zero alpha).
+fn stamp_disc(
+    vertices: &mut Vec<f32>,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    color: [f32; 4],
+    segments: usize,
+) {
+    use std::f32::consts::TAU;
+    for i in 0..segments {
+        let a0 = i as f32 * TAU / segments as f32;
+        let a1 = (i + 1) as f32 * TAU / segments as f32;
+
+        // Centre — full opacity
+        vertices.extend_from_slice(&[cx, cy, color[0], color[1], color[2], color[3]]);
+        // Edge 0 — transparent for soft falloff
+        vertices.extend_from_slice(&[
+            cx + radius * a0.cos(),
+            cy + radius * a0.sin(),
+            color[0], color[1], color[2], 0.0,
+        ]);
+        // Edge 1 — transparent for soft falloff
+        vertices.extend_from_slice(&[
+            cx + radius * a1.cos(),
+            cy + radius * a1.sin(),
+            color[0], color[1], color[2], 0.0,
+        ]);
+    }
 }
 
 /// Spray brush: scattered dots within brush radius
@@ -460,7 +490,7 @@ mod tests {
         let square_mesh = generate_stroke_vertices(&stroke_square);
         let round_mesh = generate_stroke_vertices(&stroke_round);
         assert!(round_mesh.vertices.len() > square_mesh.vertices.len());
-        assert_eq!(round_mesh.mode, DrawMode::TriangleStrip);
+        assert_eq!(round_mesh.mode, DrawMode::Triangles);
     }
 
     #[test]

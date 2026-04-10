@@ -621,6 +621,11 @@ impl Renderer {
             _ => return Err(wgpu::SurfaceError::Lost),
         };
 
+        // Skip rendering to a zero-area surface (e.g. minimised window).
+        if self.window_size.0 == 0 || self.window_size.1 == 0 {
+            return Ok(());
+        }
+
         if let Some(config) = &self.surface_config {
             let max_texture_size = device.limits().max_texture_dimension_2d;
             let clamped_width = self.window_size.0.min(max_texture_size);
@@ -640,8 +645,11 @@ impl Renderer {
         if output.suboptimal {
             logger::debug("Surface suboptimal, reconfiguring");
             if let Some(config) = &self.surface_config {
+                // SurfaceTexture must be dropped before reconfiguring the surface.
+                drop(output);
                 surface.configure(device, config);
             }
+            return Ok(());
         }
 
         let view = output
@@ -656,13 +664,16 @@ impl Renderer {
         let texture_width = output.texture.width() as f32;
         let texture_height = output.texture.height() as f32;
 
+        // WGSL alignment: vec2<f32> has align=8, so pan_offset sits at offset 16
+        // (4 bytes of implicit padding after zoom at offset 8).
+        // Layout: [canvas_w, canvas_h, zoom, _pad, pan_x, pan_y]
         let uniform_data = [
             texture_width,
             texture_height,
             frame.viewport.zoom,
+            0.0, // padding — aligns pan_offset to offset 16
             frame.viewport.pan_offset.0,
             frame.viewport.pan_offset.1,
-            0.0,
         ];
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Uniform Buffer"),

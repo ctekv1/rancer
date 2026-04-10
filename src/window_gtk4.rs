@@ -147,22 +147,7 @@ impl WindowApp {
         }
     }
 
-    /// Get current color from HSV values
-    #[allow(dead_code)]
-    fn current_color(&self) -> crate::canvas::Color {
-        crate::canvas::hsv_to_rgb(self.hue, self.saturation, self.value)
-    }
 
-    /// Transform screen coordinates to canvas coordinates using current zoom/pan
-    #[allow(dead_code)]
-    fn screen_to_canvas(&self, screen_x: f32, screen_y: f32) -> Point {
-        let canvas_x = screen_x / self.zoom + self.pan_offset.0;
-        let canvas_y = screen_y / self.zoom + self.pan_offset.1;
-        Point {
-            x: canvas_x,
-            y: canvas_y,
-        }
-    }
 }
 
 impl WindowBackend for WindowApp {
@@ -267,13 +252,7 @@ impl WindowBackend for WindowApp {
                             let canvas_ref = canvas_kb.borrow();
                             let gl_area_ref = gl_area_kb.clone();
 
-                            let filename = crate::export_ui::default_export_filename();
-                            let handle = rfd::FileDialog::new()
-                                .set_file_name(&filename)
-                                .add_filter("PNG Image", &["png"])
-                                .save_file();
-
-                            if let Some(path) = handle {
+                            if let Some(path) = crate::export_ui::show_save_dialog() {
                                 match crate::export::export_to_png(&canvas_ref, &path) {
                                     Ok(_) => {
                                         crate::export_ui::notify_export_result(true, &path, None);
@@ -888,13 +867,8 @@ fn setup_mouse_events(
             }
             ui::UiElement::Export => {
                 let canvas_ref = canvas_click.borrow();
-                let filename = crate::export_ui::default_export_filename();
-                let handle = rfd::FileDialog::new()
-                    .set_file_name(&filename)
-                    .add_filter("PNG Image", &["png"])
-                    .save_file();
 
-                if let Some(path) = handle {
+                if let Some(path) = crate::export_ui::show_save_dialog() {
                     match crate::export::export_to_png(&canvas_ref, &path) {
                         Ok(_) => {
                             crate::export_ui::notify_export_result(true, &path, None);

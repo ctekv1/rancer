@@ -45,6 +45,14 @@
 - [ ] Filters/Effects - Blur, sharpen, color adjustments
 - [ ] Symmetry Drawing - Mirror/kaleidoscope modes
 
+## Performance
+
+- [ ] **Committed stroke vertex cache** — Every committed stroke has its vertex data fully regenerated from scratch on every frame (no caching). Strokes are immutable after commit, so their vertex data only needs to be computed once.
+    - [ ] Add `version: u64` to `Canvas` struct (`src/canvas.rs`), incremented by a private `invalidate()` helper on every mutating method: `add_stroke`, `undo`, `redo`, `clear`, `add_layer`, `delete_layer`, `move_layer_up/down`, `set_layer_visibility`, `set_layer_opacity`, `commit_selection`, `move_selection`, `clear_selection`
+    - [ ] Add committed stroke CPU+GPU cache to `WgpuRenderer` (`src/renderer.rs`): `committed_strip_cache`, `committed_tri_cache`, `committed_strip_ranges_cache`, `committed_tri_ranges_cache`, `committed_strip_buffer: Option<wgpu::Buffer>`, `committed_tri_buffer: Option<wgpu::Buffer>`, `canvas_version_cached: u64`
+    - [ ] In `render_wgpu()`: skip committed stroke regeneration when `canvas.version() == self.canvas_version_cached`; reuse persistent GPU buffers on cache hit; only the active stroke regenerates every frame
+    - Expected impact: eliminates ~138 MB/sec of wasted CPU vertex generation at 60 FPS with 10 round-brush strokes
+
 ## Technical Debt & Known Issues
 
 - [x] ~~**MSAA not functional**~~ — Fixed v0.0.7: MSAA now uses a resolve texture. `config.msaa_samples` (default 4) is respected.
