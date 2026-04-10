@@ -6,6 +6,7 @@
 use crate::canvas::{ActiveStroke, BrushType, Canvas, Color, Stroke};
 use crate::geometry::{self, DrawMode, StrokeMesh};
 use crate::logger;
+use std::cell::RefCell;
 
 /// Parse hex color string to Color
 pub fn hex_to_color(hex: &str) -> Color {
@@ -37,6 +38,27 @@ pub enum RenderBackend {
     Wgpu,
     /// Cairo software rendering (fallback)
     Cairo,
+}
+
+/// Committed stroke mesh for a single stroke
+type CachedStrokeMesh = Vec<[f32; 6]>;
+
+/// Committed stroke data for a single layer
+#[derive(Clone)]
+struct LayerStrokeCache {
+    /// Strokes using TriangleStrip mode (each stroke is a separate cached mesh)
+    strip_strokes: Vec<CachedStrokeMesh>,
+    /// Strokes using Triangles mode (each stroke is a separate cached mesh)
+    tri_strokes: Vec<CachedStrokeMesh>,
+}
+
+impl LayerStrokeCache {
+    fn new() -> Self {
+        Self {
+            strip_strokes: Vec::new(),
+            tri_strokes: Vec::new(),
+        }
+    }
 }
 
 /// UI state needed for rendering a frame
@@ -105,6 +127,14 @@ pub struct Renderer {
     msaa_texture: Option<wgpu::Texture>,
     /// Actual sample count in use
     sample_count: u32,
+    /// Committed stroke cache per layer (index = layer index)
+    layer_stroke_cache: Vec<LayerStrokeCache>,
+    /// GPU buffer for committed stroke vertices (TriangleStrip)
+    committed_strip_buffer: RefCell<Option<wgpu::Buffer>>,
+    /// GPU buffer for committed stroke vertices (TriangleList)
+    committed_tri_buffer: RefCell<Option<wgpu::Buffer>>,
+    /// Canvas version when cache was last populated
+    canvas_version_cached: u64,
 }
 
 impl Renderer {
@@ -151,6 +181,10 @@ impl Renderer {
                     window: Some(window),
                     msaa_texture,
                     sample_count,
+                    layer_stroke_cache: Vec::new(),
+                    committed_strip_buffer: RefCell::new(None),
+                    committed_tri_buffer: RefCell::new(None),
+                    canvas_version_cached: 0,
                 })
             }
             Err(e) => {
@@ -175,6 +209,10 @@ impl Renderer {
                         window: Some(window),
                         msaa_texture: None,
                         sample_count: 1,
+                        layer_stroke_cache: Vec::new(),
+                        committed_strip_buffer: RefCell::new(None),
+                        committed_tri_buffer: RefCell::new(None),
+                        canvas_version_cached: 0,
                     })
                 }
                 #[cfg(target_os = "windows")]
@@ -593,6 +631,77 @@ impl Renderer {
         }
     }
 
+    /// Ensure the committed stroke cache is valid.
+    /// If the canvas version has changed, regenerate the cache.
+    fn ensure_cache_valid(&mut self, canvas: &Canvas) {
+        if canvas.version() != self.canvas_version_cached {
+            let layer_count = canvas.layers().len();
+            self.layer_stroke_cache.clear();
+            self.layer_stroke_cache.resize(layer_count, LayerStrokeCache::new());
+
+            for (layer_idx, layer) in canvas.layers().iter().enumerate() {
+                if !layer.visible {
+                    continue;
+                }
+                let cache = &mut self.layer_stroke_cache[layer_idx];
+
+                for stroke in &layer.strokes {
+                    if stroke.points.len() >= 2 {
+                        let mesh = stroke_to_mesh_7(stroke, layer.opacity);
+                        let converted = mesh_to_vertices(&mesh);
+                        if !converted.is_empty() {
+                            match mesh.mode {
+                                DrawMode::TriangleStrip => {
+                                    cache.strip_strokes.push(converted);
+                                }
+                                DrawMode::Triangles => {
+                                    cache.tri_strokes.push(converted);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            self.canvas_version_cached = canvas.version();
+        }
+    }
+
+    /// Ensure GPU buffers are created and sized for the given vertex counts.
+    /// Reuses existing buffers if large enough, recreates if needed.
+    fn ensure_gpu_buffers(&self, device: &wgpu::Device, strip_count: usize, tri_count: usize) {
+        let strip_bytes = strip_count * std::mem::size_of::<[f32; 6]>();
+        let tri_bytes = tri_count * std::mem::size_of::<[f32; 6]>();
+
+        // Strip buffer
+        {
+            let mut strip_buf = self.committed_strip_buffer.borrow_mut();
+            if !matches!(&*strip_buf, Some(buf) if buf.size() >= strip_bytes as u64) {
+                let buf = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Committed Stroke Buffer (TriangleStrip)"),
+                    size: strip_bytes.max(1) as u64,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                *strip_buf = Some(buf);
+            }
+        }
+
+        // Tri buffer
+        {
+            let mut tri_buf = self.committed_tri_buffer.borrow_mut();
+            if !matches!(&*tri_buf, Some(buf) if buf.size() >= tri_bytes as u64) {
+                let buf = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Committed Stroke Buffer (TriangleList)"),
+                    size: tri_bytes.max(1) as u64,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                *tri_buf = Some(buf);
+            }
+        }
+    }
+
     /// Render the current frame using data from `frame`
     pub fn render(&mut self, frame: &RenderFrame) -> Result<(), wgpu::SurfaceError> {
         match self.backend {
@@ -611,15 +720,82 @@ impl Renderer {
     fn render_wgpu(&mut self, frame: &RenderFrame) -> Result<(), wgpu::SurfaceError> {
         use wgpu::util::DeviceExt;
 
-        let (surface, device, queue, pipeline) = match (
-            &self.surface,
-            &self.device,
-            &self.queue,
-            &self.render_pipeline,
-        ) {
-            (Some(s), Some(d), Some(q), Some(p)) => (s, d, q, p),
-            _ => return Err(wgpu::SurfaceError::Lost),
+        // Ensure committed stroke cache is valid first (before borrowing self for GPU resources)
+        self.ensure_cache_valid(frame.canvas);
+
+        // Collect committed stroke vertices (cached) + active stroke
+        let mut strip_vertices: Vec<[f32; 6]> = Vec::new();
+        let mut strip_ranges: Vec<std::ops::Range<u32>> = Vec::new();
+        let mut tri_vertices: Vec<[f32; 6]> = Vec::new();
+        let mut tri_ranges: Vec<std::ops::Range<u32>> = Vec::new();
+
+        let active_layer_idx = frame.canvas.active_layer();
+        let layers = frame.canvas.layers();
+
+        for (layer_idx, layer) in layers.iter().enumerate().rev() {
+            if !layer.visible {
+                continue;
+            }
+
+            // Add cached committed strokes for this layer (each stroke gets its own range)
+            if layer_idx < self.layer_stroke_cache.len() {
+                let cache = &self.layer_stroke_cache[layer_idx];
+
+                // TriangleStrip strokes - each stroke gets its own range
+                for stroke_vertices in &cache.strip_strokes {
+                    let start = strip_vertices.len() as u32;
+                    strip_vertices.extend_from_slice(stroke_vertices);
+                    let end = strip_vertices.len() as u32;
+                    strip_ranges.push(start..end);
+                }
+
+                // Triangles strokes - each stroke gets its own range
+                for stroke_vertices in &cache.tri_strokes {
+                    let start = tri_vertices.len() as u32;
+                    tri_vertices.extend_from_slice(stroke_vertices);
+                    let end = tri_vertices.len() as u32;
+                    tri_ranges.push(start..end);
+                }
+            }
+
+            // Insert active stroke at the active layer position
+            if layer_idx == active_layer_idx
+                && let Some(active_stroke) = frame.active_stroke
+                && active_stroke.points().len() >= 2
+            {
+                let mesh = active_stroke_to_mesh_7(active_stroke, layer.opacity);
+                collect_mesh(
+                    &mesh,
+                    &mut strip_vertices,
+                    &mut strip_ranges,
+                    &mut tri_vertices,
+                    &mut tri_ranges,
+                );
+            }
+        }
+
+        // Extract GPU resources from self
+        let surface = match self.surface.as_ref() {
+            Some(s) => s,
+            None => return Err(wgpu::SurfaceError::Lost),
         };
+        let device = match self.device.as_ref() {
+            Some(d) => d,
+            None => return Err(wgpu::SurfaceError::Lost),
+        };
+        let queue = match self.queue.as_ref() {
+            Some(q) => q,
+            None => return Err(wgpu::SurfaceError::Lost),
+        };
+        let pipeline = match self.render_pipeline.as_ref() {
+            Some(p) => p,
+            None => return Err(wgpu::SurfaceError::Lost),
+        };
+
+        // Prepare GPU buffers - needs device reference
+        let strip_count = strip_vertices.len();
+        let tri_count = tri_vertices.len();
+        self.ensure_gpu_buffers(device, strip_count, tri_count);
 
         // Skip rendering to a zero-area surface (e.g. minimised window).
         if self.window_size.0 == 0 || self.window_size.1 == 0 {
@@ -744,58 +920,14 @@ impl Renderer {
             render_pass.set_pipeline(pipeline);
             render_pass.set_bind_group(0, &bind_group, &[]);
 
-            // Combine all stroke vertices into buffers, split by draw mode.
-            // Active stroke is inserted at the active layer position.
-            let mut strip_vertices: Vec<[f32; 6]> = Vec::new();
-            let mut strip_ranges: Vec<std::ops::Range<u32>> = Vec::new();
-            let mut tri_vertices: Vec<[f32; 6]> = Vec::new();
-            let mut tri_ranges: Vec<std::ops::Range<u32>> = Vec::new();
-
-            let active_layer_idx = frame.canvas.active_layer();
-            let layers = frame.canvas.layers();
-
-            for (layer_idx, layer) in layers.iter().enumerate().rev() {
-                if !layer.visible {
-                    continue;
-                }
-                for stroke in &layer.strokes {
-                    if stroke.points.len() >= 2 {
-                        let mesh = stroke_to_mesh_7(stroke, layer.opacity);
-                        collect_mesh(
-                            &mesh,
-                            &mut strip_vertices,
-                            &mut strip_ranges,
-                            &mut tri_vertices,
-                            &mut tri_ranges,
-                        );
-                    }
-                }
-                // Insert active stroke at the active layer position
-                if layer_idx == active_layer_idx
-                    && let Some(active_stroke) = frame.active_stroke
-                    && active_stroke.points().len() >= 2
-                {
-                    let mesh = active_stroke_to_mesh_7(active_stroke, layer.opacity);
-                    collect_mesh(
-                        &mesh,
-                        &mut strip_vertices,
-                        &mut strip_ranges,
-                        &mut tri_vertices,
-                        &mut tri_ranges,
-                    );
-                }
-            }
-
             // Draw triangle strip strokes
-            if !strip_vertices.is_empty() {
-                let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Combined Stroke Vertex Buffer (TriangleStrip)"),
-                    contents: bytemuck::cast_slice(&strip_vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
+            if !strip_vertices.is_empty()
+                && let Some(buf) = self.committed_strip_buffer.borrow().as_ref()
+            {
+                queue.write_buffer(buf, 0, bytemuck::cast_slice(&strip_vertices));
                 render_pass.set_pipeline(pipeline);
                 render_pass.set_bind_group(0, &bind_group, &[]);
-                render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                render_pass.set_vertex_buffer(0, buf.slice(..));
                 for range in &strip_ranges {
                     render_pass.draw(range.clone(), 0..1);
                 }
@@ -804,15 +936,12 @@ impl Renderer {
             // Draw triangle list strokes (spray, etc.)
             if !tri_vertices.is_empty()
                 && let Some(spray_pipeline) = &self.spray_render_pipeline
+                && let Some(buf) = self.committed_tri_buffer.borrow().as_ref()
             {
-                let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Combined Stroke Vertex Buffer (TriangleList)"),
-                    contents: bytemuck::cast_slice(&tri_vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
+                queue.write_buffer(buf, 0, bytemuck::cast_slice(&tri_vertices));
                 render_pass.set_pipeline(spray_pipeline);
                 render_pass.set_bind_group(0, &bind_group, &[]);
-                render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                render_pass.set_vertex_buffer(0, buf.slice(..));
                 for range in &tri_ranges {
                     render_pass.draw(range.clone(), 0..1);
                 }

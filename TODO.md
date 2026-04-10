@@ -47,11 +47,15 @@
 
 ## Performance
 
-- [ ] **Committed stroke vertex cache** — Every committed stroke has its vertex data fully regenerated from scratch on every frame (no caching). Strokes are immutable after commit, so their vertex data only needs to be computed once.
-    - [ ] Add `version: u64` to `Canvas` struct (`src/canvas.rs`), incremented by a private `invalidate()` helper on every mutating method: `add_stroke`, `undo`, `redo`, `clear`, `add_layer`, `delete_layer`, `move_layer_up/down`, `set_layer_visibility`, `set_layer_opacity`, `commit_selection`, `move_selection`, `clear_selection`
-    - [ ] Add committed stroke CPU+GPU cache to `WgpuRenderer` (`src/renderer.rs`): `committed_strip_cache`, `committed_tri_cache`, `committed_strip_ranges_cache`, `committed_tri_ranges_cache`, `committed_strip_buffer: Option<wgpu::Buffer>`, `committed_tri_buffer: Option<wgpu::Buffer>`, `canvas_version_cached: u64`
-    - [ ] In `render_wgpu()`: skip committed stroke regeneration when `canvas.version() == self.canvas_version_cached`; reuse persistent GPU buffers on cache hit; only the active stroke regenerates every frame
+- [x] **Committed stroke vertex cache** — CPU+GPU caching for committed strokes (both WGPU and OpenGL backends). Strokes are immutable after commit, so their vertex data only needs to be computed once.
+    - [x] Add `version: u64` to `Canvas` struct (`src/canvas.rs`), incremented by a private `invalidate()` helper on every mutating method
+    - [x] Add committed stroke CPU cache to `WgpuRenderer` (`src/renderer.rs`): per-layer `LayerStrokeCache` with `strip_strokes` and `tri_strokes` vectors
+    - [x] Add GPU buffer caching to `WgpuRenderer`: persistent `RefCell<Option<wgpu::Buffer>>` buffers reused across frames
+    - [x] Add committed stroke CPU cache to `GlRenderer` (`src/opengl_renderer.rs`): same per-layer caching pattern
+    - [x] In render loops: skip committed stroke regeneration when `canvas.version() == self.canvas_version_cached`; only the active stroke regenerates every frame
     - Expected impact: eliminates ~138 MB/sec of wasted CPU vertex generation at 60 FPS with 10 round-brush strokes
+- [ ] **UI vertex caching** — Cache UI element vertices (palette, sliders, buttons). Currently regenerates every frame but UI rarely changes.
+- [ ] **Profiling instrumentation** — Add timing to measure render pipeline bottlenecks and verify optimization impact
 
 ## Technical Debt & Known Issues
 

@@ -214,6 +214,8 @@ pub struct Canvas {
     undo_stack: Vec<(usize, Stroke)>,
     /// Active selection (rectangular, point-based)
     selection: Option<Selection>,
+    /// Version counter for cache invalidation
+    version: u64,
 }
 
 /// Represents a rectangular selection of stroke segments
@@ -277,6 +279,7 @@ impl Default for Canvas {
             active_layer: 0,
             undo_stack: Vec::new(),
             selection: None,
+            version: 0,
         }
     }
 }
@@ -298,11 +301,13 @@ impl Canvas {
     pub fn resize(&mut self, width: u32, height: u32) {
         self.width = width;
         self.height = height;
+        self.invalidate();
     }
 
     /// Set the background color
     pub fn set_background(&mut self, color: Color) {
         self.background_color = color;
+        self.invalidate();
     }
 
     /// Clear all strokes from the canvas
@@ -311,6 +316,7 @@ impl Canvas {
             layer.strokes.clear();
         }
         self.undo_stack.clear();
+        self.invalidate();
     }
 
     /// Get canvas dimensions
@@ -321,6 +327,16 @@ impl Canvas {
     /// Get background color
     pub fn background_color(&self) -> Color {
         self.background_color
+    }
+
+    /// Get the current canvas version (for cache invalidation)
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
+    /// Invalidate the canvas cache by incrementing the version counter
+    fn invalidate(&mut self) {
+        self.version += 1;
     }
 
     /// Get all layers
@@ -354,6 +370,7 @@ impl Canvas {
         }
         let layer_name = name.unwrap_or_else(|| format!("Layer {}", self.layers.len()));
         self.layers.push(Layer::new(layer_name));
+        self.invalidate();
         Ok(())
     }
 
@@ -369,6 +386,7 @@ impl Canvas {
         if self.active_layer >= self.layers.len() {
             self.active_layer = self.layers.len() - 1;
         }
+        self.invalidate();
         Ok(())
     }
 
@@ -387,6 +405,7 @@ impl Canvas {
         } else if from > self.active_layer && to <= self.active_layer {
             self.active_layer += 1;
         }
+        self.invalidate();
         Ok(())
     }
 
@@ -396,6 +415,7 @@ impl Canvas {
             return Err("Invalid layer index".to_string());
         }
         self.layers[index].visible = !self.layers[index].visible;
+        self.invalidate();
         Ok(())
     }
 
@@ -405,6 +425,7 @@ impl Canvas {
             return Err("Invalid layer index".to_string());
         }
         self.layers[index].opacity = opacity.clamp(0.0, 1.0);
+        self.invalidate();
         Ok(())
     }
 
@@ -414,6 +435,7 @@ impl Canvas {
             return Err("Invalid layer index".to_string());
         }
         self.layers[index].locked = !self.layers[index].locked;
+        self.invalidate();
         Ok(())
     }
 
@@ -445,6 +467,7 @@ impl Canvas {
     pub fn add_stroke_to_active_layer(&mut self, stroke: Stroke) {
         self.layers[self.active_layer].strokes.push(stroke);
         self.undo_stack.clear();
+        self.invalidate();
     }
 
     /// Add a stroke to a specific layer (for testing)
@@ -452,6 +475,7 @@ impl Canvas {
     pub fn add_stroke_to_layer(&mut self, stroke: Stroke, layer_index: usize) {
         if layer_index < self.layers.len() {
             self.layers[layer_index].strokes.push(stroke);
+            self.invalidate();
         }
     }
 
@@ -459,6 +483,7 @@ impl Canvas {
     pub fn undo(&mut self) {
         if let Some(stroke) = self.layers[self.active_layer].strokes.pop() {
             self.undo_stack.push((self.active_layer, stroke));
+            self.invalidate();
         }
     }
 
@@ -468,6 +493,7 @@ impl Canvas {
             && layer_index < self.layers.len()
         {
             self.layers[layer_index].strokes.push(stroke);
+            self.invalidate();
         }
     }
 
@@ -548,6 +574,7 @@ impl Canvas {
                 removed_strokes,
             });
         }
+        self.invalidate();
     }
 
     /// Offset all selected stroke points by the given delta.
@@ -566,6 +593,7 @@ impl Canvas {
                 selection.rect.h,
             );
         }
+        self.invalidate();
     }
 
     /// Duplicate the current selection and add the copies to the active layer.
@@ -576,6 +604,7 @@ impl Canvas {
                 self.layers[self.active_layer].strokes.push(stroke.clone());
             }
         }
+        self.invalidate();
     }
 
     /// Commit the selection: add the (possibly moved) selected strokes
@@ -587,6 +616,7 @@ impl Canvas {
             }
             // removed_strokes are NOT restored — the moved strokes replace them
         }
+        self.invalidate();
     }
 
     /// Discard the selection without committing any changes.
@@ -599,6 +629,7 @@ impl Canvas {
                 }
             }
         }
+        self.invalidate();
     }
 
     /// Returns a reference to the active selection, if any.
@@ -1840,5 +1871,264 @@ mod tests {
         // After copy + commit: original was restored, then moved stroke added
         assert!(!canvas.has_selection());
         assert_eq!(canvas.layers()[0].strokes.len(), 2);
+    }
+
+    // ─── Version tracking tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_canvas_version_starts_at_zero() {
+        let canvas = Canvas::new();
+        assert_eq!(canvas.version(), 0);
+    }
+
+    #[test]
+    fn test_canvas_version_increments_on_resize() {
+        let mut canvas = Canvas::new();
+        assert_eq!(canvas.version(), 0);
+        canvas.resize(800, 600);
+        assert_eq!(canvas.version(), 1);
+    }
+
+    #[test]
+    fn test_canvas_version_increments_on_set_background() {
+        let mut canvas = Canvas::new();
+        assert_eq!(canvas.version(), 0);
+        canvas.set_background(Color::BLACK);
+        assert_eq!(canvas.version(), 1);
+    }
+
+    #[test]
+    fn test_canvas_version_increments_on_clear() {
+        let mut canvas = Canvas::new();
+        assert_eq!(canvas.version(), 0);
+        canvas.clear();
+        assert_eq!(canvas.version(), 1);
+    }
+
+    #[test]
+    fn test_canvas_version_increments_on_add_stroke() {
+        let mut canvas = Canvas::new();
+        assert_eq!(canvas.version(), 0);
+        let stroke = Stroke {
+            points: vec![Point { x: 0.0, y: 0.0 }, Point { x: 10.0, y: 10.0 }],
+            color: Color::BLACK,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        canvas.add_stroke_to_layer(stroke, 0);
+        assert_eq!(canvas.version(), 1);
+    }
+
+    #[test]
+    fn test_canvas_version_increments_on_add_layer() {
+        let mut canvas = Canvas::new();
+        assert_eq!(canvas.version(), 0);
+        canvas.add_layer(None).unwrap();
+        assert_eq!(canvas.version(), 1);
+    }
+
+    #[test]
+    fn test_canvas_version_increments_on_remove_layer() {
+        let mut canvas = Canvas::new();
+        canvas.add_layer(None).unwrap();
+        assert_eq!(canvas.version(), 1);
+        canvas.remove_layer(1).unwrap();
+        assert_eq!(canvas.version(), 2);
+    }
+
+    #[test]
+    fn test_canvas_version_increments_on_move_layer() {
+        let mut canvas = Canvas::new();
+        canvas.add_layer(Some("A".to_string())).unwrap();
+        canvas.add_layer(Some("B".to_string())).unwrap();
+        assert_eq!(canvas.version(), 2);
+        canvas.move_layer(0, 2).unwrap();
+        assert_eq!(canvas.version(), 3);
+    }
+
+    #[test]
+    fn test_canvas_version_increments_on_toggle_layer_visibility() {
+        let mut canvas = Canvas::new();
+        canvas.add_layer(None).unwrap();
+        assert_eq!(canvas.version(), 1);
+        canvas.toggle_layer_visibility(1).unwrap();
+        assert_eq!(canvas.version(), 2);
+    }
+
+    #[test]
+    fn test_canvas_version_increments_on_set_layer_opacity() {
+        let mut canvas = Canvas::new();
+        canvas.add_layer(None).unwrap();
+        assert_eq!(canvas.version(), 1);
+        canvas.set_layer_opacity(1, 0.5).unwrap();
+        assert_eq!(canvas.version(), 2);
+    }
+
+    #[test]
+    fn test_canvas_version_increments_on_toggle_layer_lock() {
+        let mut canvas = Canvas::new();
+        canvas.add_layer(None).unwrap();
+        assert_eq!(canvas.version(), 1);
+        canvas.toggle_layer_lock(1).unwrap();
+        assert_eq!(canvas.version(), 2);
+    }
+
+    #[test]
+    fn test_canvas_version_increments_on_undo() {
+        let mut canvas = Canvas::new();
+        let stroke = Stroke {
+            points: vec![Point { x: 0.0, y: 0.0 }, Point { x: 10.0, y: 10.0 }],
+            color: Color::BLACK,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        canvas.add_stroke_to_layer(stroke, 0);
+        assert_eq!(canvas.version(), 1);
+        canvas.undo();
+        assert_eq!(canvas.version(), 2);
+    }
+
+    #[test]
+    fn test_canvas_version_increments_on_redo() {
+        let mut canvas = Canvas::new();
+        let stroke = Stroke {
+            points: vec![Point { x: 0.0, y: 0.0 }, Point { x: 10.0, y: 10.0 }],
+            color: Color::BLACK,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        canvas.add_stroke_to_layer(stroke, 0);
+        canvas.undo();
+        assert_eq!(canvas.version(), 2);
+        canvas.redo();
+        assert_eq!(canvas.version(), 3);
+    }
+
+    #[test]
+    fn test_canvas_version_increments_on_begin_selection() {
+        let mut canvas = Canvas::new();
+        let stroke = Stroke {
+            points: vec![Point { x: 50.0, y: 50.0 }, Point { x: 60.0, y: 60.0 }],
+            color: Color::BLACK,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        canvas.add_stroke_to_layer(stroke, 0);
+        assert_eq!(canvas.version(), 1);
+        let rect = Rect::new(0.0, 0.0, 100.0, 100.0);
+        canvas.begin_selection(rect);
+        assert_eq!(canvas.version(), 2);
+    }
+
+    #[test]
+    fn test_canvas_version_increments_on_move_selection() {
+        let mut canvas = Canvas::new();
+        let stroke = Stroke {
+            points: vec![Point { x: 50.0, y: 50.0 }, Point { x: 60.0, y: 60.0 }],
+            color: Color::BLACK,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        canvas.add_stroke_to_layer(stroke, 0);
+        let rect = Rect::new(0.0, 0.0, 100.0, 100.0);
+        canvas.begin_selection(rect);
+        assert_eq!(canvas.version(), 2);
+        canvas.move_selection(10.0, 20.0);
+        assert_eq!(canvas.version(), 3);
+    }
+
+    #[test]
+    fn test_canvas_version_increments_on_copy_selection() {
+        let mut canvas = Canvas::new();
+        let stroke = Stroke {
+            points: vec![Point { x: 50.0, y: 50.0 }, Point { x: 60.0, y: 60.0 }],
+            color: Color::BLACK,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        canvas.add_stroke_to_layer(stroke, 0);
+        let rect = Rect::new(0.0, 0.0, 100.0, 100.0);
+        canvas.begin_selection(rect);
+        assert_eq!(canvas.version(), 2);
+        canvas.copy_selection();
+        assert_eq!(canvas.version(), 3);
+    }
+
+    #[test]
+    fn test_canvas_version_increments_on_commit_selection() {
+        let mut canvas = Canvas::new();
+        let stroke = Stroke {
+            points: vec![Point { x: 50.0, y: 50.0 }, Point { x: 60.0, y: 60.0 }],
+            color: Color::BLACK,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        canvas.add_stroke_to_layer(stroke, 0);
+        let rect = Rect::new(0.0, 0.0, 100.0, 100.0);
+        canvas.begin_selection(rect);
+        canvas.commit_selection();
+        assert_eq!(canvas.version(), 3);
+    }
+
+    #[test]
+    fn test_canvas_version_increments_on_clear_selection() {
+        let mut canvas = Canvas::new();
+        let stroke = Stroke {
+            points: vec![Point { x: 50.0, y: 50.0 }, Point { x: 60.0, y: 60.0 }],
+            color: Color::BLACK,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        canvas.add_stroke_to_layer(stroke, 0);
+        let rect = Rect::new(0.0, 0.0, 100.0, 100.0);
+        canvas.begin_selection(rect);
+        assert_eq!(canvas.version(), 2);
+        canvas.clear_selection();
+        assert_eq!(canvas.version(), 3);
+    }
+
+    #[test]
+    fn test_canvas_version_multiple_operations() {
+        let mut canvas = Canvas::new();
+        assert_eq!(canvas.version(), 0);
+
+        // Add strokes
+        let stroke = Stroke {
+            points: vec![Point { x: 0.0, y: 0.0 }, Point { x: 10.0, y: 10.0 }],
+            color: Color::BLACK,
+            width: 2.0,
+            opacity: 1.0,
+            brush_type: BrushType::default(),
+        };
+        canvas.add_stroke_to_layer(stroke, 0);
+        assert_eq!(canvas.version(), 1);
+
+        // Resize
+        canvas.resize(800, 600);
+        assert_eq!(canvas.version(), 2);
+
+        // Add layer
+        canvas.add_layer(None).unwrap();
+        assert_eq!(canvas.version(), 3);
+
+        // Undo
+        canvas.undo();
+        assert_eq!(canvas.version(), 4);
+
+        // Redo
+        canvas.redo();
+        assert_eq!(canvas.version(), 5);
+
+        // Multiple increments don't break anything
+        canvas.clear();
+        assert_eq!(canvas.version(), 6);
     }
 }

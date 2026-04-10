@@ -7,7 +7,7 @@ use glow::HasContext;
 use std::rc::Rc;
 
 use crate::canvas::{ActiveStroke, BrushType, Canvas};
-use crate::geometry::{self, DrawMode};
+use crate::geometry::{self, DrawMode, StrokeMesh};
 
 const VERTEX_SHADER_SOURCE: &str = r#"
     attribute vec2 position;
@@ -66,6 +66,25 @@ pub struct GlRenderFrame<'a> {
     pub window_size: (i32, i32),
 }
 
+/// Committed stroke mesh for a single stroke
+type CachedStrokeMesh = Vec<[f32; 6]>;
+
+/// Committed stroke data for a single layer
+#[derive(Clone)]
+struct LayerStrokeCache {
+    strip_strokes: Vec<CachedStrokeMesh>,
+    tri_strokes: Vec<CachedStrokeMesh>,
+}
+
+impl LayerStrokeCache {
+    fn new() -> Self {
+        Self {
+            strip_strokes: Vec::new(),
+            tri_strokes: Vec::new(),
+        }
+    }
+}
+
 /// OpenGL renderer for GTK4 GLArea
 pub struct GlRenderer {
     gl: Rc<glow::Context>,
@@ -75,6 +94,10 @@ pub struct GlRenderer {
     canvas_size_uniform: glow::UniformLocation,
     zoom_uniform: glow::UniformLocation,
     pan_offset_uniform: glow::UniformLocation,
+    /// Committed stroke cache per layer (index = layer index)
+    layer_stroke_cache: Vec<LayerStrokeCache>,
+    /// Canvas version when cache was last populated
+    canvas_version_cached: u64,
 }
 
 impl GlRenderer {
@@ -132,8 +155,55 @@ impl GlRenderer {
                 canvas_size_uniform,
                 zoom_uniform,
                 pan_offset_uniform,
+                layer_stroke_cache: Vec::new(),
+                canvas_version_cached: 0,
             })
         }
+    }
+
+    /// Ensure the committed stroke cache is valid.
+    /// If the canvas version has changed, regenerate the cache.
+    fn ensure_cache_valid(&mut self, canvas: &Canvas) {
+        if canvas.version() != self.canvas_version_cached {
+            let layer_count = canvas.layers().len();
+            self.layer_stroke_cache.clear();
+            self.layer_stroke_cache.resize(layer_count, LayerStrokeCache::new());
+
+            for (layer_idx, layer) in canvas.layers().iter().enumerate() {
+                if !layer.visible {
+                    continue;
+                }
+                let cache = &mut self.layer_stroke_cache[layer_idx];
+
+                for stroke in &layer.strokes {
+                    if stroke.points.len() >= 2 {
+                        let mesh =
+                            geometry::generate_stroke_vertices_with_opacity(stroke, layer.opacity);
+                        let converted = mesh_to_vertices(&mesh);
+                        if !converted.is_empty() {
+                            match mesh.mode {
+                                DrawMode::TriangleStrip => {
+                                    cache.strip_strokes.push(converted);
+                                }
+                                DrawMode::Triangles => {
+                                    cache.tri_strokes.push(converted);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            self.canvas_version_cached = canvas.version();
+        }
+    }
+
+    /// Convert a stroke mesh to flat vertex array
+    fn mesh_to_vertices(mesh: &StrokeMesh) -> Vec<[f32; 6]> {
+        mesh.vertices
+            .chunks(6)
+            .map(|chunk| [chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5]])
+            .collect()
     }
 
     /// Compile vertex and fragment shaders into a program
@@ -185,8 +255,11 @@ impl GlRenderer {
     }
 
     /// Render a frame: clear, draw strokes, draw UI
-    pub fn render(&self, frame: &GlRenderFrame) {
+    pub fn render(&mut self, frame: &GlRenderFrame) {
         let (width, height) = frame.window_size;
+
+        // Ensure committed stroke cache is valid
+        self.ensure_cache_valid(frame.canvas);
 
         unsafe {
             self.gl.viewport(0, 0, width, height);
@@ -207,7 +280,7 @@ impl GlRenderer {
 
             self.gl.bind_vertex_array(Some(self.vao));
 
-            // Draw committed strokes per-layer, inserting active stroke
+            // Draw committed strokes per-layer using cache, inserting active stroke
             // at the active layer position so it renders in correct order.
             let active_layer_idx = frame.canvas.active_layer();
             let layers = frame.canvas.layers();
@@ -215,19 +288,23 @@ impl GlRenderer {
                 if !layer.visible {
                     continue;
                 }
-                for stroke in &layer.strokes {
-                    if stroke.points.len() >= 2 {
-                        let mesh =
-                            geometry::generate_stroke_vertices_with_opacity(stroke, layer.opacity);
-                        if !mesh.is_empty() {
-                            let mode = match mesh.mode {
-                                DrawMode::TriangleStrip => glow::TRIANGLE_STRIP,
-                                DrawMode::Triangles => glow::TRIANGLES,
-                            };
-                            self.upload_and_draw(&mesh.vertices, mode);
-                        }
+
+                // Use cached committed strokes
+                if layer_idx < self.layer_stroke_cache.len() {
+                    let cache = &self.layer_stroke_cache[layer_idx];
+
+                    for stroke_vertices in &cache.strip_strokes {
+                        let flat: Vec<f32> = stroke_vertices.iter().flatten().copied().collect();
+                        self.upload_and_draw(&flat, glow::TRIANGLE_STRIP);
+                    }
+
+                    for stroke_vertices in &cache.tri_strokes {
+                        let flat: Vec<f32> = stroke_vertices.iter().flatten().copied().collect();
+                        self.upload_and_draw(&flat, glow::TRIANGLES);
                     }
                 }
+
+                // Insert active stroke at the active layer position
                 if layer_idx == active_layer_idx
                     && let Some(active) = frame.active_stroke
                 {
