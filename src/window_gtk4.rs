@@ -498,7 +498,7 @@ impl WindowBackend for WindowApp {
                         }
                     }
 
-                    if let Some(ref mut renderer) = *gl_renderer_render.borrow() {
+                    if let Some(ref mut renderer) = gl_renderer_render.borrow_mut() {
                         let state = render_state_render.borrow();
                         let canvas_ref = canvas_render.borrow();
                         let active_ref = active_stroke_render.borrow();

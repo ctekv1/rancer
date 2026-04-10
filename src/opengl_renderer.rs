@@ -180,7 +180,7 @@ impl GlRenderer {
                     if stroke.points.len() >= 2 {
                         let mesh =
                             geometry::generate_stroke_vertices_with_opacity(stroke, layer.opacity);
-                        let converted = mesh_to_vertices(&mesh);
+                        let converted = Self::mesh_to_vertices(&mesh);
                         if !converted.is_empty() {
                             match mesh.mode {
                                 DrawMode::TriangleStrip => {
