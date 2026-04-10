@@ -962,8 +962,8 @@ impl ApplicationHandler for WindowApp {
                             let pan = self.render_state.pan_offset;
                             let selection_rect_screen = selection_rect_hit.map(|r| {
                                 crate::canvas::Rect::new(
-                                    (r.x + pan.0) * zoom,
-                                    (r.y + pan.1) * zoom,
+                                    (r.x - pan.0) * zoom,
+                                    (r.y - pan.1) * zoom,
                                     r.w * zoom,
                                     r.h * zoom,
                                 )

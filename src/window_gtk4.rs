@@ -682,8 +682,8 @@ fn setup_mouse_events(
         // Convert canvas-space selection rect to screen coordinates for hit testing
         let selection_rect_screen = selection_rect_hit.map(|r| {
             crate::canvas::Rect::new(
-                (r.x + pan.0) * zoom,
-                (r.y + pan.1) * zoom,
+                (r.x - pan.0) * zoom,
+                (r.y - pan.1) * zoom,
                 r.w * zoom,
                 r.h * zoom,
             )
