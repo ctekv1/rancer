@@ -61,16 +61,6 @@ sudo dnf install gtk4-devel
 cargo build --release
 ```
 
-### Dependencies
-
-**Windows:**
-- winit 0.30 (window management)
-- wgpu 28.0 (GPU rendering)
-
-**Linux:**
-- GTK4 0.9 (window management)
-- OpenGL/glow 0.14 (GPU rendering)
-
 ### Platform-specific Notes
 
 **Windows:**

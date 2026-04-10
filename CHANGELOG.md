@@ -44,6 +44,8 @@
 - **MSAA support**: Multisampled rendering with resolve texture (WGPU backend, configurable sample count)
 - **Native export dialog**: File save dialog via `rfd`, OS notifications (`notify-send` on Linux), console feedback
 - **Export bounding box**: Export now captures all stroke content regardless of position (min 100x100, max 4096x4096)
+- **HSV color picker**: Three sliders (H: 0-360°, S: 0-100%, V: 0-100%) with click-and-drag support
+- **Custom colors palette**: Save up to 10 colors (FIFO), click to select, arrow keys to navigate
 - **168 unit tests** across canvas, geometry, export, preferences, renderer, and UI modules
 
 ### Changed
@@ -64,17 +66,6 @@
 
 ### Dependencies
 - Added `rfd = "0.15"` (Linux + Windows) for native file dialogs
-
-## [0.0.6] - 2026-03-30
-
-### Added
-- **HSV color picker**: Three sliders (H: 0-360°, S: 0-100%, V: 0-100%) with click-and-drag support
-- **Custom colors palette**: Save up to 10 colors (FIFO), click to select, arrow keys to navigate
-- **Test suite expansion**: 125 tests across canvas, geometry, preferences, and window modules
-
-### Documentation
-- **Updated CI workflow**: Test count updated to 125
-- **Updated README.md**: Added HSV color picker features, version 0.0.6
 
 ## [0.0.5] - 2026-03-29
 
@@ -137,7 +128,7 @@
 
 ### Technical Implementation
 - **WGPU rendering pipeline**: GPU-accelerated graphics with shader support
-- **Cairo fallback**: Software rendering for Linux/GTK4 compatibility
+
 - **Vertex generation**: Quad-based thick line rendering with proper normals
 - **Separate UI pipeline**: Independent rendering for UI elements
 - **Cross-platform compilation**: Conditional compilation for Windows/Linux
@@ -146,8 +137,7 @@
 - winit 0.30 for Windows window management
 - wgpu 28.0 for GPU-accelerated rendering
 - GTK4 0.9 for Linux/Wayland support
-- Cairo-rs 0.20 for Linux rendering
-- tokio for async runtime support
+- tokio (rt-multi-thread only)
 
 ### Platform Support
 - **Windows**: Full WGPU support with winit window management
