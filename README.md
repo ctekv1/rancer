@@ -7,7 +7,7 @@ A digital art application built in Rust with cross-platform support.
 
 ## Features
 
-- **GPU-accelerated rendering** — WGPU 28.0 with MSAA support, OpenGL fallback for Linux
+- **GPU-accelerated rendering** — WGPU 28.0 with MSAA support, OpenGL for Linux
 - **Layer system** — Multiple layers with visibility toggle, opacity, lock, reorder (up to 20 layers)
 - **Zoom & Pan** — Mouse wheel zoom toward cursor, space+drag panning, zoom UI buttons
 - **HSV color picker** — Three sliders with click-and-drag, custom saved colors palette (FIFO, max 10)
@@ -18,6 +18,9 @@ A digital art application built in Rust with cross-platform support.
 - **Native export** — File save dialog, OS notifications, stroke bounding box export (up to 4096×4096)
 - **Cross-platform** — winit/WGPU for Windows, GTK4/OpenGL for Linux
 - **Auto-saving preferences** — TOML config with platform-specific storage
+- **Frame rate limiter** — User-configurable FPS cap (default 60, 0=unlimited, Windows only)
+- **Performance optimizations** — Committed stroke vertex caching, UI vertex caching
+- **Raster layers** — Bitmap layer support (in progress)
 
 ## Build & Run
 
@@ -58,7 +61,9 @@ cargo run
 ```
 src/
 ├── canvas.rs          — Core data model: Stroke, Layer, Canvas, ActiveStroke, BrushType
+│                     RasterImage, RasterLayer, LayerContent (raster layer support)
 ├── renderer.rs        — WGPU rendering (Windows): uses RenderFrame pattern
+│                     raster_texture_cache, raster_pipeline (infrastructure)
 ├── opengl_renderer.rs — OpenGL rendering (Linux): uses GlRenderFrame pattern
 ├── geometry/          — Vertex generation for strokes and UI elements
 │   ├── mod.rs         — Shared utilities (hex_to_color, generate_rect, hsv_to_rgb)
@@ -69,6 +74,7 @@ src/
 ├── window_gtk4.rs     — Linux backend: GTK4 + OpenGL
 ├── window_backend.rs  — Shared trait for window backends
 ├── export.rs          — PNG export with bounding box computation
+│                     render_selection_region (raster selection support)
 ├── export_ui.rs       — Export dialog helpers, OS notifications
 ├── preferences.rs     — TOML-based config with platform-specific paths
 ├── gl_loader.rs       — OpenGL function loader for Linux
@@ -94,6 +100,17 @@ src/
 - **Windows:** `%APPDATA%\rancer\config.toml`
 - **Linux:** `~/.config/rancer/config.toml`
 
+### Adjustable Settings
+
+```toml
+[renderer]
+max_fps = 60        # Frame rate limit (0 = unlimited)
+msaa_samples = 4    # Anti-aliasing samples
+```
+
+- `max_fps`: Limits render rate to save power on laptops. Set to 0 for unlimited. (Currently Windows only)
+- `msaa_samples`: MSAA level (1, 2, 4, 8, 16). Higher = smoother lines but more GPU usage.
+
 ## Status
 
 - [x] Cross-platform window backends (winit + GTK4)
@@ -111,7 +128,13 @@ src/
 - [x] Export captures full canvas content (bounding box)
 - [x] Brush types (square, round, spray, calligraphy) with preference persistence
 - [x] Selection tool (rectangular selection with move/copy, marching ants animation)
+- [x] Frame rate limiter (configurable via config)
 - [ ] Transform tools (scale, rotate, flip)
+- [x] Raster pixel-edge selection (COMPLETE - Phases 1-3)
+  - Data structures: RasterImage, RasterLayer, LayerContent enum
+  - Selection stores bitmap, extracted on begin_selection
+  - commit_selection_to_raster() method
+  - Raster layer infrastructure ready (placeholder render)
 
 ## License
 

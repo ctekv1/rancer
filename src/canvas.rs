@@ -4,6 +4,7 @@
 //! This is a placeholder implementation that will be expanded with
 //! actual drawing, rendering, and GPU integration.
 
+use crate::export;
 use serde::{Deserialize, Serialize};
 
 /// Represents a 2D point in canvas space
@@ -155,13 +156,102 @@ pub struct Stroke {
 /// Maximum number of layers allowed
 pub const MAX_LAYERS: usize = 20;
 
+/// Wrapper for raster image data (RGBA pixels)
+/// Used for raster layers and selection bitmaps.
+/// NOTE: Do not remove - infrastructure for raster layer rendering.
+#[derive(Debug, Clone)]
+pub struct RasterImage {
+    pub width: u32,
+    pub height: u32,
+    pub data: Vec<u8>,
+}
+
+impl RasterImage {
+    pub fn new(width: u32, height: u32) -> Self {
+        Self {
+            width,
+            height,
+            data: vec![0; (width * height * 4) as usize],
+        }
+    }
+
+    pub fn get_pixel(&self, x: u32, y: u32) -> Option<(u8, u8, u8, u8)> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        let idx = ((y * self.width + x) * 4) as usize;
+        Some((self.data[idx], self.data[idx + 1], self.data[idx + 2], self.data[idx + 3]))
+    }
+
+    pub fn set_pixel(&mut self, x: u32, y: u32, r: u8, g: u8, b: u8, a: u8) {
+        if x >= self.width || y >= self.height {
+            return;
+        }
+        let idx = ((y * self.width + x) * 4) as usize;
+        self.data[idx] = r;
+        self.data[idx + 1] = g;
+        self.data[idx + 2] = b;
+        self.data[idx + 3] = a;
+    }
+}
+
+/// Raster layer - stores bitmap image data
+/// NOTE: Do not remove - infrastructure for raster layer rendering.
+#[derive(Debug, Clone)]
+pub struct RasterLayer {
+    pub image: RasterImage,
+    pub offset: (f32, f32),
+    pub opacity: f32,
+}
+
+/// Layer content type - either vector strokes or raster bitmap
+/// NOTE: Do not remove - infrastructure for raster layer rendering.
+#[derive(Debug, Clone)]
+pub enum LayerContent {
+    Vector(Vec<Stroke>),
+    Raster(RasterLayer),
+}
+
+impl LayerContent {
+    pub fn strokes(&self) -> &[Stroke] {
+        match self {
+            LayerContent::Vector(s) => s,
+            LayerContent::Raster(_) => &[],
+        }
+    }
+
+    pub fn strokes_mut(&mut self) -> &mut Vec<Stroke> {
+        match self {
+            LayerContent::Vector(s) => s,
+            LayerContent::Raster(_) => panic!("Cannot get strokes from raster layer"),
+        }
+    }
+
+    pub fn is_raster(&self) -> bool {
+        matches!(self, LayerContent::Raster(_))
+    }
+
+    pub fn opacity(&self) -> f32 {
+        match self {
+            LayerContent::Vector(_) => 1.0,
+            LayerContent::Raster(r) => r.opacity,
+        }
+    }
+}
+
+impl Default for LayerContent {
+    fn default() -> Self {
+        LayerContent::Vector(Vec::new())
+    }
+}
+
 /// Represents a single layer in the canvas
 #[derive(Debug, Clone)]
 pub struct Layer {
     /// Name of the layer
     pub name: String,
-    /// Strokes on this layer
-    pub strokes: Vec<Stroke>,
+    /// Layer content (vector strokes or raster bitmap)
+    pub content: LayerContent,
     /// Whether the layer is visible
     pub visible: bool,
     /// Opacity of the layer (0.0 to 1.0)
@@ -174,7 +264,7 @@ impl Default for Layer {
     fn default() -> Self {
         Self {
             name: "Layer 1".to_string(),
-            strokes: Vec::new(),
+            content: LayerContent::default(),
             visible: true,
             opacity: 1.0,
             locked: false,
@@ -191,9 +281,35 @@ impl Layer {
         }
     }
 
+    /// Get strokes (for vector layers)
+    pub fn strokes(&self) -> &[Stroke] {
+        self.content.strokes()
+    }
+
+    /// Get strokes mutably
+    pub fn strokes_mut(&mut self) -> &mut Vec<Stroke> {
+        self.content.strokes_mut()
+    }
+
+    /// Check if this is a raster layer
+    pub fn is_raster(&self) -> bool {
+        self.content.is_raster()
+    }
+
+    /// Get raster data if this is a raster layer
+    pub fn raster(&self) -> Option<&RasterLayer> {
+        match &self.content {
+            LayerContent::Raster(r) => Some(r),
+            LayerContent::Vector(_) => None,
+        }
+    }
+
     /// Clear all strokes from this layer
     pub fn clear(&mut self) {
-        self.strokes.clear();
+        match &mut self.content {
+            LayerContent::Vector(s) => s.clear(),
+            LayerContent::Raster(_) => {}
+        }
     }
 }
 
@@ -223,7 +339,9 @@ pub struct Canvas {
 pub struct Selection {
     /// Selection rectangle in canvas coordinates
     pub rect: Rect,
-    /// Selected stroke segments (moved versions)
+    /// Raster bitmap of selected pixels (if available)
+    pub bitmap: Option<RasterImage>,
+    /// Selected stroke segments (for compatibility/movement)
     pub strokes: Vec<Stroke>,
     /// Original layer index for each selected stroke
     pub original_layer_indices: Vec<usize>,
@@ -313,7 +431,7 @@ impl Canvas {
     /// Clear all strokes from the canvas
     pub fn clear(&mut self) {
         for layer in &mut self.layers {
-            layer.strokes.clear();
+            layer.clear();
         }
         self.undo_stack.clear();
         self.invalidate();
@@ -444,7 +562,7 @@ impl Canvas {
         if index >= self.layers.len() {
             return Err("Invalid layer index".to_string());
         }
-        self.layers[index].strokes.clear();
+        self.layers[index].clear();
         Ok(())
     }
 
@@ -457,7 +575,7 @@ impl Canvas {
     #[cfg(test)]
     pub fn layer_strokes(&self, layer_index: usize) -> &[Stroke] {
         if layer_index < self.layers.len() {
-            &self.layers[layer_index].strokes
+            self.layers[layer_index].strokes()
         } else {
             &[]
         }
@@ -465,7 +583,7 @@ impl Canvas {
 
     /// Add a stroke to the active layer
     pub fn add_stroke_to_active_layer(&mut self, stroke: Stroke) {
-        self.layers[self.active_layer].strokes.push(stroke);
+        self.layers[self.active_layer].strokes_mut().push(stroke);
         self.undo_stack.clear();
         self.invalidate();
     }
@@ -474,14 +592,14 @@ impl Canvas {
     #[cfg(test)]
     pub fn add_stroke_to_layer(&mut self, stroke: Stroke, layer_index: usize) {
         if layer_index < self.layers.len() {
-            self.layers[layer_index].strokes.push(stroke);
+            self.layers[layer_index].strokes_mut().push(stroke);
             self.invalidate();
         }
     }
 
     /// Undo the last stroke on the active layer
     pub fn undo(&mut self) {
-        if let Some(stroke) = self.layers[self.active_layer].strokes.pop() {
+        if let Some(stroke) = self.layers[self.active_layer].strokes_mut().pop() {
             self.undo_stack.push((self.active_layer, stroke));
             self.invalidate();
         }
@@ -492,14 +610,14 @@ impl Canvas {
         if let Some((layer_index, stroke)) = self.undo_stack.pop()
             && layer_index < self.layers.len()
         {
-            self.layers[layer_index].strokes.push(stroke);
+            self.layers[layer_index].strokes_mut().push(stroke);
             self.invalidate();
         }
     }
 
     /// Check if there are strokes available to undo on active layer
     pub fn can_undo(&self) -> bool {
-        !self.layers[self.active_layer].strokes.is_empty()
+        !self.layers[self.active_layer].strokes().is_empty()
     }
 
     /// Check if there are strokes available to redo
@@ -513,7 +631,7 @@ impl Canvas {
         let mut result = Vec::new();
         for layer in self.layers.iter().rev() {
             if layer.visible {
-                for stroke in &layer.strokes {
+                for stroke in layer.strokes() {
                     if stroke.points.len() >= 2 {
                         result.push((stroke, layer.opacity));
                     }
@@ -544,21 +662,23 @@ impl Canvas {
             let mut layer_removed: Vec<Stroke> = Vec::new();
             let mut kept_strokes: Vec<Stroke> = Vec::new();
 
-            for stroke in layer.strokes.drain(..) {
-                // Check if any point of this stroke is inside the rect
-                let has_point_in_rect = stroke.points.iter().any(|p| rect.contains(p.x, p.y));
-                if has_point_in_rect {
-                    // Select the entire stroke
-                    layer_removed.push(stroke.clone());
-                    strokes.push(stroke);
-                    original_layer_indices.push(layer_idx);
-                } else {
-                    // Keep this stroke in the layer
-                    kept_strokes.push(stroke);
+            // Only process vector layers for stroke-based selection
+            if let LayerContent::Vector(layer_strokes) = &mut layer.content {
+                for stroke in layer_strokes.drain(..) {
+                    // Check if any point of this stroke is inside the rect
+                    let has_point_in_rect = stroke.points.iter().any(|p| rect.contains(p.x, p.y));
+                    if has_point_in_rect {
+                        // Select the entire stroke
+                        layer_removed.push(stroke.clone());
+                        strokes.push(stroke);
+                        original_layer_indices.push(layer_idx);
+                    } else {
+                        // Keep this stroke in the layer
+                        kept_strokes.push(stroke);
+                    }
                 }
+                *layer_strokes = kept_strokes;
             }
-
-            layer.strokes = kept_strokes;
             if !layer_removed.is_empty() {
                 removed_strokes.push((layer_idx, layer_removed));
             }
@@ -567,8 +687,12 @@ impl Canvas {
         if strokes.is_empty() {
             self.selection = None;
         } else {
+            // Render selection region to bitmap
+            let bitmap = export::render_selection_region(self, rect).ok();
+
             self.selection = Some(Selection {
                 rect,
+                bitmap,
                 strokes,
                 original_layer_indices,
                 removed_strokes,
@@ -577,21 +701,27 @@ impl Canvas {
         self.invalidate();
     }
 
-    /// Offset all selected stroke points by the given delta.
+    /// Offset all selected content by the given delta.
     pub fn move_selection(&mut self, dx: f32, dy: f32) {
         if let Some(ref mut selection) = self.selection {
+            // Move strokes
             for stroke in &mut selection.strokes {
                 for point in &mut stroke.points {
                     point.x += dx;
                     point.y += dy;
                 }
             }
+            // Move rect
             selection.rect = Rect::new(
                 selection.rect.x + dx,
                 selection.rect.y + dy,
                 selection.rect.w,
                 selection.rect.h,
             );
+            // Move bitmap - when committed as raster, should appear at new position
+            // (bitmap is rendered at original position, so we track offset for later)
+            // For now, we need to re-render bitmap at new position - this is a limitation
+            // TODO: re-render bitmap at new position or track offset separately
         }
         self.invalidate();
     }
@@ -601,7 +731,7 @@ impl Canvas {
     pub fn copy_selection(&mut self) {
         if let Some(ref selection) = self.selection {
             for stroke in &selection.strokes {
-                self.layers[self.active_layer].strokes.push(stroke.clone());
+                self.layers[self.active_layer].strokes_mut().push(stroke.clone());
             }
         }
         self.invalidate();
@@ -612,10 +742,51 @@ impl Canvas {
     pub fn commit_selection(&mut self) {
         if let Some(selection) = self.selection.take() {
             for stroke in &selection.strokes {
-                self.layers[self.active_layer].strokes.push(stroke.clone());
+                self.layers[self.active_layer].strokes_mut().push(stroke.clone());
             }
             // removed_strokes are NOT restored — the moved strokes replace them
         }
+        self.invalidate();
+    }
+
+    /// Commit the selection as a new raster layer.
+    /// Renders at the current (possibly moved) position.
+    pub fn commit_selection_to_raster(&mut self) {
+        let selection = match self.selection.take() {
+            Some(s) => s,
+            None => return,
+        };
+
+        // Re-render at current position (in case selection was moved)
+        let rect = selection.rect;
+        let new_bitmap = export::render_selection_region(self, rect).ok();
+
+        let raster_layer = if let Some(bitmap) = new_bitmap {
+            RasterLayer {
+                image: bitmap,
+                offset: (rect.x, rect.y),
+                opacity: 1.0,
+            }
+        } else {
+            // Fallback: create empty raster if no bitmap available
+            let width = (rect.w.ceil().max(1.0) as u32).max(1);
+            let height = (rect.h.ceil().max(1.0) as u32).max(1);
+            RasterLayer {
+                image: RasterImage::new(width, height),
+                offset: (rect.x, rect.y),
+                opacity: 1.0,
+            }
+        };
+
+        let layer = Layer {
+            name: "Selection".to_string(),
+            content: LayerContent::Raster(raster_layer),
+            visible: true,
+            opacity: 1.0,
+            locked: false,
+        };
+
+        self.layers.push(layer);
         self.invalidate();
     }
 
@@ -625,7 +796,7 @@ impl Canvas {
         if let Some(selection) = self.selection.take() {
             for (layer_idx, removed) in selection.removed_strokes {
                 if layer_idx < self.layers.len() {
-                    self.layers[layer_idx].strokes.extend(removed);
+                    self.layers[layer_idx].strokes_mut().extend(removed);
                 }
             }
         }
@@ -826,7 +997,7 @@ mod tests {
     fn test_canvas_creation() {
         let canvas = Canvas::new();
         assert_eq!(canvas.size(), (1280, 720));
-        assert_eq!(canvas.layers()[0].strokes.len(), 0);
+        assert_eq!(canvas.layers()[0].strokes().len(), 0);
     }
 
     #[test]
@@ -847,7 +1018,7 @@ mod tests {
         };
 
         canvas.add_stroke_to_layer(stroke, 0);
-        assert_eq!(canvas.layers()[0].strokes.len(), 1);
+        assert_eq!(canvas.layers()[0].strokes().len(), 1);
     }
 
     #[test]
@@ -1258,7 +1429,7 @@ mod tests {
         assert!(layer.visible);
         assert_eq!(layer.opacity, 1.0);
         assert!(!layer.locked);
-        assert!(layer.strokes.is_empty());
+        assert!(layer.strokes().is_empty());
     }
 
     #[test]
@@ -1381,9 +1552,9 @@ mod tests {
             brush_type: BrushType::default(),
         };
         canvas.add_stroke_to_layer(stroke, 0);
-        assert_eq!(canvas.layers()[0].strokes.len(), 1);
+        assert_eq!(canvas.layers()[0].strokes().len(), 1);
         canvas.clear_layer(0).unwrap();
-        assert_eq!(canvas.layers()[0].strokes.len(), 0);
+        assert_eq!(canvas.layers()[0].strokes().len(), 0);
     }
 
     #[test]
@@ -1634,8 +1805,8 @@ mod tests {
         assert_eq!(selection.strokes.len(), 1);
         assert_eq!(selection.strokes[0].color, RED);
         // stroke2 should remain in the layer
-        assert_eq!(canvas.layers()[0].strokes.len(), 1);
-        assert_eq!(canvas.layers()[0].strokes[0].color, BLUE);
+        assert_eq!(canvas.layers()[0].strokes().len(), 1);
+        assert_eq!(canvas.layers()[0].strokes()[0].color, BLUE);
     }
 
     #[test]
@@ -1659,7 +1830,7 @@ mod tests {
         assert_eq!(selection.strokes.len(), 1);
         assert_eq!(selection.strokes[0].color, GREEN);
         // Layer should be empty (entire stroke was selected)
-        assert_eq!(canvas.layers()[0].strokes.len(), 0);
+        assert_eq!(canvas.layers()[0].strokes().len(), 0);
     }
 
     #[test]
@@ -1705,8 +1876,8 @@ mod tests {
         canvas.copy_selection();
 
         // Original stroke was removed from layer, copy added to active layer
-        assert_eq!(canvas.layers()[0].strokes.len(), 1);
-        assert_eq!(canvas.layers()[0].strokes[0].color, RED);
+        assert_eq!(canvas.layers()[0].strokes().len(), 1);
+        assert_eq!(canvas.layers()[0].strokes()[0].color, RED);
         // Selection still active
         assert!(canvas.has_selection());
     }
@@ -1731,9 +1902,9 @@ mod tests {
         // Selection cleared after commit
         assert!(!canvas.has_selection());
         // Moved stroke added to active layer
-        assert_eq!(canvas.layers()[0].strokes.len(), 1);
-        assert_eq!(canvas.layers()[0].strokes[0].points[0].x, 150.0);
-        assert_eq!(canvas.layers()[0].strokes[0].points[0].y, 150.0);
+        assert_eq!(canvas.layers()[0].strokes().len(), 1);
+        assert_eq!(canvas.layers()[0].strokes()[0].points[0].x, 150.0);
+        assert_eq!(canvas.layers()[0].strokes()[0].points[0].y, 150.0);
     }
 
     #[test]
@@ -1756,9 +1927,9 @@ mod tests {
         // Selection cleared
         assert!(!canvas.has_selection());
         // Original stroke restored
-        assert_eq!(canvas.layers()[0].strokes.len(), 1);
-        assert_eq!(canvas.layers()[0].strokes[0].points[0].x, 50.0);
-        assert_eq!(canvas.layers()[0].strokes[0].points[0].y, 50.0);
+        assert_eq!(canvas.layers()[0].strokes().len(), 1);
+        assert_eq!(canvas.layers()[0].strokes()[0].points[0].x, 50.0);
+        assert_eq!(canvas.layers()[0].strokes()[0].points[0].y, 50.0);
     }
 
     #[test]
@@ -1790,7 +1961,7 @@ mod tests {
         // No selection because layer is invisible
         assert!(!canvas.has_selection());
         // Both strokes remain in layer
-        assert_eq!(canvas.layers()[0].strokes.len(), 2);
+        assert_eq!(canvas.layers()[0].strokes().len(), 2);
     }
 
     #[test]
@@ -1809,7 +1980,7 @@ mod tests {
         canvas.begin_selection(rect);
 
         assert!(!canvas.has_selection());
-        assert_eq!(canvas.layers()[0].strokes.len(), 1);
+        assert_eq!(canvas.layers()[0].strokes().len(), 1);
     }
 
     #[test]
@@ -1847,8 +2018,8 @@ mod tests {
         let selection = canvas.selection().unwrap();
         assert_eq!(selection.strokes.len(), 2);
         // stroke3 should remain in layer
-        assert_eq!(canvas.layers()[0].strokes.len(), 1);
-        assert_eq!(canvas.layers()[0].strokes[0].color, GREEN);
+        assert_eq!(canvas.layers()[0].strokes().len(), 1);
+        assert_eq!(canvas.layers()[0].strokes()[0].color, GREEN);
     }
 
     #[test]
@@ -1870,7 +2041,7 @@ mod tests {
 
         // After copy + commit: original was restored, then moved stroke added
         assert!(!canvas.has_selection());
-        assert_eq!(canvas.layers()[0].strokes.len(), 2);
+        assert_eq!(canvas.layers()[0].strokes().len(), 2);
     }
 
     // ─── Version tracking tests ──────────────────────────────────────────────

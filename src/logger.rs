@@ -2,8 +2,10 @@
 //!
 //! Provides file-based logging with timestamps and log levels.
 //! Writes to `rancer.log` in the platform-specific data directory.
+//! Also provides timing utilities for profiling.
 
 use chrono::Local;
+use std::time::Instant;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
@@ -107,6 +109,31 @@ pub fn warn(msg: &str) {
 /// Log an error message
 pub fn error(msg: &str) {
     write_log(LogLevel::Error, msg);
+}
+
+/// Timing scope for profiling - prints elapsed time when dropped
+pub struct Timer {
+    name: &'static str,
+    start: Instant,
+}
+
+impl Timer {
+    pub fn new(name: &'static str) -> Self {
+        Self {
+            name,
+            start: Instant::now(),
+        }
+    }
+}
+
+impl Drop for Timer {
+    fn drop(&mut self) {
+        let elapsed = self.start.elapsed().as_secs_f64();
+        write_log(
+            LogLevel::Debug,
+            &format!("{} took {:.3}ms", self.name, elapsed * 1000.0),
+        );
+    }
 }
 
 #[cfg(test)]

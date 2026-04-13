@@ -52,6 +52,7 @@ pub struct BrushPreferences {
 pub struct RendererPreferences {
     pub msaa_samples: u32,
     pub clear_color: String, // Hex format: "#FFFFFF"
+    pub max_fps: u32,        // 0 = unlimited, default 60
 }
 
 /// Palette configuration
@@ -86,6 +87,7 @@ impl Default for Preferences {
             renderer: RendererPreferences {
                 msaa_samples: 1,
                 clear_color: "#FFFFFF".to_string(),
+                max_fps: 60,
             },
             palette: PalettePreferences {
                 h: 0.0,

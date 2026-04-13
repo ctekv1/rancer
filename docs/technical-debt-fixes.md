@@ -84,6 +84,6 @@ Added guard for `(0, 0)` window size during `resumed` phase.
 | `ui::tests` | 16 |
 | `logger::tests` | 2 |
 | `window_winit::tests` | 8 |
-| **Total** | **168** |
+| **Total** | **183** |
 
-All 168 tests pass with no regressions.
+All 183 tests pass with no regressions.

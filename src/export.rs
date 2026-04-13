@@ -20,13 +20,164 @@ const MAX_EXPORT_SIZE: u32 = 4096;
 
 /// Export canvas to PNG file
 pub fn export_to_png(canvas: &Canvas, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    logger::info(&format!("Exporting canvas to PNG: {:?}", path));
+    logger::info(&format!("Exporting canvas to {:?}", path));
 
     let image = render_canvas_to_image(canvas)?;
     image.save(path)?;
 
     logger::info(&format!("Export successful: {:?}", path));
     Ok(())
+}
+
+/// Render a selection region to RasterImage.
+/// Only renders strokes that intersect the given rect, clipped to the region bounds.
+pub fn render_selection_region(
+    canvas: &Canvas,
+    rect: crate::canvas::Rect,
+) -> Result<crate::canvas::RasterImage, Box<dyn std::error::Error>> {
+    let (rect_x, rect_y, rect_w, rect_h) = (rect.x, rect.y, rect.w, rect.h);
+    let width = (rect_w.ceil().max(1.0) as u32).max(1);
+    let height = (rect_h.ceil().max(1.0) as u32).max(1);
+
+    let mut raster = crate::canvas::RasterImage::new(width, height);
+
+    // Fill with background
+    let bg_color = canvas.background_color();
+    for y in 0..height {
+        for x in 0..width {
+            raster.set_pixel(x, y, bg_color.r, bg_color.g, bg_color.b, bg_color.a);
+        }
+    }
+
+    // Render strokes from all visible layers, clipped to rect
+    for (stroke, layer_opacity) in canvas.all_strokes() {
+        if !stroke_intersects_rect(stroke, rect) {
+            continue;
+        }
+
+        let adjusted_stroke = Stroke {
+            opacity: stroke.opacity * layer_opacity,
+            brush_type: stroke.brush_type,
+            ..stroke.clone()
+        };
+
+        render_stroke_to_raster(&mut raster, &adjusted_stroke, rect_x, rect_y)?;
+    }
+
+    Ok(raster)
+}
+
+/// Render a stroke to raster image
+fn render_stroke_to_raster(
+    raster: &mut crate::canvas::RasterImage,
+    stroke: &Stroke,
+    offset_x: f32,
+    offset_y: f32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mesh = geometry::generate_stroke_vertices_with_opacity(stroke, stroke.opacity);
+
+    if mesh.vertices.len() < 18 {
+        return Ok(());
+    }
+
+    let color = (
+        stroke.color.r,
+        stroke.color.g,
+        stroke.color.b,
+        (stroke.opacity * 255.0) as u8,
+    );
+
+    match mesh.mode {
+        DrawMode::TriangleStrip => {
+            for i in (0..mesh.vertices.len() - 12).step_by(12) {
+                let v0 = [mesh.vertices[i] - offset_x, mesh.vertices[i + 1] - offset_y];
+                let v1 = [
+                    mesh.vertices[i + 6] - offset_x,
+                    mesh.vertices[i + 7] - offset_y,
+                ];
+                let v2 = [
+                    mesh.vertices[i + 12] - offset_x,
+                    mesh.vertices[i + 13] - offset_y,
+                ];
+
+                raster_triangle(raster, &v0, &v1, &v2, color);
+
+                if i + 18 <= mesh.vertices.len() {
+                    let v3 = [
+                        mesh.vertices[i + 12] - offset_x,
+                        mesh.vertices[i + 13] - offset_y,
+                    ];
+                    let v4 = [
+                        mesh.vertices[i + 6] - offset_x,
+                        mesh.vertices[i + 7] - offset_y,
+                    ];
+                    let v5 = [
+                        mesh.vertices[i + 18] - offset_x,
+                        mesh.vertices[i + 19] - offset_y,
+                    ];
+                    raster_triangle(raster, &v3, &v4, &v5, color);
+                }
+            }
+        }
+        DrawMode::Triangles => {
+            for i in (0..mesh.vertices.len()).step_by(18) {
+                let v0 = [mesh.vertices[i] - offset_x, mesh.vertices[i + 1] - offset_y];
+                let v1 = [
+                    mesh.vertices[i + 6] - offset_x,
+                    mesh.vertices[i + 7] - offset_y,
+                ];
+                let v2 = [
+                    mesh.vertices[i + 12] - offset_x,
+                    mesh.vertices[i + 13] - offset_y,
+                ];
+                raster_triangle(raster, &v0, &v1, &v2, color);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Rasterize a triangle to raster image (simple bounding box approach)
+fn raster_triangle(
+    raster: &mut crate::canvas::RasterImage,
+    v0: &[f32; 2],
+    v1: &[f32; 2],
+    v2: &[f32; 2],
+    color: (u8, u8, u8, u8),
+) {
+    let w = raster.width as i32;
+    let h = raster.height as i32;
+
+    let min_x = v0[0].min(v1[0]).min(v2[0]).max(0.0) as i32;
+    let min_y = v0[1].min(v1[1]).min(v2[1]).max(0.0) as i32;
+    let max_x = v0[0].max(v1[0]).max(v2[0]).min(w as f32 - 0.01).ceil() as i32;
+    let max_y = v0[1].max(v1[1]).max(v2[1]).min(h as f32 - 0.01).ceil() as i32;
+
+    for y in min_y..max_y {
+        for x in min_x..max_x {
+            let px = x as f32 + 0.5;
+            let py = y as f32 + 0.5;
+            if geometry::point_in_triangle(px, py, v0, v1, v2) {
+                raster.set_pixel(x as u32, y as u32, color.0, color.1, color.2, color.3);
+            }
+        }
+    }
+}
+
+/// Check if a stroke intersects a rectangle
+fn stroke_intersects_rect(stroke: &Stroke, rect: crate::canvas::Rect) -> bool {
+    for point in &stroke.points {
+        let half_w = stroke.width / 2.0;
+        if point.x + half_w >= rect.x
+            && point.x - half_w <= rect.x + rect.w
+            && point.y + half_w >= rect.y
+            && point.y - half_w <= rect.y + rect.h
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// Compute the bounding box of all strokes across all visible layers.

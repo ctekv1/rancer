@@ -3,7 +3,7 @@
 //! Provides GPU-accelerated rendering for the canvas using wgpu.
 //! The renderer is stateless — all render data is passed via `RenderFrame`.
 
-use crate::canvas::{ActiveStroke, BrushType, Canvas, Color, Stroke};
+use crate::canvas::{ActiveStroke, BrushType, Canvas, Color, LayerContent, Stroke};
 use crate::geometry::{self, DrawMode, StrokeMesh};
 use crate::logger;
 use std::cell::RefCell;
@@ -95,6 +95,24 @@ pub struct RenderFrame<'a> {
     pub viewport: ViewportState,
 }
 
+/// UI cache key for WGPU renderer
+#[derive(Clone, Debug, PartialEq)]
+struct UiCacheKey {
+    hue: f32,
+    saturation: f32,
+    value: f32,
+    selected_custom_index: i32,
+    brush_size: f32,
+    opacity: f32,
+    is_eraser: bool,
+    brush_type: BrushType,
+    selection_tool_active: bool,
+    can_undo: bool,
+    can_redo: bool,
+    active_layer: usize,
+    layer_count: usize,
+}
+
 /// WGPU-based renderer for the canvas
 pub struct Renderer {
     /// Configuration
@@ -135,6 +153,22 @@ pub struct Renderer {
     committed_tri_buffer: RefCell<Option<wgpu::Buffer>>,
     /// Canvas version when cache was last populated
     canvas_version_cached: u64,
+    /// Cached UI vertices (reused when UI state unchanged)
+    ui_vertex_cache: Vec<[f32; 6]>,
+    /// UI state key for cache validation
+    ui_cache_key: Option<UiCacheKey>,
+    /// GPU texture for raster layers
+    #[allow(dead_code)]
+    raster_texture_cache: Vec<Option<wgpu::Texture>>,
+    /// Bind group for raster layers
+    #[allow(dead_code)]
+    raster_bind_group_cache: Vec<Option<wgpu::BindGroup>>,
+    /// Sampler for raster textures
+    #[allow(dead_code)]
+    raster_sampler: Option<wgpu::Sampler>,
+    /// Raster render pipeline
+    #[allow(dead_code)]
+    raster_pipeline: Option<wgpu::RenderPipeline>,
 }
 
 impl Renderer {
@@ -185,6 +219,12 @@ impl Renderer {
                     committed_strip_buffer: RefCell::new(None),
                     committed_tri_buffer: RefCell::new(None),
                     canvas_version_cached: 0,
+                    ui_vertex_cache: Vec::new(),
+                    ui_cache_key: None,
+                    raster_texture_cache: Vec::new(),
+                    raster_bind_group_cache: Vec::new(),
+                    raster_sampler: None,
+                    raster_pipeline: None,
                 })
             }
             Err(e) => {
@@ -213,6 +253,12 @@ impl Renderer {
                         committed_strip_buffer: RefCell::new(None),
                         committed_tri_buffer: RefCell::new(None),
                         canvas_version_cached: 0,
+                        ui_vertex_cache: Vec::new(),
+                        ui_cache_key: None,
+                        raster_texture_cache: Vec::new(),
+                        raster_bind_group_cache: Vec::new(),
+                        raster_sampler: None,
+                        raster_pipeline: None,
                     })
                 }
                 #[cfg(target_os = "windows")]
@@ -646,7 +692,13 @@ impl Renderer {
                 }
                 let cache = &mut self.layer_stroke_cache[layer_idx];
 
-                for stroke in &layer.strokes {
+                // Only process vector layers
+                let strokes = match &layer.content {
+                    LayerContent::Vector(s) => s,
+                    LayerContent::Raster(_) => continue,
+                };
+
+                for stroke in strokes {
                     if stroke.points.len() >= 2 {
                         let mesh = stroke_to_mesh_7(stroke, layer.opacity);
                         let converted = mesh_to_vertices(&mesh);
@@ -666,6 +718,28 @@ impl Renderer {
 
             self.canvas_version_cached = canvas.version();
         }
+    }
+
+    /// Create a GPU texture from raster image data (placeholder - needs full implementation)
+    #[allow(dead_code)]
+    fn create_raster_texture(
+        &self,
+        device: &wgpu::Device,
+        _image: &crate::canvas::RasterImage,
+    ) -> Option<wgpu::Texture> {
+        // Placeholder - creates empty texture
+        // Full implementation would use queue.write_texture
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Raster Texture"),
+            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        Some(texture)
     }
 
     /// Ensure GPU buffers are created and sized for the given vertex counts.
@@ -705,6 +779,7 @@ impl Renderer {
 
     /// Render the current frame using data from `frame`
     pub fn render(&mut self, frame: &RenderFrame) -> Result<(), wgpu::SurfaceError> {
+        let _timer = logger::Timer::new("Full render frame");
         match self.backend {
             RenderBackend::Wgpu => {
                 logger::debug("[RENDER] Using WGPU backend (GPU-accelerated)");
@@ -721,6 +796,8 @@ impl Renderer {
     fn render_wgpu(&mut self, frame: &RenderFrame) -> Result<(), wgpu::SurfaceError> {
         use wgpu::util::DeviceExt;
 
+        let _cache_timer = logger::Timer::new("Stroke cache update");
+
         // Ensure committed stroke cache is valid first (before borrowing self for GPU resources)
         self.ensure_cache_valid(frame.canvas);
 
@@ -733,8 +810,17 @@ impl Renderer {
         let active_layer_idx = frame.canvas.active_layer();
         let layers = frame.canvas.layers();
 
+        // First pass: collect vector strokes and prepare raster layer data
+        let mut raster_layers_data: Vec<(usize, &crate::canvas::RasterLayer)> = Vec::new();
+        
         for (layer_idx, layer) in layers.iter().enumerate().rev() {
             if !layer.visible {
+                continue;
+            }
+
+            // Collect raster layers for separate rendering
+            if let LayerContent::Raster(raster) = &layer.content {
+                raster_layers_data.push((layer_idx, raster));
                 continue;
             }
 
@@ -1019,51 +1105,87 @@ impl Renderer {
             });
 
             if let Some(ui_pipeline) = &self.ui_pipeline {
-                let mut all_ui_vertices: Vec<[f32; 6]> = Vec::new();
+                // Build UI cache key (exclude selection_rect which animates every frame)
+                let cache_key = UiCacheKey {
+                    hue: frame.ui.hue,
+                    saturation: frame.ui.saturation,
+                    value: frame.ui.value,
+                    selected_custom_index: frame.ui.selected_custom_index,
+                    brush_size: frame.ui.brush_size,
+                    opacity: frame.ui.opacity,
+                    is_eraser: frame.ui.is_eraser,
+                    brush_type: frame.ui.brush_type,
+                    selection_tool_active: frame.ui.selection_tool_active,
+                    can_undo: frame.canvas.can_undo(),
+                    can_redo: frame.canvas.can_redo(),
+                    active_layer: frame.canvas.active_layer(),
+                    layer_count: frame.canvas.layer_count(),
+                };
 
-                all_ui_vertices.extend(flat_to_vertices(&geometry::generate_hsv_sliders(
-                    frame.ui.hue,
-                    frame.ui.saturation,
-                    frame.ui.value,
-                )));
-                all_ui_vertices.extend(flat_to_vertices(&geometry::generate_custom_palette(
-                    frame.ui.custom_colors,
-                    frame.ui.selected_custom_index as usize,
-                )));
-                all_ui_vertices.extend(flat_to_vertices(&geometry::generate_brush_size_vertices(
-                    frame.ui.brush_size,
-                )));
-                all_ui_vertices.extend(flat_to_vertices(
-                    &geometry::generate_eraser_button_vertices(frame.ui.is_eraser),
-                ));
-                all_ui_vertices
-                    .extend(flat_to_vertices(&geometry::generate_clear_button_vertices()));
-                all_ui_vertices.extend(flat_to_vertices(&geometry::generate_undo_button_vertices(
-                    frame.canvas.can_undo(),
-                )));
-                all_ui_vertices.extend(flat_to_vertices(&geometry::generate_redo_button_vertices(
-                    frame.canvas.can_redo(),
-                )));
-                all_ui_vertices.extend(flat_to_vertices(
-                    &geometry::generate_export_button_vertices(),
-                ));
-                all_ui_vertices.extend(flat_to_vertices(
-                    &geometry::generate_zoom_in_button_vertices(),
-                ));
-                all_ui_vertices.extend(flat_to_vertices(
-                    &geometry::generate_zoom_out_button_vertices(),
-                ));
-                all_ui_vertices.extend(flat_to_vertices(
-                    &geometry::generate_opacity_preset_vertices(frame.ui.opacity),
-                ));
-                all_ui_vertices.extend(flat_to_vertices(&geometry::generate_brush_type_vertices(
-                    frame.ui.brush_type,
-                )));
-                all_ui_vertices.extend(flat_to_vertices(
-                    &geometry::generate_selection_tool_button(frame.ui.selection_tool_active),
-                ));
+                // Regenerate UI only if state changed (excluding selection_rect which animates)
+                if Some(&cache_key) != self.ui_cache_key.as_ref() {
+                    let mut new_cache: Vec<[f32; 6]> = Vec::new();
+
+                    new_cache.extend(flat_to_vertices(&geometry::generate_hsv_sliders(
+                        frame.ui.hue,
+                        frame.ui.saturation,
+                        frame.ui.value,
+                    )));
+                    new_cache.extend(flat_to_vertices(&geometry::generate_custom_palette(
+                        frame.ui.custom_colors,
+                        frame.ui.selected_custom_index as usize,
+                    )));
+                    new_cache.extend(flat_to_vertices(&geometry::generate_brush_size_vertices(
+                        frame.ui.brush_size,
+                    )));
+                    new_cache.extend(flat_to_vertices(
+                        &geometry::generate_eraser_button_vertices(frame.ui.is_eraser),
+                    ));
+                    new_cache
+                        .extend(flat_to_vertices(&geometry::generate_clear_button_vertices()));
+                    new_cache.extend(flat_to_vertices(&geometry::generate_undo_button_vertices(
+                        frame.canvas.can_undo(),
+                    )));
+                    new_cache.extend(flat_to_vertices(&geometry::generate_redo_button_vertices(
+                        frame.canvas.can_redo(),
+                    )));
+                    new_cache.extend(flat_to_vertices(
+                        &geometry::generate_export_button_vertices(),
+                    ));
+                    new_cache.extend(flat_to_vertices(
+                        &geometry::generate_zoom_in_button_vertices(),
+                    ));
+                    new_cache.extend(flat_to_vertices(
+                        &geometry::generate_zoom_out_button_vertices(),
+                    ));
+                    new_cache.extend(flat_to_vertices(
+                        &geometry::generate_opacity_preset_vertices(frame.ui.opacity),
+                    ));
+                    new_cache.extend(flat_to_vertices(&geometry::generate_brush_type_vertices(
+                        frame.ui.brush_type,
+                    )));
+                    new_cache.extend(flat_to_vertices(
+                        &geometry::generate_selection_tool_button(frame.ui.selection_tool_active),
+                    ));
+
+                    let layers: Vec<(String, bool, f32, bool)> = frame
+                        .canvas
+                        .layers()
+                        .iter()
+                        .map(|l| (l.name.clone(), l.visible, l.opacity, l.locked))
+                        .collect();
+                    new_cache.extend(flat_to_vertices(&geometry::generate_layer_panel_vertices(
+                        &layers,
+                        frame.canvas.active_layer(),
+                        self.window_size.0 as f32,
+                    )));
+
+                    self.ui_vertex_cache = new_cache;
+                    self.ui_cache_key = Some(cache_key);
+                }
 
                 // Selection rect uses Triangles mode (dashes are independent quads)
+                // This is NOT cached because the selection rect animates (marching ants)
                 let mut selection_rect_vertices: Vec<[f32; 6]> = Vec::new();
                 if let Some(rect) = frame.ui.selection_rect {
                     let flat =
@@ -1071,29 +1193,17 @@ impl Renderer {
                     selection_rect_vertices.extend(flat_to_vertices(&flat));
                 }
 
-                let layers: Vec<(String, bool, f32, bool)> = frame
-                    .canvas
-                    .layers()
-                    .iter()
-                    .map(|l| (l.name.clone(), l.visible, l.opacity, l.locked))
-                    .collect();
-                all_ui_vertices.extend(flat_to_vertices(&geometry::generate_layer_panel_vertices(
-                    &layers,
-                    frame.canvas.active_layer(),
-                    self.window_size.0 as f32,
-                )));
-
-                if !all_ui_vertices.is_empty() {
+                if !self.ui_vertex_cache.is_empty() {
                     let ui_vertex_buffer =
                         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some("Combined UI Vertex Buffer"),
-                            contents: bytemuck::cast_slice(&all_ui_vertices),
+                            contents: bytemuck::cast_slice(&self.ui_vertex_cache),
                             usage: wgpu::BufferUsages::VERTEX,
                         });
                     render_pass.set_pipeline(ui_pipeline);
                     render_pass.set_bind_group(0, &ui_bind_group, &[]);
                     render_pass.set_vertex_buffer(0, ui_vertex_buffer.slice(..));
-                    render_pass.draw(0..all_ui_vertices.len() as u32, 0..1);
+                    render_pass.draw(0..self.ui_vertex_cache.len() as u32, 0..1);
                 }
 
                 if !selection_rect_vertices.is_empty()

@@ -6,7 +6,8 @@
 use glow::HasContext;
 use std::rc::Rc;
 
-use crate::canvas::{ActiveStroke, BrushType, Canvas};
+use crate::canvas::{ActiveStroke, BrushType, Canvas, LayerContent};
+use crate::logger;
 use crate::geometry::{self, DrawMode, StrokeMesh};
 
 const VERTEX_SHADER_SOURCE: &str = r#"
@@ -85,6 +86,24 @@ impl LayerStrokeCache {
     }
 }
 
+/// UI cache key - tracks values that affect UI rendering
+#[derive(Clone, Debug, PartialEq)]
+struct UiCacheKey {
+    hue: f32,
+    saturation: f32,
+    value: f32,
+    selected_custom_index: i32,
+    brush_size: f32,
+    opacity: f32,
+    is_eraser: bool,
+    brush_type: BrushType,
+    selection_tool_active: bool,
+    can_undo: bool,
+    can_redo: bool,
+    active_layer: usize,
+    layer_count: usize,
+}
+
 /// OpenGL renderer for GTK4 GLArea
 pub struct GlRenderer {
     gl: Rc<glow::Context>,
@@ -98,6 +117,10 @@ pub struct GlRenderer {
     layer_stroke_cache: Vec<LayerStrokeCache>,
     /// Canvas version when cache was last populated
     canvas_version_cached: u64,
+    /// Cached UI vertices (reused when UI state unchanged)
+    ui_vertex_cache: Vec<f32>,
+    /// UI state key for cache validation
+    ui_cache_key: Option<UiCacheKey>,
 }
 
 impl GlRenderer {
@@ -157,6 +180,8 @@ impl GlRenderer {
                 pan_offset_uniform,
                 layer_stroke_cache: Vec::new(),
                 canvas_version_cached: 0,
+                ui_vertex_cache: Vec::new(),
+                ui_cache_key: None,
             })
         }
     }
@@ -176,7 +201,13 @@ impl GlRenderer {
                 }
                 let cache = &mut self.layer_stroke_cache[layer_idx];
 
-                for stroke in &layer.strokes {
+                // Only process vector layers
+                let strokes = match &layer.content {
+                    LayerContent::Vector(s) => s,
+                    LayerContent::Raster(_) => continue,
+                };
+
+                for stroke in strokes {
                     if stroke.points.len() >= 2 {
                         let mesh =
                             geometry::generate_stroke_vertices_with_opacity(stroke, layer.opacity);
@@ -257,7 +288,10 @@ impl GlRenderer {
 
     /// Render a frame: clear, draw strokes, draw UI
     pub fn render(&mut self, frame: &GlRenderFrame) {
+        let _timer = logger::Timer::new("OpenGL render frame");
         let (width, height) = frame.window_size;
+
+        let _cache_timer = logger::Timer::new("Stroke cache update");
 
         // Ensure committed stroke cache is valid
         self.ensure_cache_valid(frame.canvas);
@@ -287,6 +321,12 @@ impl GlRenderer {
             let layers = frame.canvas.layers();
             for (layer_idx, layer) in layers.iter().enumerate().rev() {
                 if !layer.visible {
+                    continue;
+                }
+
+                // Handle raster layers - skipped for now
+                // Full texture rendering will be added in Phase 2
+                if let LayerContent::Raster(_) = &layer.content {
                     continue;
                 }
 
@@ -328,53 +368,74 @@ impl GlRenderer {
             self.gl
                 .uniform_2_f32(Some(&self.pan_offset_uniform), 0.0, 0.0);
 
-            // Batch all UI vertices into a single upload and draw call
-            let mut all_ui_vertices: Vec<f32> = Vec::new();
+            // Build UI cache key from current state
+            let cache_key = UiCacheKey {
+                hue: frame.ui.hue,
+                saturation: frame.ui.saturation,
+                value: frame.ui.value,
+                selected_custom_index: frame.ui.selected_custom_index,
+                brush_size: frame.ui.brush_size,
+                opacity: frame.ui.opacity,
+                is_eraser: frame.ui.is_eraser,
+                brush_type: frame.ui.brush_type,
+                selection_tool_active: frame.ui.selection_tool_active,
+                can_undo: frame.canvas.can_undo(),
+                can_redo: frame.canvas.can_redo(),
+                active_layer: frame.canvas.active_layer(),
+                layer_count: frame.canvas.layer_count(),
+            };
 
-            all_ui_vertices.extend(geometry::generate_hsv_sliders(
-                frame.ui.hue,
-                frame.ui.saturation,
-                frame.ui.value,
-            ));
-            all_ui_vertices.extend(geometry::generate_custom_palette(
-                &frame.ui.custom_colors,
-                frame.ui.selected_custom_index as usize,
-            ));
-            all_ui_vertices.extend(geometry::generate_brush_size_vertices(frame.ui.brush_size));
-            all_ui_vertices.extend(geometry::generate_eraser_button_vertices(
-                frame.ui.is_eraser,
-            ));
-            all_ui_vertices.extend(geometry::generate_clear_button_vertices());
-            all_ui_vertices.extend(geometry::generate_undo_button_vertices(
-                frame.canvas.can_undo(),
-            ));
-            all_ui_vertices.extend(geometry::generate_redo_button_vertices(
-                frame.canvas.can_redo(),
-            ));
-            all_ui_vertices.extend(geometry::generate_export_button_vertices());
-            all_ui_vertices.extend(geometry::generate_zoom_in_button_vertices());
-            all_ui_vertices.extend(geometry::generate_zoom_out_button_vertices());
-            all_ui_vertices.extend(geometry::generate_opacity_preset_vertices(frame.ui.opacity));
-            all_ui_vertices.extend(geometry::generate_brush_type_vertices(frame.ui.brush_type));
-            all_ui_vertices.extend(geometry::generate_selection_tool_button(
-                frame.ui.selection_tool_active,
-            ));
-            // Selection rect is rendered in a separate overlay pass (render_selection_overlay)
+            // Regenerate UI only if state changed
+            if Some(&cache_key) != self.ui_cache_key.as_ref() {
+                let mut new_cache: Vec<f32> = Vec::new();
 
-            let layer_data: Vec<(String, bool, f32, bool)> = frame
-                .canvas
-                .layers()
-                .iter()
-                .map(|l| (l.name.clone(), l.visible, l.opacity, l.locked))
-                .collect();
-            all_ui_vertices.extend(geometry::generate_layer_panel_vertices(
-                &layer_data,
-                frame.canvas.active_layer(),
-                width as f32,
-            ));
+                new_cache.extend(geometry::generate_hsv_sliders(
+                    frame.ui.hue,
+                    frame.ui.saturation,
+                    frame.ui.value,
+                ));
+                new_cache.extend(geometry::generate_custom_palette(
+                    &frame.ui.custom_colors,
+                    frame.ui.selected_custom_index as usize,
+                ));
+                new_cache.extend(geometry::generate_brush_size_vertices(frame.ui.brush_size));
+                new_cache.extend(geometry::generate_eraser_button_vertices(
+                    frame.ui.is_eraser,
+                ));
+                new_cache.extend(geometry::generate_clear_button_vertices());
+                new_cache.extend(geometry::generate_undo_button_vertices(
+                    frame.canvas.can_undo(),
+                ));
+                new_cache.extend(geometry::generate_redo_button_vertices(
+                    frame.canvas.can_redo(),
+                ));
+                new_cache.extend(geometry::generate_export_button_vertices());
+                new_cache.extend(geometry::generate_zoom_in_button_vertices());
+                new_cache.extend(geometry::generate_zoom_out_button_vertices());
+                new_cache.extend(geometry::generate_opacity_preset_vertices(frame.ui.opacity));
+                new_cache.extend(geometry::generate_brush_type_vertices(frame.ui.brush_type));
+                new_cache.extend(geometry::generate_selection_tool_button(
+                    frame.ui.selection_tool_active,
+                ));
 
-            if !all_ui_vertices.is_empty() {
-                self.upload_and_draw(&all_ui_vertices, glow::TRIANGLES);
+                let layer_data: Vec<(String, bool, f32, bool)> = frame
+                    .canvas
+                    .layers()
+                    .iter()
+                    .map(|l| (l.name.clone(), l.visible, l.opacity, l.locked))
+                    .collect();
+                new_cache.extend(geometry::generate_layer_panel_vertices(
+                    &layer_data,
+                    frame.canvas.active_layer(),
+                    width as f32,
+                ));
+
+                self.ui_vertex_cache = new_cache;
+                self.ui_cache_key = Some(cache_key);
+            }
+
+            if !self.ui_vertex_cache.is_empty() {
+                self.upload_and_draw(&self.ui_vertex_cache, glow::TRIANGLES);
             }
 
             self.gl.bind_vertex_array(None);

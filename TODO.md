@@ -22,12 +22,20 @@
 
 ## Tier 2 - Professional Features (v0.0.7)
 
-- [ ] Raster Pixel-Edge Selection (refinement for Selection Tool)
-    - [ ] Replace whole-stroke selection with true pixel-level raster selection
-    - [ ] Render strokes to offscreen texture, extract pixels within rect
-    - [ ] Selected pixels become movable bitmap overlay
-    - [ ] On deselect: convert bitmap back to strokes or keep as layer
-    - [ ] Handles partial strokes at boundary with pixel precision
+- [x] Raster Pixel-Edge Selection (refinement for Selection Tool) - Phases 1-3
+    - [x] Data structures: RasterImage, RasterLayer, LayerContent enum
+    - [x] Layer uses LayerContent (vector or raster)
+    - [x] Selection stores bitmap field
+    - [x] render_selection_region in export.rs
+    - [x] WGPU/OpenGL infrastructure ready
+    - [x] Selection bitmap extraction on begin_selection
+    - [x] commit_selection_to_raster() method
+    - [x] Raster layer infrastructure ready (full texture render pending)
+    - NOTE: Dead code fields marked with #[allow(dead_code)] - DO NOT REMOVE
+      These are infrastructure for Phase 3+ full texture rendering:
+      - Renderer::raster_texture_cache / raster_bind_group_cache / raster_sampler / raster_pipeline
+      - Renderer::create_raster_texture() method needed for queue.write_texture
+      - Update shader.wgsl with vs_textured/fs_textured entry points
 - [ ] Transform Tools - Scale, rotate, flip canvas/strokes
 
 ## Tier 3 - File Management (v0.0.9)
@@ -54,8 +62,8 @@
     - [x] Add committed stroke CPU cache to `GlRenderer` (`src/opengl_renderer.rs`): same per-layer caching pattern
     - [x] In render loops: skip committed stroke regeneration when `canvas.version() == self.canvas_version_cached`; only the active stroke regenerates every frame
     - Expected impact: eliminates ~138 MB/sec of wasted CPU vertex generation at 60 FPS with 10 round-brush strokes
-- [ ] **UI vertex caching** — Cache UI element vertices (palette, sliders, buttons). Currently regenerates every frame but UI rarely changes.
-- [ ] **Profiling instrumentation** — Add timing to measure render pipeline bottlenecks and verify optimization impact
+- [x] **UI vertex caching** — Cache UI element vertices (palette, sliders, buttons). Both WGPU and OpenGL renderers now cache UI vertices and only regenerate when state changes.
+- [x] **Profiling instrumentation** — Added `Timer` in logger.rs. Added to renderers: full frame, stroke cache update. Logs timing on Drop.
 
 ## Future Performance (v0.0.8+)
 
@@ -64,7 +72,7 @@ Note: Unlike professional tools like Krita (which use CPU for brush rendering), 
 - [ ] **Level of Detail (LOD) rendering** — When zoomed out significantly, reduce stroke detail to improve performance. Store multiple detail levels per stroke for fast LOD switching.
 - [ ] **Multithreaded stroke generation** — Parallelize geometry generation for complex brush types using Rayon or similar. Useful if future brush types become more CPU-intensive.
 - [ ] **Stroke LOD cache** — Store multiple detail levels per stroke for fast LOD switching without regeneration.
-- [ ] **Frame rate limiter option** — User-configurable FPS cap for lower-end hardware. Rancer is already GPU-efficient but frame limiting can reduce power consumption.
+- [x] **Frame rate limiter option** — Added `max_fps` to preferences (0=unlimited, default 60). Windows uses winit's wait_timeout for rate limiting. (Linux TBD)
 - [ ] **Brush type architecture** — If adding complex brushes (particle effects, procedural textures), consider separating GPU-friendly brushes from CPU-parallelized brushes.
 
 ## Technical Debt & Known Issues
