@@ -1,7 +1,7 @@
 /target
-CONTEXT.md
 /releases
 *.log
 /.claude
 CLAUDE.md
 rancer.log
+/coverage/

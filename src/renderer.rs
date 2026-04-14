@@ -731,7 +731,11 @@ impl Renderer {
         // Full implementation would use queue.write_texture
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Raster Texture"),
-            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -812,7 +816,7 @@ impl Renderer {
 
         // First pass: collect vector strokes and prepare raster layer data
         let mut raster_layers_data: Vec<(usize, &crate::canvas::RasterLayer)> = Vec::new();
-        
+
         for (layer_idx, layer) in layers.iter().enumerate().rev() {
             if !layer.visible {
                 continue;
@@ -1141,8 +1145,7 @@ impl Renderer {
                     new_cache.extend(flat_to_vertices(
                         &geometry::generate_eraser_button_vertices(frame.ui.is_eraser),
                     ));
-                    new_cache
-                        .extend(flat_to_vertices(&geometry::generate_clear_button_vertices()));
+                    new_cache.extend(flat_to_vertices(&geometry::generate_clear_button_vertices()));
                     new_cache.extend(flat_to_vertices(&geometry::generate_undo_button_vertices(
                         frame.canvas.can_undo(),
                     )));
@@ -1164,9 +1167,9 @@ impl Renderer {
                     new_cache.extend(flat_to_vertices(&geometry::generate_brush_type_vertices(
                         frame.ui.brush_type,
                     )));
-                    new_cache.extend(flat_to_vertices(
-                        &geometry::generate_selection_tool_button(frame.ui.selection_tool_active),
-                    ));
+                    new_cache.extend(flat_to_vertices(&geometry::generate_selection_tool_button(
+                        frame.ui.selection_tool_active,
+                    )));
 
                     let layers: Vec<(String, bool, f32, bool)> = frame
                         .canvas

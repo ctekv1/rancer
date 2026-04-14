@@ -53,6 +53,19 @@ jobs:
       - name: Check documentation
         run: cargo doc --no-deps
 
+      - name: Code Coverage
+        run: |
+          cargo install cargo-tarpaulin --locked || true
+          cargo tarpaulin --out Json --out Html --out Xml
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-reports
+          path: coverage/
+          retention-days: 7
+
   build-and-test-windows:
     runs-on: windows-latest
     steps:
@@ -117,6 +130,13 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     steps:
+      - name: Download coverage reports
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-reports
+          path: coverage/
+          if-no-files-found: ignore
+
       - name: Check all jobs passed
         run: |
           if [ "${{ needs.build-and-test-linux.result }}" != "success" ] || \
@@ -126,3 +146,10 @@ jobs:
             exit 1
           fi
           echo "All CI jobs passed"
+
+      - name: Show coverage summary
+        run: |
+          if [ -f "coverage/tarpaulin.json" ]; then
+            cat coverage/tarpaulin.json | jq '.[] | "Line coverage: \(.line_covered_percent)%"' || true
+          fi
+          echo "Coverage reports available at: coverage/"

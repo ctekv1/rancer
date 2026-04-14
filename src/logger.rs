@@ -5,11 +5,11 @@
 //! Also provides timing utilities for profiling.
 
 use chrono::Local;
-use std::time::Instant;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::Instant;
 
 /// Log levels
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -1680,4 +1680,130 @@ mod tests {
         assert!(!vertices_25.is_empty());
         assert!(!vertices_100.is_empty());
     }
+
+    #[test]
+    fn test_generate_hsv_sliders_returns_data() {
+        let vertices = generate_hsv_sliders(0.0, 100.0, 100.0);
+        assert!(!vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_hsv_sliders_different_hue() {
+        let v0 = generate_hsv_sliders(0.0, 100.0, 100.0);
+        let v180 = generate_hsv_sliders(180.0, 100.0, 100.0);
+        let v360 = generate_hsv_sliders(360.0, 100.0, 100.0);
+        assert!(!v0.is_empty());
+        assert!(!v180.is_empty());
+        assert!(!v360.is_empty());
+    }
+
+    #[test]
+    fn test_generate_custom_palette_empty() {
+        let vertices = generate_custom_palette(&[], 999);
+        assert_eq!(vertices.len(), 0);
+    }
+
+    #[test]
+    fn test_generate_custom_palette_single_color() {
+        let colors: [[u8; 3]; 1] = [[255, 0, 0]];
+        let vertices = generate_custom_palette(&colors, 0);
+        assert!(!vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_brush_type_square() {
+        use crate::canvas::BrushType;
+        let vertices = generate_brush_type_vertices(BrushType::Square);
+        assert!(!vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_brush_type_round() {
+        use crate::canvas::BrushType;
+        let vertices = generate_brush_type_vertices(BrushType::Round);
+        assert!(!vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_brush_type_spray() {
+        use crate::canvas::BrushType;
+        let vertices = generate_brush_type_vertices(BrushType::Spray);
+        assert!(!vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_brush_type_calligraphy() {
+        use crate::canvas::BrushType;
+        let vertices = generate_brush_type_vertices(BrushType::Calligraphy);
+        assert!(!vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_selection_tool_button_inactive() {
+        let vertices = generate_selection_tool_button(false);
+        assert!(!vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_selection_tool_button_active() {
+        let vertices = generate_selection_tool_button(true);
+        assert!(!vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_selection_rect_vertices() {
+        let rect = crate::canvas::Rect::new(100.0, 100.0, 200.0, 150.0);
+        let vertices = generate_selection_rect_vertices(rect, 0.0);
+        assert!(!vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_selection_rect_zero_size() {
+        let rect = crate::canvas::Rect::new(100.0, 100.0, 0.0, 0.0);
+        let vertices = generate_selection_rect_vertices(rect, 0.0);
+        assert!(vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_export_button() {
+        let vertices = generate_export_button_vertices();
+        assert!(!vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_zoom_in_button() {
+        let vertices = generate_zoom_in_button_vertices();
+        assert!(!vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_zoom_out_button() {
+        let vertices = generate_zoom_out_button_vertices();
+        assert!(!vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_layer_panel_empty() {
+        let layers: Vec<(String, bool, f32, bool)> = vec![];
+        let vertices = generate_layer_panel_vertices(&layers, 0, 800.0);
+        assert!(vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_layer_panel_single_layer() {
+        let layers = vec![("Layer 1".to_string(), true, 1.0, false)];
+        let vertices = generate_layer_panel_vertices(&layers, 0, 800.0);
+        assert!(!vertices.is_empty());
+    }
+
+    #[test]
+    fn test_generate_layer_panel_multiple_layers() {
+        let layers = vec![
+            ("Layer 1".to_string(), true, 1.0, false),
+            ("Layer 2".to_string(), true, 1.0, false),
+            ("Layer 3".to_string(), false, 0.5, true),
+        ];
+        let vertices = generate_layer_panel_vertices(&layers, 1, 800.0);
+        assert!(!vertices.is_empty());
+    }
 }

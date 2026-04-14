@@ -7,8 +7,8 @@ use glow::HasContext;
 use std::rc::Rc;
 
 use crate::canvas::{ActiveStroke, BrushType, Canvas, LayerContent};
-use crate::logger;
 use crate::geometry::{self, DrawMode, StrokeMesh};
+use crate::logger;
 
 const VERTEX_SHADER_SOURCE: &str = r#"
     attribute vec2 position;

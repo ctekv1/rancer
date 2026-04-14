@@ -180,7 +180,12 @@ impl RasterImage {
             return None;
         }
         let idx = ((y * self.width + x) * 4) as usize;
-        Some((self.data[idx], self.data[idx + 1], self.data[idx + 2], self.data[idx + 3]))
+        Some((
+            self.data[idx],
+            self.data[idx + 1],
+            self.data[idx + 2],
+            self.data[idx + 3],
+        ))
     }
 
     pub fn set_pixel(&mut self, x: u32, y: u32, r: u8, g: u8, b: u8, a: u8) {
@@ -731,7 +736,9 @@ impl Canvas {
     pub fn copy_selection(&mut self) {
         if let Some(ref selection) = self.selection {
             for stroke in &selection.strokes {
-                self.layers[self.active_layer].strokes_mut().push(stroke.clone());
+                self.layers[self.active_layer]
+                    .strokes_mut()
+                    .push(stroke.clone());
             }
         }
         self.invalidate();
@@ -742,7 +749,9 @@ impl Canvas {
     pub fn commit_selection(&mut self) {
         if let Some(selection) = self.selection.take() {
             for stroke in &selection.strokes {
-                self.layers[self.active_layer].strokes_mut().push(stroke.clone());
+                self.layers[self.active_layer]
+                    .strokes_mut()
+                    .push(stroke.clone());
             }
             // removed_strokes are NOT restored — the moved strokes replace them
         }

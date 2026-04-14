@@ -95,3 +95,15 @@ Note: Unlike professional tools like Krita (which use CPU for brush rendering), 
 - [x] Refactored `window_gtk4.rs`: Consolidated `GlRenderState`, debounced saves
 - [x] Refactored `window_winit.rs`: Extracted handler methods, consolidated state
 - [x] Fixed duplicate `#[test]` attribute in `canvas.rs`
+
+## Code Quality & Testing (v0.0.8)
+
+- [x] Added tarpaulin coverage config (`.tarpaulin.toml`)
+- [x] Added Makefile with common dev commands
+- [ ] **Integration Testing** - Platform-specific code requires manual/integration tests:
+    - window_gtk4.rs: GTK4 event handling, display rendering
+    - window_winit.rs: winit window management
+    - opengl_renderer.rs, renderer.rs: GPU rendering paths
+    - export_ui.rs: Native file dialogs
+  These are excluded from unit test coverage (require display/GPU).
+  Use INTEGRATION_TESTS.md checklist for manual verification.
