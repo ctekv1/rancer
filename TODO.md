@@ -96,6 +96,10 @@ Note: Unlike professional tools like Krita (which use CPU for brush rendering), 
 - [x] Refactored `window_winit.rs`: Extracted handler methods, consolidated state
 - [x] Fixed duplicate `#[test]` attribute in `canvas.rs`
 
+## Documentation (v0.0.8)
+
+- [x] ARCHITECTURE.md - Module overview, data flow, design patterns
+
 ## Code Quality & Testing (v0.0.8)
 
 - [x] Added tarpaulin coverage config (`.tarpaulin.toml`)
