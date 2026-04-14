@@ -100,6 +100,9 @@ Note: Unlike professional tools like Krita (which use CPU for brush rendering), 
 
 - [x] Added tarpaulin coverage config (`.tarpaulin.toml`)
 - [x] Added Makefile with common dev commands
+- [x] Added 18 new tests in `geometry/ui_elements.rs` for UI vertex functions
+- [x] Coverage: **85%** on testable modules (up from 63%)
+- [x] Fixed clippy warnings (absurd comparisons in tests)
 - [ ] **Integration Testing** - Platform-specific code requires manual/integration tests:
     - window_gtk4.rs: GTK4 event handling, display rendering
     - window_winit.rs: winit window management

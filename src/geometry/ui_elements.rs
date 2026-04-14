@@ -1699,8 +1699,7 @@ mod tests {
 
     #[test]
     fn test_generate_custom_palette_empty() {
-        let vertices = generate_custom_palette(&[], 999);
-        assert!(vertices.len() >= 0);
+        let _vertices = generate_custom_palette(&[], 999);
     }
 
     #[test]
@@ -1785,8 +1784,7 @@ mod tests {
     #[test]
     fn test_generate_layer_panel_empty() {
         let layers: Vec<(String, bool, f32, bool)> = vec![];
-        let vertices = generate_layer_panel_vertices(&layers, 0, 800.0);
-        assert!(vertices.len() >= 0);
+        let _vertices = generate_layer_panel_vertices(&layers, 0, 800.0);
     }
 
     #[test]
