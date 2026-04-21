@@ -1,68 +1,59 @@
 # OpenGL Migration Plan
 
 ## Goal
-Replace WGPU with OpenGL across both platforms, using winit + glow for unified windowing and rendering.
+Replace WGPU with OpenGL (via glutin) across both platforms. Keep GTK4 on Linux for windowing, use winit + glutin on Windows.
 
 ## Rationale
 - Current Windows resize issue is a wgpu-specific bug with no fix available
 - wgpu has closed relevant issues as "not planned"
-- winit + OpenGL provides a more stable cross-platform solution
-- Maximum code reuse: winit already used, glow already a dependency
+- glutin provides cross-platform OpenGL context creation
+- glow (already dependency) handles OpenGL API
 
 ## Current Architecture
 
 | Platform | Windowing | Renderer |
 |----------|-----------|----------|
 | Windows | winit | WGPU |
-| Linux | GTK4 | OpenGL (glow) |
+| Linux | GTK4 | OpenGL via GLArea |
 
 ## Target Architecture
 
 | Platform | Windowing | Renderer |
 |----------|-----------|----------|
-| Windows | winit | OpenGL (glow) |
-| Linux | winit | OpenGL (glow) |
+| Windows | winit | OpenGL via glutin |
+| Linux | GTK4 | OpenGL via glutin |
+
+GTK4 windowing stays on Linux. Only the GL context provider changes (GLArea → glutin).
 
 ## Implementation Steps
 
-### Phase 1: OpenGL Context Abstraction
-- [ ] Create `src/gl_context.rs` — cross-platform OpenGL context creation
-- [ ] Support both Windows (WGL) and Linux (GLX/EGL) via glutin or platform-native
-- [ ] Provide unified API for GL context management
+### Phase 1: Dependencies
+- [ ] Add `glutin = "0.32"` to Cargo.toml (both platforms)
+- [ ] Verify cross-platform GL context creation
 
 ### Phase 2: Renderer Unification
-- [ ] Adapt `src/opengl_renderer.rs` to work without GTK4 GLArea dependency
-- [ ] Use the new `gl_context.rs` for context management
-- [ ] Ensure feature parity with current WGPU renderer (MSAA, etc.)
+- [ ] Adapt `src/opengl_renderer.rs` to use glutin GL context instead of GLArea
+- [ ] Ensure feature parity with current implementation (MSAA, etc.)
+- [ ] Linux: Replace GLArea context hooks with glutin
 
 ### Phase 3: Windows Backend Migration
-- [ ] Modify `src/window_winit.rs` to use OpenGL instead of WGPU
+- [ ] Add glutin context initialization to `src/window_winit.rs`
+- [ ] Replace WGPU initialization with glutin + OpenGL setup
 - [ ] Remove WGPU-specific code paths
-- [ ] Test window resize behavior on Windows
+- [ ] Test window resize behavior on Windows (primary fix target)
 
-### Phase 4: Linux Backend Simplification
-- [ ] Remove GTK4 dependency from `Cargo.toml`
-- [ ] Update `src/window_gtk4.rs` → `src/window_sdl2.rs` or reuse winit
-- [ ] Remove platform-specific windowing code
-
-### Phase 5: Cleanup
+### Phase 4: Cleanup
 - [ ] Remove `src/renderer.rs` (WGPU implementation)
-- [ ] Remove WGPU from `Cargo.toml`
-- [ ] Update `src/lib.rs` to remove WGPU cfg flags
+- [ ] Remove `wgpu` from Cargo.toml
+- [ ] Update `src/lib.rs` to remove wgpu cfg flags
 - [ ] Update TODO.md with completed items
-
-## Expected Outcome
-- Single renderer: ~520 lines (existing OpenGL renderer)
-- Single window backend: ~1300 lines (existing winit, adapted)
-- Removed: ~1461 lines of WGPU renderer
-- Simplified dependency tree
 
 ## Dependencies After
 ```toml
 # Core
 winit = "0.30"
 glow = "0.14"
-glutin = "0.32"  # or platform-native
+glutin = "0.32"
 
 # Existing
 bytemuck = "1.25"
@@ -73,20 +64,31 @@ log = "0.4"
 serde = "1.0"
 toml = "0.8"
 
-# Platform-specific (removed)
-# - wgpu (removed)
-# - gtk4 (removed)
-# - raw-window-handle (may still be needed)
+# Platform-specific (kept)
+gtk4 = "0.9"     # Linux windowing only
+rfd = "0.15"      # Native dialogs (both platforms)
+libloading = "0.8" # Linux GL loading
+
+# Removed
+# - wgpu
+# - raw-window-handle (wgpu dep)
 ```
+
+## Expected Outcome
+| Metric | Before | After |
+|--------|--------|-------|
+| Renderer code | ~1981 lines | ~520 lines |
+| WGPU deps | ~1461 lines | removed |
+| Dependencies | 8 crates | 8 crates (swapped) |
 
 ## Testing Checklist
 - [ ] Window creation on Windows
 - [ ] Window creation on Linux
-- [ ] OpenGL context creation
+- [ ] OpenGL context creation (both platforms)
 - [ ] Stroke rendering
 - [ ] UI rendering
 - [ ] Zoom/Pan functionality
-- [ ] Window resize (primary fix target)
+- [ ] **Window resize (Windows)** — Primary fix target
 - [ ] Layer system
 - [ ] Selection tool
 - [ ] Export functionality
@@ -95,3 +97,4 @@ toml = "0.8"
 - `docs/window-resize-issue.md` — Current WGPU resize bug
 - `src/opengl_renderer.rs` — Existing OpenGL implementation
 - `src/window_winit.rs` — Existing winit implementation
+- `src/renderer.rs` — WGPU implementation (to be removed)
