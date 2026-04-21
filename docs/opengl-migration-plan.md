@@ -32,9 +32,10 @@ GTK4 windowing stays on Linux. Only the GL context provider changes (GLArea → 
 - [ ] Verify cross-platform GL context creation
 
 ### Phase 2: Renderer Unification
-- [ ] Adapt `src/opengl_renderer.rs` to use glutin GL context instead of GLArea
-- [ ] Ensure feature parity with current implementation (MSAA, etc.)
-- [ ] Linux: Replace GLArea context hooks with glutin
+- [x] `src/opengl_renderer.rs` is already generic (takes `Rc<glow::Context>`)
+- [x] Linux: GTK4 GLArea provides GL context, works as-is
+- [x] Fix winit 0.30 API change: `set_wait_timeout` → `WaitUntil`
+- [ ] Windows: Will use glutin to create GL context (Phase 3)
 
 ### Phase 3: Windows Backend Migration
 - [ ] Add glutin context initialization to `src/window_winit.rs`

@@ -1164,15 +1164,16 @@ pub fn run_window_app(preferences: Preferences) {
             return;
         }
     };
-    let mut app = WindowApp::new(preferences);
+    let mut app = WindowApp::new(preferences.clone());
 
     let max_fps = preferences.renderer.max_fps;
     if max_fps == 0 {
         event_loop.set_control_flow(ControlFlow::Poll);
     } else {
         let target_duration = std::time::Duration::from_secs_f64(1.0 / max_fps as f64);
-        event_loop.set_control_flow(ControlFlow::Wait);
-        event_loop.set_wait_timeout(target_duration);
+        event_loop.set_control_flow(ControlFlow::WaitUntil(
+            std::time::Instant::now() + target_duration,
+        ));
     }
 
     if let Err(e) = event_loop.run_app(&mut app) {
