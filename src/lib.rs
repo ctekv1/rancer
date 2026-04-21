@@ -12,15 +12,13 @@ pub mod preferences;
 pub mod renderer;
 pub mod ui;
 pub mod window_backend;
+pub mod opengl_renderer;
 
 #[cfg(target_os = "windows")]
 pub mod window_winit;
 
 #[cfg(target_os = "linux")]
 pub mod window_gtk4;
-
-#[cfg(target_os = "linux")]
-pub mod opengl_renderer;
 
 #[cfg(target_os = "linux")]
 pub mod gl_loader;

@@ -27,29 +27,27 @@ GTK4 windowing stays on Linux. Only the GL context provider changes (GLArea → 
 
 ## Implementation Steps
 
-### Phase 1: Dependencies
-- [ ] Add `glutin = "0.32"` to Cargo.toml (both platforms)
-- [ ] Verify cross-platform GL context creation
+### Phase 1: Dependencies (COMPLETED)
+- [x] Add `glutin = "0.32"` and `glutin-winit = "0.5"` to Cargo.toml
+- [x] Add `glow = "0.14"` to main deps (was Linux-only)
 
-### Phase 2: Renderer Unification
+### Phase 2: Renderer Unification (COMPLETED)
 - [x] `src/opengl_renderer.rs` is already generic (takes `Rc<glow::Context>`)
 - [x] Linux: GTK4 GLArea provides GL context, works as-is
-- [x] Fix winit 0.30 API change: `set_wait_timeout` → `WaitUntil`
-- [ ] Windows: Will use glutin to create GL context (Phase 3)
 
-### Phase 3: Windows Backend Migration
-- [ ] Add glutin context initialization to `src/window_winit.rs`
-  - Glutin API is complex, requires careful implementation
-  - Started work, needs completion
+### Phase 3: Windows Backend Migration (IN PROGRESS)
+- [x] Add glutin and glutin-winit dependencies
+- [ ] Implement glutin context initialization in `window_winit.rs`
+  - Glutin 0.32 API requires careful handling
+  - DisplayBuilder approach creates new window, but we need to use existing window
+  - Need to investigate raw display handle approach
 - [ ] Replace WGPU initialization with glutin + OpenGL setup
-- [ ] Remove WGPU-specific code paths
 - [ ] Test window resize behavior on Windows (primary fix target)
 
 ### Phase 4: Cleanup
 - [ ] Remove `src/renderer.rs` (WGPU implementation)
 - [ ] Remove `wgpu` from Cargo.toml
-- [ ] Update `src/lib.rs` to remove wgpu cfg flags
-- [ ] Update TODO.md with completed items
+- [ ] Update `src/lib.rs` to remove WGPU cfg flags
 
 ## Dependencies After
 ```toml
@@ -57,6 +55,7 @@ GTK4 windowing stays on Linux. Only the GL context provider changes (GLArea → 
 winit = "0.30"
 glow = "0.14"
 glutin = "0.32"
+glutin-winit = "0.5"
 
 # Existing
 bytemuck = "1.25"
@@ -74,15 +73,7 @@ libloading = "0.8" # Linux GL loading
 
 # Removed
 # - wgpu
-# - raw-window-handle (wgpu dep)
 ```
-
-## Expected Outcome
-| Metric | Before | After |
-|--------|--------|-------|
-| Renderer code | ~1981 lines | ~520 lines |
-| WGPU deps | ~1461 lines | removed |
-| Dependencies | 8 crates | 8 crates (swapped) |
 
 ## Testing Checklist
 - [ ] Window creation on Windows
