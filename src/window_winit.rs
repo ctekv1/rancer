@@ -1,17 +1,21 @@
 //! Window management module for Rancer using winit + WGPU
 //!
-//! Provides window creation, mouse input handling, and WGPU rendering using winit.
+//! Provides window creation, mouse input handling, and WGPU rendering.
 //! This module handles the window lifecycle, input events, and GPU-accelerated rendering
 //! using the canvas data model.
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Instant;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
+
+#[cfg(target_os = "linux")]
+use crate::opengl_renderer::{GlRenderFrame, GlRenderer, GlUiState, GlViewportState};
 
 use crate::canvas::{ActiveStroke, BrushType, Canvas, Point};
 use crate::logger;
@@ -86,9 +90,9 @@ struct WinitRenderState {
 /// Window application state using winit
 pub struct WindowApp {
     /// The winit window
-    window: Option<std::sync::Arc<Window>>,
-    /// WGPU renderer
-    renderer: Option<Renderer>,
+    window: Option<Arc<Window>>,
+    /// WGPU renderer (current default)
+    renderer: Option<crate::renderer::Renderer>,
     /// Canvas for drawing operations
     canvas: Rc<RefCell<Canvas>>,
     /// Current active stroke being drawn
@@ -729,26 +733,23 @@ impl ApplicationHandler for WindowApp {
                 ));
             }
 
-            let rt = match tokio::runtime::Runtime::new() {
-                Ok(rt) => rt,
-                Err(e) => {
-                    logger::error(&format!("Failed to create tokio runtime: {e}"));
-                    return;
-                }
-            };
-            match rt.block_on(Renderer::new(
-                config,
-                window.clone(),
-                (render_width, render_height),
-            )) {
-                Ok(renderer) => {
-                    logger::info("✅ WGPU renderer initialized successfully!");
-                    renderer.print_backend_status();
-                    self.renderer = Some(renderer);
+            // Try OpenGL first, fall back to WGPU
+            match self.init_gl_renderer(window.as_ref(), render_width, render_height) {
+                Ok(_) => {
+                    logger::info("✅ OpenGL renderer initialized successfully!");
                 }
                 Err(e) => {
-                    logger::error(&format!("❌ Failed to initialize renderer: {}", e));
-                    logger::warn("   Application may not render correctly");
+                    logger::warn(&format!("OpenGL init failed: {e}, trying WGPU..."));
+                    // Fall back to WGPU
+                    match self.init_wgpu_renderer(std::sync::Arc::clone(&window), config, (render_width, render_height)) {
+                        Ok(_) => {
+                            logger::info("✅ WGPU renderer initialized successfully!");
+                        }
+                        Err(e2) => {
+                            logger::error(&format!("❌ Failed to initialize renderer: {}", e2));
+                            logger::warn("   Application may not render correctly");
+                        }
+                    }
                 }
             }
             logger::info("===============================");
@@ -839,11 +840,11 @@ impl ApplicationHandler for WindowApp {
                 self.preferences.canvas.width = logical_width;
                 self.preferences.canvas.height = logical_height;
 
-                if let Err(e) = crate::preferences::save(&self.preferences) {
+if let Err(e) = crate::preferences::save(&self.preferences) {
                     logger::error(&format!("Failed to save preferences: {}", e));
                 }
 
-                if let Some(renderer) = &mut self.renderer {
+                if let Some(ref mut renderer) = self.renderer {
                     renderer.resize((physical_size.width, physical_size.height));
                 }
                 {
@@ -856,32 +857,11 @@ impl ApplicationHandler for WindowApp {
                 let has_selection = self.canvas.borrow().selection().is_some()
                     || self.render_state.selection_drawing;
 
-                // Request another redraw for animation if selection is active
-                // This creates a continuous loop when combined with ControlFlow::Poll
-                if has_selection && let Some(window) = &self.window {
-                    window.request_redraw();
-                }
-
-                let selection_rect = {
-                    let canvas_rect = self.canvas.borrow().selection().map(|s| s.rect);
-                    if self.render_state.selection_drawing {
-                        let start = self.render_state.selection_start;
-                        let zoom = self.render_state.zoom;
-                        let pan = self.render_state.pan_offset;
-                        let mx = self.render_state.mouse_position.x;
-                        let my = self.render_state.mouse_position.y;
-                        let end_x = mx / zoom + pan.0;
-                        let end_y = my / zoom + pan.1;
-                        Some(crate::canvas::Rect::new(
-                            start.x,
-                            start.y,
-                            end_x - start.x,
-                            end_y - start.y,
-                        ))
-                    } else {
-                        canvas_rect
+                if has_selection {
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
                     }
-                };
+                }
 
                 if let Some(renderer) = &mut self.renderer {
                     let canvas = self.canvas.borrow();
@@ -901,7 +881,7 @@ impl ApplicationHandler for WindowApp {
                             is_eraser: self.render_state.is_eraser,
                             brush_type: self.render_state.brush_type,
                             selection_tool_active: self.render_state.selection_tool_active,
-                            selection_rect,
+                            selection_rect: None,
                             selection_time: self.start_time.elapsed().as_secs_f32(),
                             selected_strokes: canvas.selection().map(|s| s.strokes.as_slice()),
                         },
@@ -911,23 +891,8 @@ impl ApplicationHandler for WindowApp {
                         },
                     };
 
-                    match renderer.render(&frame) {
-                        Ok(_) => {}
-                        Err(wgpu::SurfaceError::Lost) => {
-                            if let Some(window) = self.window.as_ref() {
-                                let size = window.inner_size();
-                                renderer.resize((size.width, size.height));
-                            } else {
-                                logger::warn("Window lost during SurfaceError::Lost recovery");
-                            }
-                        }
-                        Err(wgpu::SurfaceError::OutOfMemory) => {
-                            logger::error("Out of memory!");
-                            event_loop.exit();
-                        }
-                        Err(e) => {
-                            logger::error(&format!("Render error: {:?}", e));
-                        }
+                    if let Err(e) = renderer.render(&frame) {
+                        logger::error(&format!("Render error: {:?}", e));
                     }
                 }
             }
@@ -1183,6 +1148,37 @@ pub fn run_window_app(preferences: Preferences) {
     logger::info("Rancer application closed successfully");
 }
 
+impl WindowApp {
+    #[cfg(target_os = "windows")]
+    fn init_gl_renderer(
+        &mut self,
+        _window: &Window,
+        _width: u32,
+        _height: u32,
+    ) -> Result<(), String> {
+        Err("OpenGL Windows implementation pending".to_string())
+    }
+
+    #[cfg(target_os = "windows")]
+    fn init_wgpu_renderer(
+        &mut self,
+        window: Arc<Window>,
+        config: RendererConfig,
+        size: (u32, u32),
+    ) -> Result<(), String> {
+        use tokio::runtime;
+
+        let rt = runtime::Runtime::new()
+            .map_err(|e| format!("Failed to create tokio runtime: {e}"))?;
+
+        let renderer = rt.block_on(Renderer::new(config, window, size))
+            .map_err(|e| format!("Failed to create WGPU renderer: {e}"))?;
+
+        self.renderer = Some(renderer);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1212,7 +1208,7 @@ mod tests {
 
         assert!(!app.render_state.is_eraser);
         assert!(app.window.is_none());
-        assert!(app.renderer.is_none());
+        assert!(app.gl_renderer.is_none());
     }
 
     #[test]

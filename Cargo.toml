@@ -13,6 +13,7 @@ categories = ["graphics"]
 [dependencies]
 winit = "0.30"
 glutin = "0.32"
+glutin-winit = "0.5"
 wgpu = "28.0"
 tokio = { version = "1.0", features = ["rt-multi-thread"] }
 bytemuck = "1.25.0"

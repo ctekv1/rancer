@@ -39,6 +39,8 @@ GTK4 windowing stays on Linux. Only the GL context provider changes (GLArea → 
 
 ### Phase 3: Windows Backend Migration
 - [ ] Add glutin context initialization to `src/window_winit.rs`
+  - Glutin API is complex, requires careful implementation
+  - Started work, needs completion
 - [ ] Replace WGPU initialization with glutin + OpenGL setup
 - [ ] Remove WGPU-specific code paths
 - [ ] Test window resize behavior on Windows (primary fix target)
