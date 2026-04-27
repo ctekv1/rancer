@@ -1,16 +1,8 @@
-//! Shared geometry and vertex generation for rendering
+//! Shared geometry utilities for rendering
 //!
-//! Contains pure-math functions for generating vertex data used by both
-//! the WGPU renderer (Windows) and OpenGL renderer (Linux).
-
-mod stroke;
-mod ui_elements;
+//! Contains pure-math functions for generating vertex data.
 
 use crate::canvas::Color;
-
-// Re-export all sub-module items so consumers can continue using `geometry::*`
-pub use stroke::*;
-pub use ui_elements::*;
 
 /// Parse a hex color string into a Color
 pub fn hex_to_color(hex: &str) -> Color {
