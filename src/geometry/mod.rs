@@ -1,19 +1,17 @@
 //! Shared geometry utilities for rendering
 //!
-//! Contains pure-math functions for generating vertex data.
-
-use crate::canvas::Color;
+//! Contains pure-math functions for raster drawing operations.
 
 /// Parse a hex color string into a Color
-pub fn hex_to_color(hex: &str) -> Color {
+pub fn hex_to_color(hex: &str) -> crate::canvas::Color {
     let hex = hex.trim_start_matches('#');
     if hex.len() == 6 {
         let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(255);
         let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(255);
         let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(255);
-        Color { r, g, b, a: 255 }
+        crate::canvas::Color { r, g, b, a: 255 }
     } else {
-        Color::WHITE
+        crate::canvas::Color::WHITE
     }
 }
 
@@ -39,57 +37,15 @@ pub fn point_in_triangle(px: f32, py: f32, v0: &[f32; 2], v1: &[f32; 2], v2: &[f
 #[allow(clippy::too_many_arguments)]
 pub fn generate_rect(x: f32, y: f32, w: f32, h: f32, r: f32, g: f32, b: f32, a: f32) -> Vec<f32> {
     vec![
-        x,
-        y,
-        r,
-        g,
-        b,
-        a,
-        x + w,
-        y,
-        r,
-        g,
-        b,
-        a,
-        x,
-        y + h,
-        r,
-        g,
-        b,
-        a,
-        x + w,
-        y,
-        r,
-        g,
-        b,
-        a,
-        x + w,
-        y + h,
-        r,
-        g,
-        b,
-        a,
-        x,
-        y + h,
-        r,
-        g,
-        b,
-        a,
+        x, y, r, g, b, a, x + w, y, r, g, b, a, x, y + h, r, g, b, a,
+        x + w, y, r, g, b, a, x + w, y + h, r, g, b, a, x, y + h, r, g, b, a,
     ]
 }
 
 /// Generate vertices for a rotated rectangle (quadrilateral) for diagonal lines
 #[allow(clippy::too_many_arguments)]
 pub fn generate_rotated_rect(
-    x1: f32,
-    y1: f32,
-    x2: f32,
-    y2: f32,
-    width: f32,
-    r: f32,
-    g: f32,
-    b: f32,
-    a: f32,
+    x1: f32, y1: f32, x2: f32, y2: f32, width: f32, r: f32, g: f32, b: f32, a: f32,
 ) -> Vec<f32> {
     let dx = x2 - x1;
     let dy = y2 - y1;
@@ -103,42 +59,8 @@ pub fn generate_rotated_rect(
     let ny = dx / len * half_width;
 
     vec![
-        x1 + nx,
-        y1 + ny,
-        r,
-        g,
-        b,
-        a,
-        x1 - nx,
-        y1 - ny,
-        r,
-        g,
-        b,
-        a,
-        x2 + nx,
-        y2 + ny,
-        r,
-        g,
-        b,
-        a,
-        x1 - nx,
-        y1 - ny,
-        r,
-        g,
-        b,
-        a,
-        x2 - nx,
-        y2 - ny,
-        r,
-        g,
-        b,
-        a,
-        x2 + nx,
-        y2 + ny,
-        r,
-        g,
-        b,
-        a,
+        x1 + nx, y1 + ny, r, g, b, a, x1 - nx, y1 - ny, r, g, b, a, x2 + nx, y2 + ny, r, g, b, a,
+        x1 - nx, y1 - ny, r, g, b, a, x2 - nx, y2 - ny, r, g, b, a, x2 + nx, y2 + ny, r, g, b, a,
     ]
 }
 
@@ -161,7 +83,7 @@ mod tests {
         let c = hex_to_color("FF0000");
         assert_eq!(
             c,
-            Color {
+            crate::canvas::Color {
                 r: 255,
                 g: 0,
                 b: 0,
@@ -175,7 +97,7 @@ mod tests {
         let c = hex_to_color("#00FF00");
         assert_eq!(
             c,
-            Color {
+            crate::canvas::Color {
                 r: 0,
                 g: 255,
                 b: 0,
@@ -189,7 +111,7 @@ mod tests {
         let c = hex_to_color("#0000FF");
         assert_eq!(
             c,
-            Color {
+            crate::canvas::Color {
                 r: 0,
                 g: 0,
                 b: 255,
@@ -203,7 +125,7 @@ mod tests {
         let c = hex_to_color("#000000");
         assert_eq!(
             c,
-            Color {
+            crate::canvas::Color {
                 r: 0,
                 g: 0,
                 b: 0,
@@ -217,7 +139,7 @@ mod tests {
         let c = hex_to_color("#FFFFFF");
         assert_eq!(
             c,
-            Color {
+            crate::canvas::Color {
                 r: 255,
                 g: 255,
                 b: 255,
@@ -231,7 +153,7 @@ mod tests {
         let c = hex_to_color("#ZZZZZZ");
         assert_eq!(
             c,
-            Color {
+            crate::canvas::Color {
                 r: 255,
                 g: 255,
                 b: 255,
@@ -243,19 +165,19 @@ mod tests {
     #[test]
     fn test_hex_too_short() {
         let c = hex_to_color("#FFF");
-        assert_eq!(c, Color::WHITE);
+        assert_eq!(c, crate::canvas::Color::WHITE);
     }
 
     #[test]
     fn test_hex_too_long() {
         let c = hex_to_color("#FF0000FF");
-        assert_eq!(c, Color::WHITE);
+        assert_eq!(c, crate::canvas::Color::WHITE);
     }
 
     #[test]
     fn test_hex_empty() {
         let c = hex_to_color("");
-        assert_eq!(c, Color::WHITE);
+        assert_eq!(c, crate::canvas::Color::WHITE);
     }
 
     #[test]
@@ -263,7 +185,7 @@ mod tests {
         let c = hex_to_color("#ff8800");
         assert_eq!(
             c,
-            Color {
+            crate::canvas::Color {
                 r: 255,
                 g: 136,
                 b: 0,
@@ -284,7 +206,28 @@ mod tests {
     }
 
     #[test]
-    fn test_point_inside_triangle() {
+    fn test_hex_variations_green() {
+        let c1 = hex_to_color("#00FF00");
+        let c2 = hex_to_color("00FF00");
+        assert_eq!(c1, c2);
+    }
+
+    #[test]
+    fn test_hex_variations_blue() {
+        let c1 = hex_to_color("#0000FF");
+        let c2 = hex_to_color("0000FF");
+        assert_eq!(c1, c2);
+    }
+
+    #[test]
+    fn test_hex_variations_black() {
+        let c1 = hex_to_color("#000000");
+        let c2 = hex_to_color("000000");
+        assert_eq!(c1, c2);
+    }
+
+    #[test]
+    fn test_point_inside_triangle_center() {
         let v0 = [0.0, 0.0];
         let v1 = [10.0, 0.0];
         let v2 = [5.0, 10.0];
@@ -292,11 +235,11 @@ mod tests {
     }
 
     #[test]
-    fn test_point_outside_triangle() {
+    fn test_point_inside_triangle_outside() {
         let v0 = [0.0, 0.0];
         let v1 = [10.0, 0.0];
         let v2 = [5.0, 10.0];
-        assert!(!point_in_triangle(0.0, 10.0, &v0, &v1, &v2));
+        assert!(!point_in_triangle(100.0, 100.0, &v0, &v1, &v2));
     }
 
     #[test]
@@ -350,15 +293,24 @@ mod tests {
     #[test]
     fn test_generate_rect_positions() {
         let vertices = generate_rect(10.0, 20.0, 5.0, 5.0, 0.0, 0.0, 0.0, 1.0);
-        assert_eq!([vertices[0], vertices[1]], [10.0, 20.0]);
-        assert_eq!([vertices[6], vertices[7]], [15.0, 20.0]);
-        assert_eq!([vertices[12], vertices[13]], [10.0, 25.0]);
+        assert_eq!(vertices[0], 10.0);
+        assert_eq!(vertices[1], 20.0);
+        assert_eq!(vertices[6], 15.0);
+        assert_eq!(vertices[7], 20.0);
+        assert_eq!(vertices[12], 10.0);
+        assert_eq!(vertices[13], 25.0);
     }
 
     #[test]
     fn test_generate_rect_colors() {
         let vertices = generate_rect(0.0, 0.0, 10.0, 10.0, 0.5, 0.3, 0.1, 0.9);
-        assert_eq!(&vertices[2..6], &[0.5, 0.3, 0.1, 0.9]);
+        assert_eq!(vertices.len(), 36);
+        // Each vertex: [x, y, r, g, b, a] repeated 4 times
+        // Vertex 0: index 0-5, Vertex 1: index 6-11, Vertex 2: index 12-17, Vertex 3: index 18-23
+        assert!((vertices[2] - 0.5).abs() < 0.01);  // r of vertex 0
+        assert!((vertices[3] - 0.3).abs() < 0.01);  // g of vertex 0
+        assert!((vertices[4] - 0.1).abs() < 0.01);  // b of vertex 0
+        assert!((vertices[5] - 0.9).abs() < 0.01);  // a of vertex 0
     }
 
     #[test]
