@@ -8,7 +8,12 @@ pub mod export_ui;
 pub mod geometry;
 pub mod logger;
 pub mod preferences;
+pub mod viewport;
 pub mod window;
+
+pub mod gl {
+    pub use glow::*;
+}
 
 #[cfg(target_os = "linux")]
 pub mod gl_loader;
