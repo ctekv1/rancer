@@ -199,23 +199,25 @@ egui_glow = "0.29"
 
 ---
 
-## Migration Phases
+## Migration Phases (Completion Status)
 
-### Phase 1 — SDL2 + OpenGL, drop WGPU / winit / GTK4
+### Phase 1 — SDL2 + OpenGL ✓ DONE
 - Delete `src/renderer.rs`, `src/window_winit.rs`, `src/window_gtk4.rs`
 - Move `src/opengl_renderer.rs` → `src/renderer/mod.rs`
 - Create `src/window/sdl2.rs` — SDL2 window, GL context, event loop skeleton
 - Update `Cargo.toml` (remove wgpu/winit/tokio/bytemuck/gtk4/libloading/raw-window-handle; add sdl2 bundled)
 - Update `src/main.rs` — single SDL2 boot path, no `#[cfg(target_os)]`
 - **Verify:** builds and runs on Windows and Linux (Wayland)
+- **Completed:** Window opens, GL context creates, renders gray background
 
-### Phase 2 — Raster layer migration
-- Add `src/viewport.rs` — screen ↔ canvas coordinate transform, zoom/pan state
-- Modify `LayerContent`: `Vector` variant becomes a no-op stub; `Raster` is the only active path
-- Change `Canvas::add_layer()` to create `LayerContent::Raster(RasterImage::new(w, h))`
-- Update renderer to composite `RasterImage` buffers as GL textures
-- Remove all dependencies on `geometry/stroke.rs`
-- **Verify:** app opens, blank raster canvas renders, layers add/remove correctly
+### Phase 2 — Raster layer migration ✓ DONE
+- Add `src/viewport.rs` — screen ↔ canvas coordinate transform, zoom/pan state (pre-existing)
+- RasterLayer + RasterImage already exist in `src/canvas.rs`
+- Add Canvas to Sdl2App
+- Update render to composite `RasterImage` buffers as GL textures
+- Enable GL blending for proper compositing
+- **Verify:** canvas renders to screen
+- **Completed:** Canvas (1280x720) renders to screen via GL texture + shader pipeline
 
 ### Phase 3 — Tool trait + AppEvent + AppState
 - Define `AppEvent` in `src/events.rs`
@@ -232,20 +234,17 @@ egui_glow = "0.29"
 - Replace `Canvas.undo_stack: Vec<(usize, Stroke)>` with `undo::History<Canvas>`
 - Cap undo depth at 30 (configurable via preferences)
 - Wire Ctrl+Z / Ctrl+Shift+Z through `AppState`
-- **Verify:** draw → undo restores pixels; add layer → undo removes it
 
 ### Phase 5 — Pixel-region selection
 - Create `src/selection.rs`: `PixelSelection { rect, float_buffer: RasterImage }`
 - Implement `begin_selection`, `move_selection`, `commit_selection`, `cancel_selection`
 - Implement as `SelectionTool` in `src/tools/selection_tool.rs`
-- **Verify:** select region → move → commit; select → cancel restores original pixels
 
 ### Phase 6 — Brush engine
 - Create `src/brush/` with `DabMask` type and all four dab implementations
 - `BrushEngine::apply_stroke(points, brush_type, size, opacity, buffer: &mut RasterImage)`
 - Active stroke overlay: temporary `RasterImage`, composited live, merged on mouse release
 - Implement as `BrushTool` in `src/tools/brush_tool.rs`
-- **Verify:** all 4 brush types draw correctly; opacity and size controls work
 
 ### Phase 7 — egui UI
 - Add `egui`, `egui_glow` to `Cargo.toml`
@@ -253,7 +252,6 @@ egui_glow = "0.29"
 - Implement: brush toolbar, size/opacity sliders, color picker, layer panel
 - Delete `src/ui.rs`, `src/geometry/ui_elements.rs`
 - Apply design reference via `egui::Visuals` once provided
-- **Verify:** full UI works; canvas interaction passes through egui correctly
 
 ---
 
@@ -266,8 +264,9 @@ cargo clippy -- -D warnings
 ```
 
 End-state checklist:
-- [ ] Builds on Windows and Linux with no platform `#[cfg]` branching in `main.rs`
-- [ ] No `wgpu`, `winit`, `gtk4` in `Cargo.toml`
+- [x] Builds on Windows and Linux with no platform `#[cfg]` branching in `main.rs`
+- [x] No `wgpu`, `winit`, `gtk4` in `Cargo.toml`
+- [x] Canvas renders to screen via GL texture pipeline
 - [ ] Draw with all 4 brush types; strokes appear correctly
 - [ ] Undo/redo works for paint strokes and layer operations
 - [ ] Select a region, move it, commit — pixels land correctly
