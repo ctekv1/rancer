@@ -11,6 +11,12 @@ pub mod preferences;
 pub mod viewport;
 pub mod window;
 
+#[cfg(test)]
+pub mod window_tests;
+
+#[cfg(test)]
+pub mod raster_render_tests;
+
 pub mod gl {
     pub use glow::*;
 }
