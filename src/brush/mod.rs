@@ -11,3 +11,10 @@ pub use dab::DabMask;
 pub use square::SquareDab;
 pub use round::RoundDab;
 pub use engine::BrushEngine;
+
+/// Available brush types
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BrushType {
+    Round,
+    Square,
+}

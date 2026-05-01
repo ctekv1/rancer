@@ -2,7 +2,7 @@
 //!
 //! Stamps brush dabs onto RasterImage buffers with alpha compositing.
 
-use crate::brush::{DabMask, RoundDab};
+use crate::brush::DabMask;
 use crate::canvas::{RasterImage, Color};
 
 pub struct BrushEngine;
@@ -59,6 +59,7 @@ impl BrushEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::brush::RoundDab;
 
     #[test]
     fn test_stamp_dab_affects_pixels_at_center() {

@@ -2,7 +2,6 @@
 //!
 //! Provides the core canvas functionality using raster layers.
 
-use crate::export;
 use serde::{Deserialize, Serialize};
 
 /// Represents a 2D point in canvas space
@@ -107,6 +106,23 @@ pub fn rgb_to_hsv(color: Color) -> HsvColor {
     HsvColor { h, s, v }
 }
 
+/// Pixel reference for mutable access
+pub struct PixelRef<'a> {
+    data: &'a mut [u8],
+}
+
+impl<'a> PixelRef<'a> {
+    pub fn r(&self) -> u8 { self.data[0] }
+    pub fn g(&self) -> u8 { self.data[1] }
+    pub fn b(&self) -> u8 { self.data[2] }
+    pub fn a(&self) -> u8 { self.data[3] }
+
+    pub fn set_r(&mut self, r: u8) { self.data[0] = r; }
+    pub fn set_g(&mut self, g: u8) { self.data[1] = g; }
+    pub fn set_b(&mut self, b: u8) { self.data[2] = b; }
+    pub fn set_a(&mut self, a: u8) { self.data[3] = a; }
+}
+
 /// Raster image data (RGBA pixels)
 #[derive(Debug, Clone)]
 pub struct RasterImage {
@@ -148,6 +164,14 @@ impl RasterImage {
         self.data[idx + 3] = a;
     }
 
+    pub fn get_pixel_mut(&mut self, x: u32, y: u32) -> Option<PixelRef<'_>> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        let idx = ((y * self.width + x) * 4) as usize;
+        Some(PixelRef { data: &mut self.data[idx..idx + 4] })
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         self.width = width;
         self.height = height;
@@ -159,6 +183,47 @@ impl RasterImage {
         for chunk in self.data.chunks_exact_mut(4) {
             chunk.copy_from_slice(&bytes);
         }
+    }
+}
+
+#[cfg(test)]
+mod pixel_ref_tests {
+    use super::*;
+
+    #[test]
+    fn test_pixel_ref_reads_correct_values() {
+        let mut image = RasterImage::new(2, 2);
+        image.set_pixel(0, 0, 10, 20, 30, 40);
+        
+        if let Some(pixel) = image.get_pixel_mut(0, 0) {
+            assert_eq!(pixel.r(), 10);
+            assert_eq!(pixel.g(), 20);
+            assert_eq!(pixel.b(), 30);
+            assert_eq!(pixel.a(), 40);
+        } else {
+            panic!("Expected pixel");
+        }
+    }
+
+    #[test]
+    fn test_pixel_ref_writes_correct_values() {
+        let mut image = RasterImage::new(2, 2);
+        
+        if let Some(mut pixel) = image.get_pixel_mut(0, 0) {
+            pixel.set_r(100);
+            pixel.set_g(150);
+            pixel.set_b(200);
+            pixel.set_a(250);
+        }
+        
+        assert_eq!(image.get_pixel(0, 0), Some((100, 150, 200, 250)));
+    }
+
+    #[test]
+    fn test_pixel_ref_returns_none_for_out_of_bounds() {
+        let mut image = RasterImage::new(2, 2);
+        assert!(image.get_pixel_mut(5, 0).is_none());
+        assert!(image.get_pixel_mut(0, 5).is_none());
     }
 }
 
@@ -203,7 +268,7 @@ impl RasterLayer {
 #[derive(Debug, Clone)]
 pub struct Layer {
     pub name: String,
-    pub content: LayerContent,
+    pub content: RasterLayer,
     pub visible: bool,
     pub opacity: f32,
     pub locked: bool,
@@ -213,7 +278,7 @@ impl Default for Layer {
     fn default() -> Self {
         Self {
             name: "Layer 1".to_string(),
-            content: LayerContent::default(),
+            content: RasterLayer::default(),
             visible: true,
             opacity: 1.0,
             locked: false,
@@ -225,7 +290,7 @@ impl Layer {
     pub fn new(name: String, width: u32, height: u32, opacity: f32) -> Self {
         Self {
             name,
-            content: LayerContent::new(width, height),
+            content: RasterLayer::new(width, height, 1.0),
             visible: true,
             opacity,
             locked: false,
@@ -233,15 +298,11 @@ impl Layer {
     }
 
     pub fn raster_mut(&mut self) -> &mut RasterLayer {
-        match &mut self.content {
-            LayerContent::Raster(r) => r,
-        }
+        &mut self.content
     }
 
     pub fn raster(&self) -> &RasterLayer {
-        match &self.content {
-            LayerContent::Raster(r) => r,
-        }
+        &self.content
     }
 
     pub fn is_raster(&self) -> bool {
@@ -249,55 +310,121 @@ impl Layer {
     }
 
     pub fn clear(&mut self) {
-        self.content.clear();
-    }
-}
-
-/// Layer content - only raster supported in this version
-#[derive(Debug, Clone)]
-pub enum LayerContent {
-    Raster(RasterLayer),
-}
-
-impl Default for LayerContent {
-    fn default() -> Self {
-        LayerContent::Raster(RasterLayer::default())
-    }
-}
-
-impl LayerContent {
-    pub fn new(width: u32, height: u32) -> Self {
-        LayerContent::Raster(RasterLayer::new(width, height, 1.0))
-    }
-
-    pub fn is_raster(&self) -> bool {
-        true
-    }
-
-    pub fn opacity(&self) -> f32 {
-        match self {
-            LayerContent::Raster(r) => r.opacity,
-        }
-    }
-
-    pub fn clear(&mut self) {
-        match self {
-            LayerContent::Raster(r) => r.image.fill(Color::TRANSPARENT),
-        }
+        self.content.image.fill(Color::TRANSPARENT);
     }
 }
 
 /// The main canvas for drawing operations
 #[derive(Clone)]
 pub struct Canvas {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) background_color: Color,
+    pub(crate) layers: Vec<Layer>,
+    pub(crate) active_layer: usize,
+    pub(crate) version: u64,
+    dirty_rect: DirtyRect,
+}
+
+/// Rectangle representing a dirty region
+#[derive(Debug, Clone, Copy)]
+pub struct DirtyRect {
+    pub x: u32,
+    pub y: u32,
     pub width: u32,
     pub height: u32,
-    pub background_color: Color,
-    pub layers: Vec<Layer>,
-    pub active_layer: usize,
-    pub undo_stack: Vec<usize>,
-    pub selection: Option<Selection>,
-    pub version: u64,
+    is_dirty: bool,
+}
+
+impl DirtyRect {
+    pub fn new() -> Self {
+        Self {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+            is_dirty: false,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        !self.is_dirty
+    }
+
+    pub fn contains(&self, x: u32, y: u32) -> bool {
+        self.is_dirty && x >= self.x && x < self.x + self.width && y >= self.y && y < self.y + self.height
+    }
+
+    pub fn mark_pixel(&mut self, x: u32, y: u32) {
+        if !self.is_dirty {
+            self.x = x;
+            self.y = y;
+            self.width = 1;
+            self.height = 1;
+            self.is_dirty = true;
+        } else {
+            let new_min_x = self.x.min(x);
+            let new_min_y = self.y.min(y);
+            let new_max_x = (self.x + self.width).max(x + 1);
+            let new_max_y = (self.y + self.height).max(y + 1);
+            self.x = new_min_x;
+            self.y = new_min_y;
+            self.width = new_max_x - new_min_x;
+            self.height = new_max_y - new_min_y;
+        }
+    }
+
+    pub fn mark_rect(&mut self, x: u32, y: u32, w: u32, h: u32) {
+        if w == 0 || h == 0 {
+            return;
+        }
+        if !self.is_dirty {
+            self.x = x;
+            self.y = y;
+            self.width = w;
+            self.height = h;
+            self.is_dirty = true;
+        } else {
+            let new_min_x = self.x.min(x);
+            let new_min_y = self.y.min(y);
+            let new_max_x = (self.x + self.width).max(x + w);
+            let new_max_y = (self.y + self.height).max(y + h);
+            self.x = new_min_x;
+            self.y = new_min_y;
+            self.width = new_max_x - new_min_x;
+            self.height = new_max_y - new_min_y;
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.is_dirty = false;
+        self.x = 0;
+        self.y = 0;
+        self.width = 0;
+        self.height = 0;
+    }
+
+    pub fn mark_full(&mut self, width: u32, height: u32) {
+        self.x = 0;
+        self.y = 0;
+        self.width = width;
+        self.height = height;
+        self.is_dirty = true;
+    }
+}
+
+impl Default for DirtyRect {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Result of compositing all visible layers
+#[derive(Debug, Clone)]
+pub struct CompositeResult {
+    pub width: u32,
+    pub height: u32,
+    pub data: Vec<u8>,
 }
 
 impl Default for Canvas {
@@ -308,9 +435,8 @@ impl Default for Canvas {
             background_color: Color::WHITE,
             layers: vec![Layer::new("Background".to_string(), 1280, 720, 1.0)],
             active_layer: 0,
-            undo_stack: Vec::new(),
-            selection: None,
             version: 0,
+            dirty_rect: DirtyRect::new(),
         }
     }
 }
@@ -326,9 +452,191 @@ impl Canvas {
         canvas
     }
 
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    pub fn active_layer_index(&self) -> usize {
+        self.active_layer
+    }
+
+    pub fn invalidate(&mut self) {
+        self.version += 1;
+        self.dirty_rect.mark_full(self.width, self.height);
+    }
+
+    pub fn mark_dirty(&mut self, x: u32, y: u32) {
+        self.version += 1;
+        self.dirty_rect.mark_pixel(x, y);
+    }
+
+    pub fn mark_dirty_rect(&mut self, x: u32, y: u32, w: u32, h: u32) {
+        self.version += 1;
+        self.dirty_rect.mark_rect(x, y, w, h);
+    }
+
+    pub fn dirty_rect(&self) -> &DirtyRect {
+        &self.dirty_rect
+    }
+
+    pub fn consume_dirty_rect(&mut self) -> DirtyRect {
+        let dirty = self.dirty_rect;
+        self.dirty_rect.clear();
+        dirty
+    }
+
+    pub fn composite_all(&self) -> CompositeResult {
+        let pixel_count = (self.width * self.height) as usize;
+        let mut data = vec![0u8; pixel_count * 4];
+        
+        // Fill with background color first
+        for i in 0..pixel_count {
+            data[i * 4] = self.background_color.r;
+            data[i * 4 + 1] = self.background_color.g;
+            data[i * 4 + 2] = self.background_color.b;
+            data[i * 4 + 3] = 255;
+        }
+        
+        for layer in &self.layers {
+            if !layer.visible {
+                continue;
+            }
+            
+            let opacity = layer.opacity;
+            let raster = &layer.content;
+            let layer_data = &raster.image.data;
+            
+            for i in 0..pixel_count {
+                let src_r = layer_data[i * 4] as f32 / 255.0;
+                let src_g = layer_data[i * 4 + 1] as f32 / 255.0;
+                let src_b = layer_data[i * 4 + 2] as f32 / 255.0;
+                let src_a = (layer_data[i * 4 + 3] as f32 / 255.0) * opacity;
+                
+                if src_a <= 0.0 {
+                    continue;
+                }
+                
+                let dst_r = data[i * 4] as f32 / 255.0;
+                let dst_g = data[i * 4 + 1] as f32 / 255.0;
+                let dst_b = data[i * 4 + 2] as f32 / 255.0;
+                let dst_a = data[i * 4 + 3] as f32 / 255.0;
+                
+                let out_a = src_a + dst_a * (1.0 - src_a);
+                let inv_dst_a = 1.0 - src_a;
+                
+                let out_r = (src_r * src_a + dst_r * dst_a * inv_dst_a) / out_a;
+                let out_g = (src_g * src_a + dst_g * dst_a * inv_dst_a) / out_a;
+                let out_b = (src_b * src_a + dst_b * dst_a * inv_dst_a) / out_a;
+                
+                data[i * 4] = (out_r * 255.0).clamp(0.0, 255.0) as u8;
+                data[i * 4 + 1] = (out_g * 255.0).clamp(0.0, 255.0) as u8;
+                data[i * 4 + 2] = (out_b * 255.0).clamp(0.0, 255.0) as u8;
+                data[i * 4 + 3] = (out_a * 255.0).clamp(0.0, 255.0) as u8;
+            }
+        }
+        
+        CompositeResult {
+            width: self.width,
+            height: self.height,
+            data,
+        }
+    }
+
+    pub fn composite_rect(&self, x: u32, y: u32, w: u32, h: u32) -> CompositeResult {
+        if w == 0 || h == 0 {
+            return CompositeResult {
+                width: 0,
+                height: 0,
+                data: Vec::new(),
+            };
+        }
+        
+        // Clamp to canvas bounds
+        let x = x.min(self.width);
+        let y = y.min(self.height);
+        let w = w.min(self.width - x);
+        let h = h.min(self.height - y);
+        
+        let pixel_count = (w * h) as usize;
+        let mut data = vec![0u8; pixel_count * 4];
+        
+        // Fill with background color
+        for i in 0..pixel_count {
+            data[i * 4] = self.background_color.r;
+            data[i * 4 + 1] = self.background_color.g;
+            data[i * 4 + 2] = self.background_color.b;
+            data[i * 4 + 3] = 255;
+        }
+        
+        for layer in &self.layers {
+            if !layer.visible {
+                continue;
+            }
+            
+            let opacity = layer.opacity;
+            let raster = &layer.content;
+            let layer_data = &raster.image.data;
+            let layer_width = raster.image.width;
+            
+            for cy in 0..h {
+                for cx in 0..w {
+                    let canvas_x = x + cx;
+                    let canvas_y = y + cy;
+                    
+                    let out_idx = ((cy * w + cx) * 4) as usize;
+                    
+                    let layer_idx = ((canvas_y * layer_width + canvas_x) * 4) as usize;
+                    
+                    let src_r = layer_data[layer_idx] as f32 / 255.0;
+                    let src_g = layer_data[layer_idx + 1] as f32 / 255.0;
+                    let src_b = layer_data[layer_idx + 2] as f32 / 255.0;
+                    let src_a = (layer_data[layer_idx + 3] as f32 / 255.0) * opacity;
+                    
+                    if src_a <= 0.0 {
+                        continue;
+                    }
+                    
+                    let dst_r = data[out_idx] as f32 / 255.0;
+                    let dst_g = data[out_idx + 1] as f32 / 255.0;
+                    let dst_b = data[out_idx + 2] as f32 / 255.0;
+                    let dst_a = data[out_idx + 3] as f32 / 255.0;
+                    
+                    let out_a = src_a + dst_a * (1.0 - src_a);
+                    let inv_dst_a = 1.0 - src_a;
+                    
+                    let out_r = (src_r * src_a + dst_r * dst_a * inv_dst_a) / out_a;
+                    let out_g = (src_g * src_a + dst_g * dst_a * inv_dst_a) / out_a;
+                    let out_b = (src_b * src_a + dst_b * dst_a * inv_dst_a) / out_a;
+                    
+                    data[out_idx] = (out_r * 255.0).clamp(0.0, 255.0) as u8;
+                    data[out_idx + 1] = (out_g * 255.0).clamp(0.0, 255.0) as u8;
+                    data[out_idx + 2] = (out_b * 255.0).clamp(0.0, 255.0) as u8;
+                    data[out_idx + 3] = (out_a * 255.0).clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+        
+        CompositeResult {
+            width: w,
+            height: h,
+            data,
+        }
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         self.width = width;
         self.height = height;
+        for layer in &mut self.layers {
+            layer.content.image.resize(width, height);
+        }
         self.invalidate();
     }
 
@@ -341,7 +649,6 @@ impl Canvas {
         for layer in &mut self.layers {
             layer.clear();
         }
-        self.undo_stack.clear();
         self.invalidate();
     }
 
@@ -353,16 +660,12 @@ impl Canvas {
         self.background_color
     }
 
-    pub fn version(&self) -> u64 {
-        self.version
-    }
-
-    fn invalidate(&mut self) {
-        self.version += 1;
-    }
-
     pub fn layers(&self) -> &[Layer] {
         &self.layers
+    }
+
+    pub fn layers_mut(&mut self) -> &mut [Layer] {
+        &mut self.layers
     }
 
     pub fn layer_count(&self) -> usize {
@@ -459,24 +762,6 @@ impl Canvas {
         &mut self.layers[self.active_layer]
     }
 
-    pub fn undo(&mut self) {
-        if let Some(layer_idx) = self.undo_stack.pop() {
-            self.invalidate();
-        }
-    }
-
-    pub fn redo(&mut self) {
-        self.invalidate();
-    }
-
-    pub fn can_undo(&self) -> bool {
-        !self.undo_stack.is_empty()
-    }
-
-    pub fn can_redo(&self) -> bool {
-        !self.undo_stack.is_empty()
-    }
-
     pub fn all_layers_visible_strokes(&self) -> Vec<(&RasterLayer, f32)> {
         let mut result = Vec::new();
         for layer in self.layers.iter().rev() {
@@ -490,70 +775,4 @@ impl Canvas {
     pub fn is_active_layer_locked(&self) -> bool {
         self.layers[self.active_layer].locked
     }
-
-    // ─── Selection ─────────────────────────────────────────────
-
-    pub fn begin_selection(&mut self, _rect: (f32, f32, f32, f32)) {
-        self.selection = Some(Selection {
-            rect: (_rect.0, _rect.1, _rect.2, _rect.3),
-            bitmap: Some(RasterImage::new(100, 100)),
-            strokes: Vec::new(),
-        });
-        self.invalidate();
-    }
-
-    pub fn move_selection(&mut self, dx: f32, dy: f32) {
-        if let Some(ref mut sel) = self.selection {
-            sel.rect = (sel.rect.0 + dx, sel.rect.1 + dy, sel.rect.2, sel.rect.3);
-            self.invalidate();
-        }
-    }
-
-    pub fn copy_selection(&mut self) {
-        // raster-only: no strokes to copy
-    }
-
-    pub fn commit_selection(&mut self) {
-        self.selection = None;
-        self.invalidate();
-    }
-
-    pub fn commit_selection_to_raster(&mut self) {
-        if let Some(selection) = self.selection.take() {
-            if let Some(bitmap) = &selection.bitmap {
-                let mut layer = RasterLayer::new(bitmap.width, bitmap.height, 1.0);
-                layer.image = bitmap.clone();
-                let layer_obj = Layer {
-                    name: "Selection".to_string(),
-                    content: LayerContent::Raster(layer),
-                    visible: true,
-                    opacity: 1.0,
-                    locked: false,
-                };
-                self.layers.push(layer_obj);
-            }
-        }
-        self.invalidate();
-    }
-
-    pub fn clear_selection(&mut self) {
-        self.selection = None;
-        self.invalidate();
-    }
-
-    pub fn selection(&self) -> Option<&Selection> {
-        self.selection.as_ref()
-    }
-
-    pub fn has_selection(&self) -> bool {
-        self.selection.is_some()
-    }
-}
-
-/// Represents a rectangular selection
-#[derive(Debug, Clone)]
-pub struct Selection {
-    pub rect: (f32, f32, f32, f32),
-    pub bitmap: Option<RasterImage>,
-    pub strokes: Vec<()>,
 }

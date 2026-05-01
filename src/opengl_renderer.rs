@@ -6,7 +6,7 @@
 use glow::HasContext;
 use std::rc::Rc;
 
-use crate::canvas::{ActiveStroke, BrushType, Canvas, LayerContent};
+use crate::canvas::{ActiveStroke, BrushType, Canvas};
 use crate::geometry::{self, DrawMode, StrokeMesh};
 use crate::logger;
 
@@ -65,6 +65,8 @@ pub struct GlRenderFrame<'a> {
     pub ui: GlUiState,
     pub viewport: GlViewportState,
     pub window_size: (i32, i32),
+    pub can_undo: bool,
+    pub can_redo: bool,
 }
 
 /// Committed stroke mesh for a single stroke
@@ -199,31 +201,7 @@ impl GlRenderer {
                 if !layer.visible {
                     continue;
                 }
-                let cache = &mut self.layer_stroke_cache[layer_idx];
-
-                // Only process vector layers
-                let strokes = match &layer.content {
-                    LayerContent::Vector(s) => s,
-                    LayerContent::Raster(_) => continue,
-                };
-
-                for stroke in strokes {
-                    if stroke.points.len() >= 2 {
-                        let mesh =
-                            geometry::generate_stroke_vertices_with_opacity(stroke, layer.opacity);
-                        let converted = Self::mesh_to_vertices(&mesh);
-                        if !converted.is_empty() {
-                            match mesh.mode {
-                                DrawMode::TriangleStrip => {
-                                    cache.strip_strokes.push(converted);
-                                }
-                                DrawMode::Triangles => {
-                                    cache.tri_strokes.push(converted);
-                                }
-                            }
-                        }
-                    }
-                }
+                // Raster layers are rendered via texture
             }
 
             self.canvas_version_cached = canvas.version();
@@ -315,53 +293,8 @@ impl GlRenderer {
 
             self.gl.bind_vertex_array(Some(self.vao));
 
-            // Draw committed strokes per-layer using cache, inserting active stroke
-            // at the active layer position so it renders in correct order.
-            let active_layer_idx = frame.canvas.active_layer();
-            let layers = frame.canvas.layers();
-            for (layer_idx, layer) in layers.iter().enumerate().rev() {
-                if !layer.visible {
-                    continue;
-                }
-
-                // Handle raster layers - skipped for now
-                // Full texture rendering will be added in Phase 2
-                if let LayerContent::Raster(_) = &layer.content {
-                    continue;
-                }
-
-                // Use cached committed strokes
-                if layer_idx < self.layer_stroke_cache.len() {
-                    let cache = &self.layer_stroke_cache[layer_idx];
-
-                    for stroke_vertices in &cache.strip_strokes {
-                        let flat: Vec<f32> = stroke_vertices.iter().flatten().copied().collect();
-                        self.upload_and_draw(&flat, glow::TRIANGLE_STRIP);
-                    }
-
-                    for stroke_vertices in &cache.tri_strokes {
-                        let flat: Vec<f32> = stroke_vertices.iter().flatten().copied().collect();
-                        self.upload_and_draw(&flat, glow::TRIANGLES);
-                    }
-                }
-
-                // Insert active stroke at the active layer position
-                if layer_idx == active_layer_idx
-                    && let Some(active) = frame.active_stroke
-                {
-                    let mesh = geometry::generate_active_stroke_vertices_with_opacity(
-                        active,
-                        layer.opacity,
-                    );
-                    if !mesh.is_empty() {
-                        let mode = match mesh.mode {
-                            DrawMode::TriangleStrip => glow::TRIANGLE_STRIP,
-                            DrawMode::Triangles => glow::TRIANGLES,
-                        };
-                        self.upload_and_draw(&mesh.vertices, mode);
-                    }
-                }
-            }
+            // Raster layers are rendered via texture in the window backend.
+            // Vector stroke rendering would go here if vector layers were added.
 
             // Reset zoom/pan for UI elements (UI stays fixed on screen)
             self.gl.uniform_1_f32(Some(&self.zoom_uniform), 1.0);
@@ -379,8 +312,8 @@ impl GlRenderer {
                 is_eraser: frame.ui.is_eraser,
                 brush_type: frame.ui.brush_type,
                 selection_tool_active: frame.ui.selection_tool_active,
-                can_undo: frame.canvas.can_undo(),
-                can_redo: frame.canvas.can_redo(),
+                can_undo: frame.can_undo,
+                can_redo: frame.can_redo,
                 active_layer: frame.canvas.active_layer(),
                 layer_count: frame.canvas.layer_count(),
             };
@@ -404,10 +337,10 @@ impl GlRenderer {
                 ));
                 new_cache.extend(geometry::generate_clear_button_vertices());
                 new_cache.extend(geometry::generate_undo_button_vertices(
-                    frame.canvas.can_undo(),
+                    frame.can_undo,
                 ));
                 new_cache.extend(geometry::generate_redo_button_vertices(
-                    frame.canvas.can_redo(),
+                    frame.can_redo,
                 ));
                 new_cache.extend(geometry::generate_export_button_vertices());
                 new_cache.extend(geometry::generate_zoom_in_button_vertices());

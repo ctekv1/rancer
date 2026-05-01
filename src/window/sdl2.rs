@@ -4,24 +4,58 @@
 
 use glow::HasContext;
 use sdl2::event::Event;
-use sdl2::video::GLContext;
-use sdl2::video::Window;
 
-use crate::canvas::Canvas;
+use crate::app::AppState;
+use crate::events::AppEvent;
 use crate::preferences::Preferences;
-use crate::viewport::{Viewport, DEFAULT_CANVAS_COLOR};
+
+/// Convert an SDL2 event to an AppEvent
+pub fn sdl_event_to_app_event(event: Event) -> Option<AppEvent> {
+    match event {
+        Event::Quit { .. } => Some(AppEvent::Quit),
+        Event::MouseButtonDown { x, y, .. } => Some(AppEvent::Press {
+            x: x as f32,
+            y: y as f32,
+        }),
+        Event::MouseButtonUp { x, y, .. } => Some(AppEvent::Release {
+            x: x as f32,
+            y: y as f32,
+        }),
+        Event::MouseMotion {
+            x,
+            y,
+            mousestate,
+            ..
+        } => {
+            if mousestate.left() {
+                Some(AppEvent::Drag {
+                    x: x as f32,
+                    y: y as f32,
+                })
+            } else {
+                None
+            }
+        }
+        Event::KeyDown {
+            keycode: Some(keycode),
+            ..
+        } => Some(AppEvent::Key {
+            code: format!("{:?}", keycode).to_lowercase(),
+        }),
+        _ => None,
+    }
+}
 
 pub struct Sdl2App {
-    window: Window,
+    window: sdl2::video::Window,
     gl: glow::Context,
     gl_context: sdl2::video::GLContext,
-    width: u32,
-    height: u32,
-    viewport: Viewport,
-    canvas: Canvas,
+    app_state: AppState,
     program: glow::Program,
     texture: glow::Texture,
     vao: glow::VertexArray,
+    last_rendered_version: u64,
+    has_rendered: bool,
 }
 
 #[cfg(test)]
@@ -178,19 +212,18 @@ impl Sdl2App {
         let width = size.0 as u32;
         let height = size.1 as u32;
 
-        let canvas = Canvas::new();
+        let app_state = AppState::new(width, height);
 
         Ok(Self {
             window,
             gl,
             gl_context,
-            width,
-            height,
-            viewport: Viewport::new(1280, 720),
-            canvas,
+            app_state,
             program,
             texture,
             vao,
+            last_rendered_version: 0,
+            has_rendered: false,
         })
     }
 
@@ -202,51 +235,129 @@ impl Sdl2App {
 
         self.window.gl_make_current(&self.gl_context).ok();
 
-        let canvas_r = DEFAULT_CANVAS_COLOR.r as f32 / 255.0;
-        let canvas_g = DEFAULT_CANVAS_COLOR.g as f32 / 255.0;
-        let canvas_b = DEFAULT_CANVAS_COLOR.b as f32 / 255.0;
+        // Enable VSync to prevent screen tearing/flash
+        self.window.subsystem().sdl().video()
+            .unwrap()
+            .gl_set_swap_interval(1)
+            .ok();
+
+        // Use canvas's actual background color for clear, not DEFAULT_CANVAS_COLOR
+        let bg = self.app_state.canvas().background_color;
+        let canvas_r = bg.r as f32 / 255.0;
+        let canvas_g = bg.g as f32 / 255.0;
+        let canvas_b = bg.b as f32 / 255.0;
 
         'running: loop {
+            let mut has_work = false;
             for event in event_pump.poll_iter() {
-                match event {
-                    Event::Quit { .. } => break 'running,
-                    _ => {}
+                if let Some(app_event) = sdl_event_to_app_event(event) {
+                    has_work = true;
+                    match app_event {
+                        AppEvent::Quit => break 'running,
+                        _ => self.app_state.handle_event(app_event),
+                    }
                 }
             }
 
+            // Check if canvas changed since last render
+            let current_version = self.app_state.canvas().version();
+            if current_version != self.last_rendered_version {
+                has_work = true;
+            }
+
+            // Render and swap
             self.render_frame(canvas_r, canvas_g, canvas_b);
             self.window.gl_swap_window();
+            self.last_rendered_version = self.app_state.canvas().version();
 
-            std::thread::sleep(std::time::Duration::from_millis(16));
+            // Yield CPU when idle
+            if !has_work {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
         }
     }
 
-fn render_frame(&mut self, r: f32, g: f32, b: f32) {
-        let layer = &self.canvas.layers()[self.canvas.active_layer()];
-        let raster = match &layer.content {
-            crate::canvas::LayerContent::Raster(r) => &r.image,
-            _ => return,
-        };
+    fn render_frame(&mut self, r: f32, g: f32, b: f32) {
+        let canvas_width = self.app_state.canvas().width() as i32;
+        let canvas_height = self.app_state.canvas().height() as i32;
+        let current_version = self.app_state.canvas().version();
+        let needs_update = !self.has_rendered || current_version != self.last_rendered_version;
+        
+        if needs_update {
+            unsafe {
+                if !self.has_rendered {
+                    // First frame: full composite + texture allocation
+                    let composite = self.app_state.canvas().composite_all();
+                    self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+                    self.gl.tex_image_2d(
+                        glow::TEXTURE_2D,
+                        0,
+                        glow::RGBA as i32,
+                        canvas_width,
+                        canvas_height,
+                        0,
+                        glow::RGBA,
+                        glow::UNSIGNED_BYTE,
+                        Some(&composite.data),
+                    );
+                } else {
+                    // Subsequent frames: use dirty rect for partial update
+                    let dirty = self.app_state.canvas().dirty_rect().clone();
+                    
+                    if !dirty.is_empty() && (dirty.width as i64 * dirty.height as i64) < (canvas_width as i64 * canvas_height as i64 / 2) {
+                        // Small dirty region: partial update
+                        let composite = self.app_state.canvas().composite_rect(
+                            dirty.x, dirty.y, dirty.width, dirty.height
+                        );
+                        
+                        if composite.width > 0 && composite.height > 0 {
+                            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+                            self.gl.tex_sub_image_2d(
+                                glow::TEXTURE_2D,
+                                0,
+                                dirty.x as i32,
+                                dirty.y as i32,
+                                composite.width as i32,
+                                composite.height as i32,
+                                glow::RGBA,
+                                glow::UNSIGNED_BYTE,
+                                glow::PixelUnpackData::Slice(&composite.data),
+                            );
+                        }
+                    } else {
+                        // Large/empty dirty region: full update
+                        let composite = self.app_state.canvas().composite_all();
+                        self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+                        self.gl.tex_sub_image_2d(
+                            glow::TEXTURE_2D,
+                            0,
+                            0,
+                            0,
+                            canvas_width,
+                            canvas_height,
+                            glow::RGBA,
+                            glow::UNSIGNED_BYTE,
+                            glow::PixelUnpackData::Slice(&composite.data),
+                        );
+                    }
+                }
+            }
+            
+            self.last_rendered_version = current_version;
+            self.has_rendered = true;
+            
+            // Consume the dirty rect so it doesn't accumulate
+            self.app_state.canvas_mut().consume_dirty_rect();
+        }
         
         unsafe {
-            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-            self.gl.tex_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                glow::RGBA as i32,
-                raster.width as i32,
-                raster.height as i32,
-                0,
-                glow::RGBA,
-                glow::UNSIGNED_BYTE,
-                Some(&raster.data),
-            );
-
+            // Set viewport to match canvas size
+            self.gl.viewport(0, 0, canvas_width, canvas_height);
+            
+            // Clear with canvas background color (matches composite background)
             self.gl.clear_color(r, g, b, 1.0);
             self.gl.clear(glow::COLOR_BUFFER_BIT);
-
-            self.gl.enable(glow::BLEND);
-            self.gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+            self.gl.disable(glow::BLEND);
 
             self.gl.use_program(Some(self.program));
             
@@ -263,7 +374,6 @@ fn render_frame(&mut self, r: f32, g: f32, b: f32) {
 
             self.gl.bind_vertex_array(None);
             self.gl.use_program(None);
-            self.gl.disable(glow::BLEND);
         }
     }
 }

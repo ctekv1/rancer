@@ -17,6 +17,35 @@ pub mod window_tests;
 #[cfg(test)]
 pub mod raster_render_tests;
 
+#[cfg(test)]
+pub mod app_tests;
+
+#[cfg(test)]
+pub mod sdl2_event_tests;
+
+#[cfg(test)]
+pub mod undo_tests;
+
+#[cfg(test)]
+pub mod selection_tests;
+
+#[cfg(test)]
+pub mod brush_tool_tests;
+
+#[cfg(test)]
+pub mod ui_tests;
+
+#[cfg(test)]
+pub mod render_optimization_tests;
+
+pub mod events;
+pub mod app;
+pub mod tools;
+pub mod commands;
+pub mod selection;
+pub mod brush;
+pub mod ui;
+
 pub mod gl {
     pub use glow::*;
 }

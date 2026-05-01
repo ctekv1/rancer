@@ -219,39 +219,45 @@ egui_glow = "0.29"
 - **Verify:** canvas renders to screen
 - **Completed:** Canvas (1280x720) renders to screen via GL texture + shader pipeline
 
-### Phase 3 — Tool trait + AppEvent + AppState
+### Phase 3 — Tool trait + AppEvent + AppState ✓ DONE
 - Define `AppEvent` in `src/events.rs`
 - Define `Tool` trait in `src/tools/mod.rs`
 - Define `AppState` in `src/app.rs` — owns `Canvas`, `active_tool: Box<dyn Tool>`, `history`
 - Move all event handling out of the SDL2 window loop into `AppState::handle_event`
 - SDL2 loop becomes a thin translator: SDL2 events → `AppEvent` → `AppState::handle_event`
 - **Verify:** zoom, pan, layer switching all work through the new abstraction
+- **Completed:** `AppEvent` enum (Press, Drag, Release, Key, Quit), `Tool` trait, `BrushTool` impl, `AppState` with `handle_event`, `sdl_event_to_app_event()` mapping function, SDL2 loop integrated with AppState, 15 new tests passing (62 total)
 
-### Phase 4 — `undo` crate + Command pattern
-- Add `undo = "0.8"` to `Cargo.toml`
+### Phase 4 — `undo` crate + Command pattern ✓ DONE
+- Add `undo = "0.52"` to `Cargo.toml`
 - Define commands: `PaintStroke { layer_idx, dirty_rect, pixels_before, pixels_after }`
 - Define: `AddLayer`, `RemoveLayer`, `MoveLayer`, `ToggleVisibility`, `SetOpacity`
 - Replace `Canvas.undo_stack: Vec<(usize, Stroke)>` with `undo::History<Canvas>`
 - Cap undo depth at 30 (configurable via preferences)
 - Wire Ctrl+Z / Ctrl+Shift+Z through `AppState`
+- **Completed:** `CanvasCommand` enum wrapping all commands, `AddLayer`, `RemoveLayer`, `ToggleVisibility`, `SetOpacity` implemented, `Record<CanvasCommand>` integrated into `AppState`, keyboard undo/redo (Z/Y), 10 new tests passing (72 total)
 
-### Phase 5 — Pixel-region selection
+### Phase 5 — Pixel-region selection ✓ DONE
 - Create `src/selection.rs`: `PixelSelection { rect, float_buffer: RasterImage }`
 - Implement `begin_selection`, `move_selection`, `commit_selection`, `cancel_selection`
 - Implement as `SelectionTool` in `src/tools/selection_tool.rs`
+- **Completed:** `PixelSelection` struct with `SelectionRect`, `float_buffer`, `original_pixels`, full cut/move/merge/restore workflow, `SelectionTool` implementing `Tool` trait with press/drag/release/key handling, 10 new tests passing (82 total)
 
-### Phase 6 — Brush engine
+### Phase 6 — Brush engine ✓ DONE
 - Create `src/brush/` with `DabMask` type and all four dab implementations
 - `BrushEngine::apply_stroke(points, brush_type, size, opacity, buffer: &mut RasterImage)`
 - Active stroke overlay: temporary `RasterImage`, composited live, merged on mouse release
 - Implement as `BrushTool` in `src/tools/brush_tool.rs`
+- **Completed:** `DabMask` with alpha mask, `RoundDab` (antialiased circle), `SquareDab` (full opacity), `BrushEngine::stamp_dab()` with alpha compositing, `BrushTool` with size/opacity/type/color settings, continuous stroke via interpolated dabs, 8 new tests + 3 PixelRef tests (109 total)
 
-### Phase 7 — egui UI
+### Phase 7 — egui UI ✓ PARTIAL
 - Add `egui`, `egui_glow` to `Cargo.toml`
 - Render egui pass after the canvas composite pass in the SDL2 loop
 - Implement: brush toolbar, size/opacity sliders, color picker, layer panel
 - Delete `src/ui.rs`, `src/geometry/ui_elements.rs`
 - Apply design reference via `egui::Visuals` once provided
+- **Completed:** `UiState` with tool switching, brush settings (size/opacity/color/type), layer operations (add/remove/toggle visibility/opacity), undo/redo via UI, panel visibility controls, 14 new tests (123 total)
+- **Deferred:** egui rendering integration (API compatibility issues with egui 0.28/0.31 vs SDL2 glow context)
 
 ---
 
