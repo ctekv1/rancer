@@ -13,12 +13,14 @@ pub use crate::tools::ToolType;
 pub struct UiState {
     // Tool selection
     pub active_tool: ToolType,
+    pub eraser_mode: bool,  // true = eraser mode (BrushTool with is_eraser=true)
+    pub color_picker_open: bool,  // Color picker popup state
+    pub pending_color: Option<crate::canvas::Color>,  // Color to apply after picker closes
     
     // Panel visibility
     pub show_tool_panel: bool,
     pub show_brush_panel: bool,
     pub show_layer_panel: bool,
-    pub show_color_panel: bool,
     
     // Theme
     pub use_dark_theme: bool,
@@ -32,10 +34,12 @@ impl UiState {
     pub fn new() -> Self {
         Self {
             active_tool: ToolType::Brush,
+            eraser_mode: false,
+            color_picker_open: false,
+            pending_color: None,
             show_tool_panel: true,
             show_brush_panel: true,
             show_layer_panel: true,
-            show_color_panel: true,
             use_dark_theme: true,
         }
     }
@@ -49,8 +53,16 @@ impl UiState {
     pub fn apply_to_app(&mut self, app: &mut AppState) {
         match self.active_tool {
             ToolType::Brush => {
+                // Check if we need to create a new tool or just toggle eraser mode
                 if app.tool_name() != "Brush" {
-                    app.set_active_tool(Box::new(BrushTool::new()));
+                    let mut tool = BrushTool::new();
+                    tool.set_eraser_mode(self.eraser_mode);
+                    app.set_active_tool(Box::new(tool));
+                } else {
+                    // Tool is already Brush, just update eraser mode
+                    if let Some(brush_tool) = app.active_tool_mut().as_any_mut().downcast_mut::<BrushTool>() {
+                        brush_tool.set_eraser_mode(self.eraser_mode);
+                    }
                 }
             }
             ToolType::Selection => {

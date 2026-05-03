@@ -14,7 +14,8 @@ fn test_ui_state_defaults() {
     assert!(ui_state.show_tool_panel);
     assert!(ui_state.show_brush_panel);
     assert!(ui_state.show_layer_panel);
-    assert!(ui_state.show_color_panel);
+    // show_color_panel removed - use color_picker_open instead
+    assert!(!ui_state.color_picker_open); // Default: popup closed
 }
 
 /// Test tool switching in UiState
@@ -473,4 +474,107 @@ fn test_svg_icon_size_consistency() {
         assert!(svg.contains("height=\"24\""), "{} icon should be 24px tall", name);
         assert!(svg.contains("viewBox=\"0 0 24 24\""), "{} icon should have 24x24 viewBox", name);
     }
+}
+
+/// Test color conversion functions
+#[test]
+fn test_color_conversion_functions() {
+    use crate::canvas::Color;
+    use crate::ui::egui_impl::{color_to_color32, color32_to_color};
+    
+    // Test basic RGB color (opaque)
+    let color = Color { r: 255, g: 128, b: 64, a: 255 };
+    let color32 = color_to_color32(color);
+    let converted = color32_to_color(color32);
+    
+    assert_eq!(converted.r, 255);
+    assert_eq!(converted.g, 128);
+    assert_eq!(converted.b, 64);
+    assert_eq!(converted.a, 255);
+}
+
+/// Test opaque black conversion
+#[test]
+fn test_color_conversion_black() {
+    use crate::canvas::Color;
+    use crate::ui::egui_impl::{color_to_color32, color32_to_color};
+    
+    let color = Color::BLACK; // r:0, g:0, b:0, a:255
+    let color32 = color_to_color32(color);
+    let converted = color32_to_color(color32);
+    
+    assert_eq!(converted, Color::BLACK);
+}
+
+/// Test white color conversion
+#[test]
+fn test_color_conversion_white() {
+    use crate::canvas::Color;
+    use crate::ui::egui_impl::{color_to_color32, color32_to_color};
+    
+    let color = Color::WHITE; // r:255, g:255, b:255, a:255
+    let color32 = color_to_color32(color);
+    let converted = color32_to_color(color32);
+    
+    assert_eq!(converted, Color::WHITE);
+}
+
+/// Test that color swatch reads from active tool's brush color
+#[test]
+fn test_color_swatch_shows_brush_color() {
+    use crate::app::AppState;
+    use crate::canvas::Color;
+    use crate::ui::egui_impl::color_to_color32;
+    
+    let mut app = AppState::new(800, 600);
+    
+    // Get current brush color (default is black)
+    let settings = app.active_tool().brush_settings();
+    let color32 = color_to_color32(settings.color);
+    
+    // Default color should be black (0,0,0,255)
+    assert_eq!(settings.color, Color::BLACK);
+    
+    // Color32 should match
+    let expected = color_to_color32(Color::BLACK);
+    assert_eq!(color32, expected);
+}
+
+/// Test that changing brush color updates what swatch shows
+#[test]
+fn test_changing_brush_color_updates_swatch() {
+    use crate::app::AppState;
+    use crate::canvas::Color;
+    use crate::ui::egui_impl::{color_to_color32, color32_to_color};
+    use crate::tools::Tool;
+    
+    let mut app = AppState::new(800, 600);
+    
+    // Change brush color to red via Tool trait
+    let red = Color { r: 255, g: 0, b: 0, a: 255 };
+    app.active_tool_mut().set_brush_color(red);
+    
+    // Now swatch should show red
+    let settings = app.active_tool().brush_settings();
+    let color32 = color_to_color32(settings.color);
+    let converted = color32_to_color(color32);
+    
+    assert_eq!(converted, red);
+}
+
+/// Test that clicking color swatch toggles color_picker_open
+#[test]
+fn test_color_swatch_click_toggles_picker() {
+    let mut ui_state = UiState::new();
+    
+    // Initially closed
+    assert!(!ui_state.color_picker_open);
+    
+    // Simulate click: toggle open
+    ui_state.color_picker_open = !ui_state.color_picker_open;
+    assert!(ui_state.color_picker_open);
+    
+    // Simulate click again: toggle closed
+    ui_state.color_picker_open = !ui_state.color_picker_open;
+    assert!(!ui_state.color_picker_open);
 }

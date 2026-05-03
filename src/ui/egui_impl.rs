@@ -95,6 +95,29 @@ impl Theme {
     }
 }
 
+/// Convert our Color (RGBA u8) to egui::Color32
+pub fn color_to_color32(color: crate::canvas::Color) -> Color32 {
+    // Color32 stores RGBA as u32, with a() returning the alpha byte
+    // from_rgba_unmultiplied expects values in 0-255 range
+    let c = Color32::from_rgba_premultiplied(
+        (color.r as f32 * (color.a as f32 / 255.0)) as u8,
+        (color.g as f32 * (color.a as f32 / 255.0)) as u8,
+        (color.b as f32 * (color.a as f32 / 255.0)) as u8,
+        color.a
+    );
+    c
+}
+
+/// Convert egui::Color32 to our Color (RGBA u8)
+pub fn color32_to_color(c: Color32) -> crate::canvas::Color {
+    crate::canvas::Color {
+        r: c.r(),
+        g: c.g(),
+        b: c.b(),
+        a: c.a(),
+    }
+}
+
 /// Show the main UI using egui
 pub fn show_ui(ctx: &Context, app: &mut AppState, ui_state: &mut UiState, icon_cache: &IconCache) {
     let theme = if ui_state.use_dark_theme { Theme::studio_dark() } else { Theme::studio_light() };
@@ -185,37 +208,53 @@ pub fn show_ui(ctx: &Context, app: &mut AppState, ui_state: &mut UiState, icon_c
         ui.vertical(|ui| {
             ui.add_space(8.0);
             
-            // Tools with pre-loaded SVG icons
-            let tools = [
-                ("brush", AppToolType::Brush, "Brush"),
-                ("eraser", AppToolType::Selection, "Selection (uses eraser icon)"),
-            ];
+            // Brush button
+            let is_brush_active = ui_state.active_tool == AppToolType::Brush && !ui_state.eraser_mode;
             
-            for (icon_name, tool_type, _tooltip) in tools {
-                let is_active = ui_state.active_tool == tool_type;
+            if let Some(texture) = icon_cache.get("brush") {
+                let button = egui::Button::image(texture)
+                    .min_size(egui::vec2(36.0, 36.0))
+                    .corner_radius(8.0)
+                    .fill(if is_brush_active { 
+                        theme.accent.linear_multiply(0.2) 
+                    } else { 
+                        Color32::TRANSPARENT 
+                    })
+                    .stroke(if is_brush_active { 
+                        Stroke::new(1.5, theme.accent) 
+                    } else { 
+                        Stroke::NONE 
+                    });
                 
-                if let Some(texture) = icon_cache.get(icon_name) {
-                    // Fixed-size button (no shrinkage)
-                    let button = egui::Button::image(texture)
-                        .min_size(egui::vec2(36.0, 36.0))
-                        .corner_radius(8.0)
-                        .fill(if is_active { 
-                            theme.accent.linear_multiply(0.2) 
-                        } else { 
-                            Color32::TRANSPARENT 
-                        })
-                        .stroke(if is_active { 
-                            Stroke::new(1.5, theme.accent) 
-                        } else { 
-                            Stroke::NONE 
-                        });
-                    
-                    let response = ui.add(button);
-                    
-                    if response.clicked() {
-                        ui_state.set_tool(tool_type);
-                        ui_state.apply_to_app(app);
-                    }
+                if ui.add(button).clicked() {
+                    ui_state.set_tool(AppToolType::Brush);
+                    ui_state.eraser_mode = false;
+                    ui_state.apply_to_app(app);
+                }
+            }
+            
+            // Eraser button (uses BrushTool with eraser_mode=true)
+            let is_eraser_active = ui_state.active_tool == AppToolType::Brush && ui_state.eraser_mode;
+            
+            if let Some(texture) = icon_cache.get("eraser") {
+                let button = egui::Button::image(texture)
+                    .min_size(egui::vec2(36.0, 36.0))
+                    .corner_radius(8.0)
+                    .fill(if is_eraser_active { 
+                        theme.accent.linear_multiply(0.2) 
+                    } else { 
+                        Color32::TRANSPARENT 
+                    })
+                    .stroke(if is_eraser_active { 
+                        Stroke::new(1.5, theme.accent) 
+                    } else { 
+                        Stroke::NONE 
+                    });
+                
+                if ui.add(button).clicked() {
+                    ui_state.set_tool(AppToolType::Brush);
+                    ui_state.eraser_mode = true;
+                    ui_state.apply_to_app(app);
                 }
             }
         });
@@ -226,15 +265,20 @@ pub fn show_ui(ctx: &Context, app: &mut AppState, ui_state: &mut UiState, icon_c
         ui.horizontal(|ui| {
             ui.add_space(8.0);
             
-            // Color swatch
+            // Color swatch - shows current brush color
+            let current_color = {
+                let settings = app.active_tool().brush_settings();
+                color_to_color32(settings.color)
+            };
+            
             if ui.add(
                 egui::Button::new("")
                     .min_size(egui::vec2(38.0, 38.0))
                     .corner_radius(9.0)
-                    .fill(Color32::from_rgb(192, 80, 48))
+                    .fill(current_color)
                     .stroke(Stroke::new(1.5, theme.border))
             ).clicked() {
-                // TODO: toggle color picker
+                ui_state.color_picker_open = !ui_state.color_picker_open;
             }
             
             ui.add_space(4.0);
@@ -285,4 +329,48 @@ pub fn show_ui(ctx: &Context, app: &mut AppState, ui_state: &mut UiState, icon_c
             }
         });
     });
+    
+    // Color picker popup (above bottom bar)
+    if ui_state.color_picker_open {
+        let mut color32 = {
+            let settings = app.active_tool().brush_settings();
+            color_to_color32(settings.color)
+        };
+        
+        egui::Window::new("color_picker")
+            .open(&mut ui_state.color_picker_open)
+            .title_bar(false)
+            .resizable(false)
+            .default_pos(egui::pos2(50.0, ctx.screen_rect().bottom() - 80.0 - 350.0))
+            .show(ctx, |ui| {
+                egui::Frame::none()
+                    .fill(theme.panel)
+                    .stroke(Stroke::new(1.0, theme.border))
+                    .corner_radius(8.0)
+                    .inner_margin(8.0)
+                    .show(ui, |ui| {
+                        ui.set_max_width(280.0);
+                        
+                        let changed = egui::widgets::color_picker::color_picker_color32(
+                            ui,
+                            &mut color32,
+                            egui::widgets::color_picker::Alpha::OnlyBlend,
+                        );
+                        
+                        if changed {
+                            ui_state.pending_color = Some(color32_to_color(color32));
+                        }
+                    });
+            });
+        
+        // Apply color change after popup renders
+        if let Some(color) = ui_state.pending_color.take() {
+            if let Some(tool) = app.active_tool_mut()
+                .as_any_mut()
+                .downcast_mut::<crate::tools::BrushTool>() 
+            {
+                tool.set_brush_color(color);
+            }
+        }
+    }
 }
