@@ -76,6 +76,15 @@ impl Tool for BrushTool {
 
     fn on_drag(&mut self, x: f32, y: f32, canvas: &mut Canvas) {
         if self.is_drawing {
+            // Professional apps: ignore drags that start outside canvas
+            // or clamp coordinates to valid range
+            let canvas_width = canvas.width() as f32;
+            let canvas_height = canvas.height() as f32;
+            
+            // Clamp to canvas bounds
+            let x = x.clamp(0.0, canvas_width - 1.0);
+            let y = y.clamp(0.0, canvas_height - 1.0);
+            
             let dx = x - self.last_x;
             let dy = y - self.last_y;
             let dist = (dx * dx + dy * dy).sqrt();

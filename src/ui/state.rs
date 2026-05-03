@@ -19,6 +19,13 @@ pub struct UiState {
     pub show_brush_panel: bool,
     pub show_layer_panel: bool,
     pub show_color_panel: bool,
+    
+    // Theme
+    pub use_dark_theme: bool,
+    
+    // Pre-loaded SVG icon textures (to prevent disappearance on hover)
+    #[cfg(feature = "svg")]
+    pub icon_textures: std::collections::HashMap<&'static str, egui_sdl2::egui::TextureHandle>,
 }
 
 impl UiState {
@@ -29,6 +36,7 @@ impl UiState {
             show_brush_panel: true,
             show_layer_panel: true,
             show_color_panel: true,
+            use_dark_theme: true,
         }
     }
 

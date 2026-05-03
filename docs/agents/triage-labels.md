@@ -1,16 +1,19 @@
-# Triage labels
+# Triage Labels
 
-This repo uses the following label vocabulary for the triage state machine:
+This repo uses the **five canonical triage roles** as GitHub issue labels.
 
-| Role | Label |
-|------|-------|
-| Needs evaluation | `needs-triage` |
-| Waiting on reporter | `needs-info` |
-| Ready for AFK agent | `ready-for-agent` |
-| Ready for human | `ready-for-human` |
-| Will not fix | `wontfix` |
+## Label Vocabulary
 
-## Notes
+| Label | Purpose | When applied |
+|-------|---------|--------------|
+| `needs-triage` | Maintainer needs to evaluate | New issue, not yet reviewed |
+| `needs-info` | Waiting on reporter | Issue lacks reproduction steps or context |
+| `ready-for-agent` | Fully specified, AI-agent-ready | All context present, agent can pick up |
+| `ready-for-human` | Needs human implementation | Agent cannot complete (needs judgement) |
+| `wontfix` | Will not be actioned | Issue is out of scope or duplicate |
 
-- These are the default label strings; create them in the GitHub repo if they don't exist
-- The `triage` skill applies these labels as issues move through the state machine
+## Usage
+
+- Skills `triage` and `to-issues` apply these labels automatically
+- Labels must exist in the GitHub repo (create them via `gh label create` if missing)
+- To override defaults, edit this file and the skills will read from here

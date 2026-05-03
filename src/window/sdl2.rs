@@ -8,6 +8,8 @@ use sdl2::event::Event;
 use crate::app::AppState;
 use crate::events::AppEvent;
 use crate::preferences::Preferences;
+use crate::ui::egui_integration::EguiIntegration;
+use crate::ui::UiState;
 
 /// Convert an SDL2 event to an AppEvent
 pub fn sdl_event_to_app_event(event: Event) -> Option<AppEvent> {
@@ -51,6 +53,9 @@ pub struct Sdl2App {
     gl: glow::Context,
     gl_context: sdl2::video::GLContext,
     app_state: AppState,
+    ui_state: UiState,
+    icon_cache: crate::ui::egui_impl::IconCache,
+    egui: EguiIntegration,
     program: glow::Program,
     texture: glow::Texture,
     vao: glow::VertexArray,
@@ -213,12 +218,23 @@ impl Sdl2App {
         let height = size.1 as u32;
 
         let app_state = AppState::new(width, height);
-
+        let ui_state = UiState::new();
+        
+        // Create egui integration
+        let mut egui = EguiIntegration::new(&window, &gl_context, &gl)
+            .map_err(|e| format!("Failed to create egui integration: {}", e))?;
+        
+        // Create icon cache (needs egui context)
+        let icon_cache = crate::ui::egui_impl::IconCache::new(egui.ctx());
+        
         Ok(Self {
             window,
             gl,
             gl_context,
             app_state,
+            ui_state,
+            icon_cache,
+            egui,
             program,
             texture,
             vao,
@@ -250,6 +266,10 @@ impl Sdl2App {
         'running: loop {
             let mut has_work = false;
             for event in event_pump.poll_iter() {
+                // Pass event to egui first
+                self.egui.handle_event(&self.window, &event);
+                
+                // Then convert to AppEvent for the app
                 if let Some(app_event) = sdl_event_to_app_event(event) {
                     has_work = true;
                     match app_event {
@@ -267,6 +287,13 @@ impl Sdl2App {
 
             // Render and swap
             self.render_frame(canvas_r, canvas_g, canvas_b);
+            
+            // Render egui on top
+                self.egui.run_and_render(&self.window, |ctx: &egui_sdl2::egui::Context| {
+                    self.ui_state.apply_to_app(&mut self.app_state);
+                    crate::ui::show_ui(ctx, &mut self.app_state, &mut self.ui_state, &self.icon_cache);
+                });
+            
             self.window.gl_swap_window();
             self.last_rendered_version = self.app_state.canvas().version();
 
@@ -298,7 +325,7 @@ impl Sdl2App {
                         0,
                         glow::RGBA,
                         glow::UNSIGNED_BYTE,
-                        Some(&composite.data),
+                        glow::PixelUnpackData::Slice(Some(&composite.data[..])),
                     );
                 } else {
                     // Subsequent frames: use dirty rect for partial update
@@ -321,7 +348,7 @@ impl Sdl2App {
                                 composite.height as i32,
                                 glow::RGBA,
                                 glow::UNSIGNED_BYTE,
-                                glow::PixelUnpackData::Slice(&composite.data),
+                                glow::PixelUnpackData::Slice(Some(&composite.data[..])),
                             );
                         }
                     } else {
@@ -337,7 +364,7 @@ impl Sdl2App {
                             canvas_height,
                             glow::RGBA,
                             glow::UNSIGNED_BYTE,
-                            glow::PixelUnpackData::Slice(&composite.data),
+                            glow::PixelUnpackData::Slice(Some(&composite.data[..])),
                         );
                     }
                 }
