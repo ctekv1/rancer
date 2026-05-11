@@ -55,17 +55,19 @@ impl Edit for CanvasCommand {
 pub struct AddLayer {
     name: Option<String>,
     layer: Option<Layer>,
+    insertion_index: Option<usize>,
 }
 
 impl AddLayer {
     pub fn new(name: Option<String>) -> Self {
-        Self { name, layer: None }
+        Self { name, layer: None, insertion_index: None }
     }
 
     pub fn default() -> Self {
         Self {
             name: None,
             layer: None,
+            insertion_index: None,
         }
     }
 }
@@ -75,18 +77,21 @@ impl Edit for AddLayer {
     type Output = Result<(), String>;
 
     fn edit(&mut self, target: &mut Canvas) -> Self::Output {
-        let width = target.width;
-        let height = target.height;
-        let name = self.name.clone().unwrap_or_else(|| format!("Layer {}", target.layers.len()));
-        let layer = Layer::new(name.clone(), width, height, 1.0);
-        self.layer = Some(layer.clone());
-        target.add_layer(Some(name))
+        let idx = target.add_layer(self.name.clone())?;
+        self.layer = Some(target.layers[idx].clone());
+        self.insertion_index = Some(idx);
+        Ok(())
     }
 
     fn undo(&mut self, target: &mut Canvas) -> Self::Output {
-        if self.layer.is_some() {
-            self.layer = None;
-            target.remove_layer(target.layers.len() - 1)
+        if let Some(idx) = self.insertion_index {
+            if idx < target.layers.len() {
+                self.insertion_index = None;
+                self.layer = None;
+                target.remove_layer(idx)
+            } else {
+                Ok(())
+            }
         } else {
             Ok(())
         }
@@ -111,9 +116,6 @@ impl Edit for RemoveLayer {
     type Output = Result<(), String>;
 
     fn edit(&mut self, target: &mut Canvas) -> Self::Output {
-        if self.index >= target.layers.len() || self.index == 0 {
-            return Err("Invalid layer index".to_string());
-        }
         self.layer = Some(target.layers[self.index].clone());
         target.remove_layer(self.index)
     }
@@ -152,9 +154,8 @@ impl Edit for ToggleVisibility {
     fn edit(&mut self, target: &mut Canvas) -> Self::Output {
         if self.index < target.layers.len() {
             self.was_visible = target.layers[self.index].visible;
-            target.layers[self.index].visible = !self.was_visible;
-            target.invalidate();
         }
+        let _ = target.toggle_layer_visibility(self.index);
     }
 
     fn undo(&mut self, target: &mut Canvas) -> Self::Output {
@@ -190,9 +191,8 @@ impl Edit for SetOpacity {
     fn edit(&mut self, target: &mut Canvas) -> Self::Output {
         if self.index < target.layers.len() {
             self.old_opacity = target.layers[self.index].opacity;
-            target.layers[self.index].opacity = self.new_opacity;
-            target.invalidate();
         }
+        let _ = target.set_layer_opacity(self.index, self.new_opacity);
     }
 
     fn undo(&mut self, target: &mut Canvas) -> Self::Output {

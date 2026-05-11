@@ -1,8 +1,7 @@
 //! Tool trait — interface for all drawing and interaction tools
 //!
 //! Each tool implements this trait to handle user input events.
-
-use std::any::Any;
+//! Brush-specific configuration lives in the separate `BrushConfig` trait.
 
 use crate::canvas::{Canvas, Color};
 use crate::brush::BrushType;
@@ -20,46 +19,31 @@ pub struct BrushSettings {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ToolType {
     Brush,
-    Selection,
 }
 
 /// Trait for all tools (brush, pan, selection, etc.)
-pub trait Tool: Any {
-    /// Called when mouse is pressed
+pub trait Tool {
     fn on_press(&mut self, x: f32, y: f32, canvas: &mut Canvas);
-    /// Called when mouse is dragged
     fn on_drag(&mut self, x: f32, y: f32, canvas: &mut Canvas);
-    /// Called when mouse is released
     fn on_release(&mut self, x: f32, y: f32, canvas: &mut Canvas);
-    /// Called when keyboard input occurs
     fn on_key(&mut self, code: &str);
-    /// Tool name for UI display
     fn name(&self) -> &str;
-    /// Get brush settings (default: returns defaults for non-brush tools)
-    fn brush_settings(&self) -> BrushSettings {
-        BrushSettings {
-            size: 10,
-            opacity: 1.0,
-            color: Color { r: 0, g: 0, b: 0, a: 255 },
-            brush_type: BrushType::Round,
-        }
-    }
-    /// Set brush size (no-op for non-brush tools)
-    fn set_brush_size(&mut self, _size: u32) {}
-    /// Set brush opacity (no-op for non-brush tools)
-    fn set_brush_opacity(&mut self, _opacity: f32) {}
-    /// Set brush color (no-op for non-brush tools)
-    fn set_brush_color(&mut self, _color: Color) {}
-    /// Set brush type (no-op for non-brush tools)
-    fn set_brush_type(&mut self, _brush_type: BrushType) {}
-    /// Cast to Any for downcasting
-    fn as_any(&self) -> &dyn Any;
-    /// Cast to Any mut for downcasting
-    fn as_any_mut(&mut self) -> &mut dyn Any;
+    fn brush_settings(&self) -> Option<BrushSettings> { None }
+    fn as_brush_config(&mut self) -> Option<&mut dyn BrushConfig> { None }
 }
 
-pub mod selection_tool;
+/// Brush-specific configuration (size, opacity, color, eraser mode).
+/// Only brush-like tools implement this.
+pub trait BrushConfig {
+    fn brush_settings(&self) -> BrushSettings;
+    fn set_brush_size(&mut self, size: u32);
+    fn set_brush_opacity(&mut self, opacity: f32);
+    fn set_brush_color(&mut self, color: Color);
+    fn set_brush_type(&mut self, brush_type: BrushType);
+    fn set_eraser_mode(&mut self, enabled: bool);
+    fn is_eraser(&self) -> bool;
+}
+
 pub mod brush_tool;
 
 pub use brush_tool::BrushTool;
-pub use selection_tool::SelectionTool;

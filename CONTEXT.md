@@ -13,7 +13,6 @@ Rancer is a **high-performance digital art application** built in Rust. It suppo
   - **Paint mode**: Stamps brush dabs with color/size/opacity from `paint_settings`
   - **Eraser mode**: Erases to `canvas.background_color` using `eraser_settings`
   - Toggle via `is_eraser: bool` — same tool, different settings
-- **SelectionTool**: Pixel-region selection with move support
 - **AppState**: Owns the canvas, active tool, and undo/redo history
 - **UiState**: Manages egui panel visibility, tool selection, eraser mode, color picker state, and theme
 
@@ -38,8 +37,8 @@ See `REDESIGN.md` for the SDL2 + OpenGL + egui migration plan.
 
 - **Version**: 0.0.7
 - **Phase**: Mid-redesign (SDL2 + egui + glow)
-- **Tools implemented**: BrushTool (Paint + Eraser modes), SelectionTool (stubbed)
+- **Tools implemented**: BrushTool (Paint + Eraser modes)
 - **UI**: egui integration with SVG icons, theme toggle, layer management, tool strip, color picker popup
-- **Tests**: 136+ tests passing (unit + integration + TDD eraser + TDD color picker)
+- **Tests**: 117 tests passing (unit + integration + TDD eraser + TDD color picker)
 - **Eraser mode**: `BrushTool` with `is_eraser` toggle, separate `paint_settings`/`eraser_settings`
 - **Color picker**: Popup above bottom bar using `egui::color_picker_color32()`, reads/writes `BrushTool::paint_settings.color`

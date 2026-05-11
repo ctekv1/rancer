@@ -22,12 +22,8 @@ fn test_ui_state_defaults() {
 #[test]
 fn test_ui_state_tool_switching() {
     let mut ui_state = UiState::new();
+    assert_eq!(ui_state.active_tool, ToolType::Brush);
     
-    // Switch to Selection tool
-    ui_state.set_tool(ToolType::Selection);
-    assert_eq!(ui_state.active_tool, ToolType::Selection);
-    
-    // Switch back to Brush tool
     ui_state.set_tool(ToolType::Brush);
     assert_eq!(ui_state.active_tool, ToolType::Brush);
 }
@@ -40,14 +36,8 @@ fn test_ui_state_apply_to_app() {
     let mut app = AppState::new(800, 600);
     let mut ui_state = UiState::new();
     
-    // Default should be Brush
     ui_state.apply_to_app(&mut app);
     assert_eq!(app.tool_name(), "Brush");
-    
-    // Switch to Selection
-    ui_state.set_tool(ToolType::Selection);
-    ui_state.apply_to_app(&mut app);
-    assert_eq!(app.tool_name(), "Selection");
 }
 
 /// Test UiState layer operations
@@ -166,24 +156,15 @@ fn test_egui_integration_ctx_access() {
 /// Test ToolType conversion from UiState to app
 #[test]
 fn test_tool_type_consistency() {
-    // Ensure ToolType in ui::state matches tools::ToolType
     assert_eq!(ToolType::Brush as u8, crate::tools::ToolType::Brush as u8);
-    assert_eq!(ToolType::Selection as u8, crate::tools::ToolType::Selection as u8);
 }
 
 /// Test that clicking tool icon in UI updates active_tool in UiState
 #[test]
 fn test_tool_switching_via_ui() {
     let mut ui_state = UiState::new();
-    
-    // Initially Brush
     assert_eq!(ui_state.active_tool, ToolType::Brush);
     
-    // Simulate clicking Selection tool
-    ui_state.set_tool(ToolType::Selection);
-    assert_eq!(ui_state.active_tool, ToolType::Selection);
-    
-    // Simulate clicking Brush tool
     ui_state.set_tool(ToolType::Brush);
     assert_eq!(ui_state.active_tool, ToolType::Brush);
 }
@@ -196,22 +177,15 @@ fn test_apply_to_app_switches_tools() {
     let mut app = AppState::new(800, 600);
     let mut ui_state = UiState::new();
     
-    // Start with Brush
     ui_state.apply_to_app(&mut app);
     assert_eq!(app.tool_name(), "Brush");
     
-    // Switch to Selection via UI state
-    ui_state.set_tool(ToolType::Selection);
-    ui_state.apply_to_app(&mut app);
-    assert_eq!(app.tool_name(), "Selection");
-    
-    // Switch back to Brush
     ui_state.set_tool(ToolType::Brush);
     ui_state.apply_to_app(&mut app);
     assert_eq!(app.tool_name(), "Brush");
 }
 
-/// Test that tool switching preserves tool settings (brush size, opacity, etc.)
+/// Test that tool switching preserves brush settings
 #[test]
 fn test_tool_switching_preserves_settings() {
     use crate::app::AppState;
@@ -220,27 +194,15 @@ fn test_tool_switching_preserves_settings() {
     let mut app = AppState::new(800, 600);
     let mut ui_state = UiState::new();
     
-    // Set brush settings
-    app.active_tool_mut().set_brush_size(25);
-    app.active_tool_mut().set_brush_opacity(0.5);
-    app.active_tool_mut().set_brush_type(BrushType::Square);
-    
-    let original_size = app.active_tool().brush_settings().size;
-    let original_opacity = app.active_tool().brush_settings().opacity;
-    let original_type = app.active_tool().brush_settings().brush_type;
-    
-    // Switch to Selection and back
-    ui_state.set_tool(ToolType::Selection);
-    ui_state.apply_to_app(&mut app);
-    assert_eq!(app.tool_name(), "Selection");
+    if let Some(config) = app.active_tool_mut().as_brush_config() {
+        config.set_brush_size(25);
+        config.set_brush_opacity(0.5);
+        config.set_brush_type(BrushType::Square);
+    }
     
     ui_state.set_tool(ToolType::Brush);
     ui_state.apply_to_app(&mut app);
-    
-    // Brush settings should be reset (new BrushTool instance)
-    // This test documents current behavior
     assert_eq!(app.tool_name(), "Brush");
-    // Note: Currently creates new BrushTool, losing settings
 }
 
 /// Test that multiple rapid tool switches work correctly
@@ -251,17 +213,11 @@ fn test_rapid_tool_switching() {
     let mut app = AppState::new(800, 600);
     let mut ui_state = UiState::new();
     
-    // Rapid switching
-    for i in 0..10 {
-        if i % 2 == 0 {
-            ui_state.set_tool(ToolType::Selection);
-        } else {
-            ui_state.set_tool(ToolType::Brush);
-        }
+    for _ in 0..10 {
+        ui_state.set_tool(ToolType::Brush);
         ui_state.apply_to_app(&mut app);
     }
     
-    // Should end with Brush (since loop ends on odd i=9)
     assert_eq!(app.tool_name(), "Brush");
 }
 
@@ -280,21 +236,6 @@ fn test_click_brush_tool_icon() {
     assert_eq!(ui_state.active_tool, ToolType::Brush);
 }
 
-/// Test that clicking Selection tool icon updates active_tool and applies to app
-#[test]
-fn test_click_selection_tool_icon() {
-    use crate::app::AppState;
-    
-    let mut app = AppState::new(800, 600);
-    let mut ui_state = UiState::new();
-    
-    // Simulate clicking Selection tool
-    ui_state.set_tool(ToolType::Selection);
-    ui_state.apply_to_app(&mut app);
-    assert_eq!(app.tool_name(), "Selection");
-    assert_eq!(ui_state.active_tool, ToolType::Selection);
-}
-
 /// Test that apply_to_app doesn't recreate tool if already correct
 #[test]
 fn test_apply_to_app_no_recreate() {
@@ -304,12 +245,7 @@ fn test_apply_to_app_no_recreate() {
     let mut ui_state = UiState::new();
     
     // Apply when already Brush (should not recreate)
-    let tool_ptr_before = app.active_tool() as *const dyn crate::tools::Tool;
     ui_state.apply_to_app(&mut app);
-    let tool_ptr_after = app.active_tool() as *const dyn crate::tools::Tool;
-    
-    // If tool wasn't recreated, pointer should be same
-    // Note: This documents current behavior (may recreate)
     assert_eq!(app.tool_name(), "Brush");
 }
 
@@ -526,10 +462,10 @@ fn test_color_swatch_shows_brush_color() {
     use crate::canvas::Color;
     use crate::ui::egui_impl::color_to_color32;
     
-    let mut app = AppState::new(800, 600);
+    let app = AppState::new(800, 600);
     
     // Get current brush color (default is black)
-    let settings = app.active_tool().brush_settings();
+    let settings = app.active_tool().brush_settings().unwrap();
     let color32 = color_to_color32(settings.color);
     
     // Default color should be black (0,0,0,255)
@@ -546,16 +482,17 @@ fn test_changing_brush_color_updates_swatch() {
     use crate::app::AppState;
     use crate::canvas::Color;
     use crate::ui::egui_impl::{color_to_color32, color32_to_color};
-    use crate::tools::Tool;
     
     let mut app = AppState::new(800, 600);
     
-    // Change brush color to red via Tool trait
+    // Change brush color to red via BrushConfig
     let red = Color { r: 255, g: 0, b: 0, a: 255 };
-    app.active_tool_mut().set_brush_color(red);
+    if let Some(config) = app.active_tool_mut().as_brush_config() {
+        config.set_brush_color(red);
+    }
     
     // Now swatch should show red
-    let settings = app.active_tool().brush_settings();
+    let settings = app.active_tool().brush_settings().unwrap();
     let color32 = color_to_color32(settings.color);
     let converted = color32_to_color(color32);
     

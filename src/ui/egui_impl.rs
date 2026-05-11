@@ -266,10 +266,9 @@ pub fn show_ui(ctx: &Context, app: &mut AppState, ui_state: &mut UiState, icon_c
             ui.add_space(8.0);
             
             // Color swatch - shows current brush color
-            let current_color = {
-                let settings = app.active_tool().brush_settings();
-                color_to_color32(settings.color)
-            };
+            let current_color = app.active_tool().brush_settings()
+                .map(|s| color_to_color32(s.color))
+                .unwrap_or(egui::Color32::BLACK);
             
             if ui.add(
                 egui::Button::new("")
@@ -332,18 +331,17 @@ pub fn show_ui(ctx: &Context, app: &mut AppState, ui_state: &mut UiState, icon_c
     
     // Color picker popup (above bottom bar)
     if ui_state.color_picker_open {
-        let mut color32 = {
-            let settings = app.active_tool().brush_settings();
-            color_to_color32(settings.color)
-        };
+        let mut color32 = app.active_tool().brush_settings()
+            .map(|s| color_to_color32(s.color))
+            .unwrap_or(egui::Color32::BLACK);
         
         egui::Window::new("color_picker")
             .open(&mut ui_state.color_picker_open)
             .title_bar(false)
             .resizable(false)
-            .default_pos(egui::pos2(50.0, ctx.screen_rect().bottom() - 80.0 - 350.0))
+            .default_pos(egui::pos2(50.0, ctx.content_rect().bottom() - 80.0 - 350.0))
             .show(ctx, |ui| {
-                egui::Frame::none()
+                egui::Frame::NONE
                     .fill(theme.panel)
                     .stroke(Stroke::new(1.0, theme.border))
                     .corner_radius(8.0)
@@ -365,11 +363,8 @@ pub fn show_ui(ctx: &Context, app: &mut AppState, ui_state: &mut UiState, icon_c
         
         // Apply color change after popup renders
         if let Some(color) = ui_state.pending_color.take() {
-            if let Some(tool) = app.active_tool_mut()
-                .as_any_mut()
-                .downcast_mut::<crate::tools::BrushTool>() 
-            {
-                tool.set_brush_color(color);
+            if let Some(config) = app.active_tool_mut().as_brush_config() {
+                config.set_brush_color(color);
             }
         }
     }

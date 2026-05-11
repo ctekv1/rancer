@@ -227,48 +227,11 @@ mod pixel_ref_tests {
     }
 }
 
-/// Raster layer containing a bitmap image
-#[derive(Debug, Clone)]
-pub struct RasterLayer {
-    pub image: RasterImage,
-    pub opacity: f32,
-}
-
-impl Default for RasterLayer {
-    fn default() -> Self {
-        Self {
-            image: RasterImage::new(1280, 720),
-            opacity: 1.0,
-        }
-    }
-}
-
-impl RasterLayer {
-    pub fn new(width: u32, height: u32, opacity: f32) -> Self {
-        Self {
-            image: RasterImage::new(width, height),
-            opacity,
-        }
-    }
-
-    pub fn width(&self) -> u32 {
-        self.image.width
-    }
-
-    pub fn height(&self) -> u32 {
-        self.image.height
-    }
-
-    pub fn resize(&mut self, width: u32, height: u32) {
-        self.image.resize(width, height);
-    }
-}
-
 /// Represents a single layer in the canvas (raster only)
 #[derive(Debug, Clone)]
 pub struct Layer {
     pub name: String,
-    pub content: RasterLayer,
+    pub content: RasterImage,
     pub visible: bool,
     pub opacity: f32,
     pub locked: bool,
@@ -278,7 +241,7 @@ impl Default for Layer {
     fn default() -> Self {
         Self {
             name: "Layer 1".to_string(),
-            content: RasterLayer::default(),
+            content: RasterImage::new(1280, 720),
             visible: true,
             opacity: 1.0,
             locked: false,
@@ -290,27 +253,23 @@ impl Layer {
     pub fn new(name: String, width: u32, height: u32, opacity: f32) -> Self {
         Self {
             name,
-            content: RasterLayer::new(width, height, 1.0),
+            content: RasterImage::new(width, height),
             visible: true,
             opacity,
             locked: false,
         }
     }
 
-    pub fn raster_mut(&mut self) -> &mut RasterLayer {
+    pub fn content_mut(&mut self) -> &mut RasterImage {
         &mut self.content
     }
 
-    pub fn raster(&self) -> &RasterLayer {
+    pub fn content(&self) -> &RasterImage {
         &self.content
     }
 
-    pub fn is_raster(&self) -> bool {
-        true
-    }
-
     pub fn clear(&mut self) {
-        self.content.image.fill(Color::TRANSPARENT);
+        self.content.fill(Color::TRANSPARENT);
     }
 }
 
@@ -419,14 +378,6 @@ impl Default for DirtyRect {
     }
 }
 
-/// Result of compositing all visible layers
-#[derive(Debug, Clone)]
-pub struct CompositeResult {
-    pub width: u32,
-    pub height: u32,
-    pub data: Vec<u8>,
-}
-
 impl Default for Canvas {
     fn default() -> Self {
         Self {
@@ -493,149 +444,11 @@ impl Canvas {
         dirty
     }
 
-    pub fn composite_all(&self) -> CompositeResult {
-        let pixel_count = (self.width * self.height) as usize;
-        let mut data = vec![0u8; pixel_count * 4];
-        
-        // Fill with background color first
-        for i in 0..pixel_count {
-            data[i * 4] = self.background_color.r;
-            data[i * 4 + 1] = self.background_color.g;
-            data[i * 4 + 2] = self.background_color.b;
-            data[i * 4 + 3] = 255;
-        }
-        
-        for layer in &self.layers {
-            if !layer.visible {
-                continue;
-            }
-            
-            let opacity = layer.opacity;
-            let raster = &layer.content;
-            let layer_data = &raster.image.data;
-            
-            for i in 0..pixel_count {
-                let src_r = layer_data[i * 4] as f32 / 255.0;
-                let src_g = layer_data[i * 4 + 1] as f32 / 255.0;
-                let src_b = layer_data[i * 4 + 2] as f32 / 255.0;
-                let src_a = (layer_data[i * 4 + 3] as f32 / 255.0) * opacity;
-                
-                if src_a <= 0.0 {
-                    continue;
-                }
-                
-                let dst_r = data[i * 4] as f32 / 255.0;
-                let dst_g = data[i * 4 + 1] as f32 / 255.0;
-                let dst_b = data[i * 4 + 2] as f32 / 255.0;
-                let dst_a = data[i * 4 + 3] as f32 / 255.0;
-                
-                let out_a = src_a + dst_a * (1.0 - src_a);
-                let inv_dst_a = 1.0 - src_a;
-                
-                let out_r = (src_r * src_a + dst_r * dst_a * inv_dst_a) / out_a;
-                let out_g = (src_g * src_a + dst_g * dst_a * inv_dst_a) / out_a;
-                let out_b = (src_b * src_a + dst_b * dst_a * inv_dst_a) / out_a;
-                
-                data[i * 4] = (out_r * 255.0).clamp(0.0, 255.0) as u8;
-                data[i * 4 + 1] = (out_g * 255.0).clamp(0.0, 255.0) as u8;
-                data[i * 4 + 2] = (out_b * 255.0).clamp(0.0, 255.0) as u8;
-                data[i * 4 + 3] = (out_a * 255.0).clamp(0.0, 255.0) as u8;
-            }
-        }
-        
-        CompositeResult {
-            width: self.width,
-            height: self.height,
-            data,
-        }
-    }
-
-    pub fn composite_rect(&self, x: u32, y: u32, w: u32, h: u32) -> CompositeResult {
-        if w == 0 || h == 0 {
-            return CompositeResult {
-                width: 0,
-                height: 0,
-                data: Vec::new(),
-            };
-        }
-        
-        // Clamp to canvas bounds
-        let x = x.min(self.width);
-        let y = y.min(self.height);
-        let w = w.min(self.width - x);
-        let h = h.min(self.height - y);
-        
-        let pixel_count = (w * h) as usize;
-        let mut data = vec![0u8; pixel_count * 4];
-        
-        // Fill with background color
-        for i in 0..pixel_count {
-            data[i * 4] = self.background_color.r;
-            data[i * 4 + 1] = self.background_color.g;
-            data[i * 4 + 2] = self.background_color.b;
-            data[i * 4 + 3] = 255;
-        }
-        
-        for layer in &self.layers {
-            if !layer.visible {
-                continue;
-            }
-            
-            let opacity = layer.opacity;
-            let raster = &layer.content;
-            let layer_data = &raster.image.data;
-            let layer_width = raster.image.width;
-            
-            for cy in 0..h {
-                for cx in 0..w {
-                    let canvas_x = x + cx;
-                    let canvas_y = y + cy;
-                    
-                    let out_idx = ((cy * w + cx) * 4) as usize;
-                    
-                    let layer_idx = ((canvas_y * layer_width + canvas_x) * 4) as usize;
-                    
-                    let src_r = layer_data[layer_idx] as f32 / 255.0;
-                    let src_g = layer_data[layer_idx + 1] as f32 / 255.0;
-                    let src_b = layer_data[layer_idx + 2] as f32 / 255.0;
-                    let src_a = (layer_data[layer_idx + 3] as f32 / 255.0) * opacity;
-                    
-                    if src_a <= 0.0 {
-                        continue;
-                    }
-                    
-                    let dst_r = data[out_idx] as f32 / 255.0;
-                    let dst_g = data[out_idx + 1] as f32 / 255.0;
-                    let dst_b = data[out_idx + 2] as f32 / 255.0;
-                    let dst_a = data[out_idx + 3] as f32 / 255.0;
-                    
-                    let out_a = src_a + dst_a * (1.0 - src_a);
-                    let inv_dst_a = 1.0 - src_a;
-                    
-                    let out_r = (src_r * src_a + dst_r * dst_a * inv_dst_a) / out_a;
-                    let out_g = (src_g * src_a + dst_g * dst_a * inv_dst_a) / out_a;
-                    let out_b = (src_b * src_a + dst_b * dst_a * inv_dst_a) / out_a;
-                    
-                    data[out_idx] = (out_r * 255.0).clamp(0.0, 255.0) as u8;
-                    data[out_idx + 1] = (out_g * 255.0).clamp(0.0, 255.0) as u8;
-                    data[out_idx + 2] = (out_b * 255.0).clamp(0.0, 255.0) as u8;
-                    data[out_idx + 3] = (out_a * 255.0).clamp(0.0, 255.0) as u8;
-                }
-            }
-        }
-        
-        CompositeResult {
-            width: w,
-            height: h,
-            data,
-        }
-    }
-
     pub fn resize(&mut self, width: u32, height: u32) {
         self.width = width;
         self.height = height;
         for layer in &mut self.layers {
-            layer.content.image.resize(width, height);
+            layer.content.resize(width, height);
         }
         self.invalidate();
     }
@@ -684,7 +497,7 @@ impl Canvas {
         Ok(())
     }
 
-    pub fn add_layer(&mut self, name: Option<String>) -> Result<(), String> {
+    pub fn add_layer(&mut self, name: Option<String>) -> Result<usize, String> {
         const MAX_LAYERS: usize = 20;
         if self.layers.len() >= MAX_LAYERS {
             return Err("Maximum number of layers reached".to_string());
@@ -692,7 +505,7 @@ impl Canvas {
         let layer_name = name.unwrap_or_else(|| format!("Layer {}", self.layers.len()));
         self.layers.push(Layer::new(layer_name, self.width, self.height, 1.0));
         self.invalidate();
-        Ok(())
+        Ok(self.layers.len() - 1)
     }
 
     pub fn remove_layer(&mut self, index: usize) -> Result<(), String> {
@@ -760,16 +573,6 @@ impl Canvas {
 
     pub fn active_layer_mut(&mut self) -> &mut Layer {
         &mut self.layers[self.active_layer]
-    }
-
-    pub fn all_layers_visible_strokes(&self) -> Vec<(&RasterLayer, f32)> {
-        let mut result = Vec::new();
-        for layer in self.layers.iter().rev() {
-            if layer.visible {
-                result.push((layer.raster(), layer.opacity));
-            }
-        }
-        result
     }
 
     pub fn is_active_layer_locked(&self) -> bool {

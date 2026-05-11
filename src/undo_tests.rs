@@ -10,7 +10,7 @@ fn add_layer_command_edits_canvas() {
     assert_eq!(canvas.layer_count(), 1); // Starts with 1 default layer
 
     let mut record: Record<AddLayer> = Record::new();
-    record.edit(&mut canvas, AddLayer::default());
+    let _ = record.edit(&mut canvas, AddLayer::default());
     
     assert_eq!(canvas.layer_count(), 2);
 }
@@ -23,7 +23,7 @@ fn add_layer_command_undo_removes_layer() {
 
     let mut canvas = Canvas::new();
     let mut record: Record<AddLayer> = Record::new();
-    record.edit(&mut canvas, AddLayer::default());
+    let _ = record.edit(&mut canvas, AddLayer::default());
     assert_eq!(canvas.layer_count(), 2);
 
     record.undo(&mut canvas);
@@ -38,7 +38,7 @@ fn add_layer_command_redo_adds_layer_back() {
 
     let mut canvas = Canvas::new();
     let mut record: Record<AddLayer> = Record::new();
-    record.edit(&mut canvas, AddLayer::default());
+    let _ = record.edit(&mut canvas, AddLayer::default());
     record.undo(&mut canvas);
     assert_eq!(canvas.layer_count(), 1);
 
@@ -54,12 +54,12 @@ fn remove_layer_command_removes_and_undo_restores() {
 
     let mut canvas = Canvas::new();
     let mut add_record: Record<AddLayer> = Record::new();
-    add_record.edit(&mut canvas, AddLayer::default());
+    let _ = add_record.edit(&mut canvas, AddLayer::default());
     assert_eq!(canvas.layer_count(), 2);
 
     let removed_idx = canvas.layer_count() - 1;
     let mut remove_record: Record<RemoveLayer> = Record::new();
-    remove_record.edit(&mut canvas, RemoveLayer::new(removed_idx));
+    let _ = remove_record.edit(&mut canvas, RemoveLayer::new(removed_idx));
     assert_eq!(canvas.layer_count(), 1);
 
     remove_record.undo(&mut canvas);
@@ -77,7 +77,7 @@ fn toggle_visibility_command_toggles_and_undo_restores() {
     assert!(canvas.layers()[0].visible);
 
     let mut record: Record<ToggleVisibility> = Record::new();
-    record.edit(&mut canvas, ToggleVisibility::new(0));
+    let _ = record.edit(&mut canvas, ToggleVisibility::new(0));
     assert!(!canvas.layers()[0].visible);
 
     record.undo(&mut canvas);
@@ -94,7 +94,7 @@ fn set_opacity_command_changes_and_undo_restores() {
     assert_eq!(canvas.layers()[0].opacity, 1.0);
 
     let mut record: Record<SetOpacity> = Record::new();
-    record.edit(&mut canvas, SetOpacity::new(0, 0.5));
+    let _ = record.edit(&mut canvas, SetOpacity::new(0, 0.5));
     assert_eq!(canvas.layers()[0].opacity, 0.5);
 
     record.undo(&mut canvas);
@@ -111,11 +111,11 @@ fn canvas_undo_record_handles_multiple_commands() {
     let mut record: Record<CanvasCommand> = Record::new();
     
     // Add a layer
-    record.edit(&mut canvas, CanvasCommand::AddLayer(AddLayer::default()));
+    let _ = record.edit(&mut canvas, CanvasCommand::AddLayer(AddLayer::default()));
     assert_eq!(canvas.layer_count(), 2);
     
     // Toggle visibility
-    record.edit(&mut canvas, CanvasCommand::ToggleVisibility(ToggleVisibility::new(0)));
+    let _ = record.edit(&mut canvas, CanvasCommand::ToggleVisibility(ToggleVisibility::new(0)));
     assert!(!canvas.layers()[0].visible);
     
     // Undo toggle
@@ -140,7 +140,7 @@ fn canvas_can_undo_and_can_redo() {
     assert!(!record.can_undo());
     assert!(!record.can_redo());
     
-    record.edit(&mut canvas, CanvasCommand::AddLayer(AddLayer::default()));
+    let _ = record.edit(&mut canvas, CanvasCommand::AddLayer(AddLayer::default()));
     assert!(record.can_undo());
     assert!(!record.can_redo());
     

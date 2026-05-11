@@ -2,15 +2,15 @@
 
 #[test]
 fn shaders_are_defined() {
-    use crate::window::sdl2;
-    assert!(!sdl2::VERTEX_SHADER.is_empty());
-    assert!(!sdl2::FRAGMENT_SHADER.is_empty());
+    use crate::renderer;
+    assert!(!renderer::VERTEX_SHADER.is_empty());
+    assert!(!renderer::FRAGMENT_SHADER.is_empty());
 }
 
 #[test]
 fn vertex_shader_has_version_and_main() {
-    use crate::window::sdl2;
-    let src = sdl2::VERTEX_SHADER;
+    use crate::renderer;
+    let src = renderer::VERTEX_SHADER;
     assert!(src.contains("#version"));
     assert!(src.contains("main()"));
     assert!(src.contains("gl_Position"));
@@ -18,8 +18,8 @@ fn vertex_shader_has_version_and_main() {
 
 #[test]
 fn fragment_shader_has_output_and_texture() {
-    use crate::window::sdl2;
-    let src = sdl2::FRAGMENT_SHADER;
+    use crate::renderer;
+    let src = renderer::FRAGMENT_SHADER;
     assert!(src.contains("#version"));
     assert!(src.contains("main()"));
     assert!(src.contains("fragColor") || src.contains("gl_FragColor"));

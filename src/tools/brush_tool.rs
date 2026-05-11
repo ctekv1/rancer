@@ -3,9 +3,9 @@
 //! Stamps brush dabs onto RasterImage buffers with alpha compositing.
 //! Also supports eraser mode (erase to background color).
 
-use crate::brush::{BrushEngine, BrushType, RoundDab, SquareDab};
+use crate::brush::{BrushEngine, BrushType, DabMask, RoundDab};
 use crate::canvas::{Canvas, Color};
-use crate::tools::{BrushSettings, Tool};
+use crate::tools::{BrushConfig, BrushSettings, Tool};
 
 /// Eraser settings (separate from brush settings)
 #[derive(Clone, Copy)]
@@ -57,14 +57,6 @@ impl BrushTool {
         self.is_drawing
     }
     
-    pub fn is_eraser(&self) -> bool {
-        self.is_eraser
-    }
-    
-    pub fn set_eraser_mode(&mut self, is_eraser: bool) {
-        self.is_eraser = is_eraser;
-    }
-    
     pub fn paint_settings(&self) -> BrushSettings {
         self.paint_settings
     }
@@ -96,7 +88,7 @@ impl BrushTool {
             
             let dab = match self.paint_settings.brush_type {
                 BrushType::Round => RoundDab::generate(self.paint_settings.size),
-                BrushType::Square => SquareDab::generate(self.paint_settings.size),
+                BrushType::Square => DabMask::new(self.paint_settings.size),
             };
             
             let color = Color {
@@ -112,7 +104,7 @@ impl BrushTool {
             let max_x = (x as i32 + half).min(canvas_width as i32 - 1) as u32;
             let max_y = (y as i32 + half).min(canvas_height as i32 - 1) as u32;
             
-            BrushEngine::stamp_dab(&mut raster.image, x as i32, y as i32, &dab, color);
+            BrushEngine::stamp_dab(raster, x as i32, y as i32, &dab, color);
             canvas.mark_dirty_rect(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1);
         }
     }
@@ -127,7 +119,7 @@ impl BrushTool {
         
         let dab = match self.paint_settings.brush_type {
             BrushType::Round => RoundDab::generate(self.eraser_settings.size),
-            BrushType::Square => SquareDab::generate(self.eraser_settings.size),
+            BrushType::Square => DabMask::new(self.eraser_settings.size),
         };
         
         let half = (self.eraser_settings.size as f32 / 2.0).ceil() as i32;
@@ -136,7 +128,7 @@ impl BrushTool {
         let max_x = (x as i32 + half).min(canvas_width as i32 - 1) as u32;
         let max_y = (y as i32 + half).min(canvas_height as i32 - 1) as u32;
         
-        BrushEngine::erase_dab(&mut raster.image, x as i32, y as i32, &dab, bg_color, erase_opacity);
+        BrushEngine::erase_dab(raster, x as i32, y as i32, &dab, bg_color, erase_opacity);
         canvas.mark_dirty_rect(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1);
     }
 }
@@ -157,12 +149,9 @@ impl Tool for BrushTool {
 
     fn on_drag(&mut self, x: f32, y: f32, canvas: &mut Canvas) {
         if self.is_drawing {
-            // Professional apps: ignore drags that start outside canvas
-            // or clamp coordinates to valid range
             let canvas_width = canvas.width() as f32;
             let canvas_height = canvas.height() as f32;
             
-            // Clamp to canvas bounds
             let x = x.clamp(0.0, canvas_width - 1.0);
             let y = y.clamp(0.0, canvas_height - 1.0);
             
@@ -192,20 +181,24 @@ impl Tool for BrushTool {
     }
 
     fn on_key(&mut self, _code: &str) {
-        // Brush tool doesn't handle keys directly
     }
 
     fn name(&self) -> &str {
         "Brush"
     }
 
+    fn brush_settings(&self) -> Option<BrushSettings> {
+        Some(self.paint_settings)
+    }
+
+    fn as_brush_config(&mut self) -> Option<&mut dyn BrushConfig> {
+        Some(self)
+    }
+}
+
+impl BrushConfig for BrushTool {
     fn brush_settings(&self) -> BrushSettings {
-        if self.is_eraser {
-            // Return paint_settings (we use paint_settings for brush UI)
-            self.paint_settings
-        } else {
-            self.paint_settings
-        }
+        self.paint_settings
     }
 
     fn set_brush_size(&mut self, size: u32) {
@@ -225,7 +218,6 @@ impl Tool for BrushTool {
     }
 
     fn set_brush_color(&mut self, color: Color) {
-        // Color only applies to paint mode
         self.paint_settings.color = color;
     }
 
@@ -233,21 +225,20 @@ impl Tool for BrushTool {
         self.paint_settings.brush_type = brush_type;
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
+    fn set_eraser_mode(&mut self, enabled: bool) {
+        self.is_eraser = enabled;
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
+    fn is_eraser(&self) -> bool {
+        self.is_eraser
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::brush::{BrushEngine, RoundDab};
     use crate::canvas::{Canvas, Color};
-    use crate::tools::BrushSettings;
+    use crate::tools::{BrushConfig, BrushSettings};
     
     #[test]
     fn test_brush_tool_new_has_eraser_off() {
@@ -276,7 +267,7 @@ mod tests {
         
         let layer_idx = canvas.active_layer();
         let raster = &canvas.layers()[layer_idx].content;
-        let pixel = raster.image.get_pixel(50, 50).unwrap();
+        let pixel = raster.get_pixel(50, 50).unwrap();
         // Pixel should have alpha > 0 after painting (even if RGB is 0 for black)
         assert!(pixel.3 > 0);
     }
@@ -292,7 +283,7 @@ mod tests {
         
         let layer_idx = canvas.active_layer();
         let raster = &canvas.layers()[layer_idx].content;
-        let pixel_before = raster.image.get_pixel(50, 50).unwrap();
+        let pixel_before = raster.get_pixel(50, 50).unwrap();
         assert!(pixel_before.3 > 0);
         
         let mut eraser_tool = BrushTool::new();
@@ -300,7 +291,7 @@ mod tests {
         eraser_tool.on_press(50.0, 50.0, &mut canvas);
         
         let raster = &canvas.layers()[layer_idx].content;
-        let pixel_after = raster.image.get_pixel(50, 50).unwrap();
+        let pixel_after = raster.get_pixel(50, 50).unwrap();
         assert!(pixel_after.3 < pixel_before.3);
     }
     
@@ -321,8 +312,8 @@ mod tests {
         
         let layer_idx = canvas.active_layer();
         let raster = &canvas.layers()[layer_idx].content;
-        let px1 = raster.image.get_pixel(50, 50).unwrap();
-        let px2 = raster.image.get_pixel(55, 50).unwrap();
+        let px1 = raster.get_pixel(50, 50).unwrap();
+        let px2 = raster.get_pixel(55, 50).unwrap();
         assert!(px1.3 < 255);
         assert!(px2.3 < 255);
     }
@@ -342,7 +333,7 @@ mod tests {
         
         let layer_idx = canvas.active_layer();
         let raster = &canvas.layers()[layer_idx].content;
-        let px = raster.image.get_pixel(50, 50).unwrap();
+        let px = raster.get_pixel(50, 50).unwrap();
         assert_eq!(px.0, canvas.background_color.r);
         assert_eq!(px.3, canvas.background_color.a);
     }

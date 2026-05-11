@@ -5,7 +5,7 @@
 
 use crate::app::AppState;
 use crate::commands::{CanvasCommand, RemoveLayer, SetOpacity, ToggleVisibility};
-use crate::tools::{BrushTool, SelectionTool};
+use crate::tools::{BrushConfig, BrushTool};
 
 pub use crate::tools::ToolType;
 
@@ -25,9 +25,6 @@ pub struct UiState {
     // Theme
     pub use_dark_theme: bool,
     
-    // Pre-loaded SVG icon textures (to prevent disappearance on hover)
-    #[cfg(feature = "svg")]
-    pub icon_textures: std::collections::HashMap<&'static str, egui_sdl2::egui::TextureHandle>,
 }
 
 impl UiState {
@@ -51,24 +48,13 @@ impl UiState {
 
     /// Apply UI tool selection to the AppState
     pub fn apply_to_app(&mut self, app: &mut AppState) {
-        match self.active_tool {
-            ToolType::Brush => {
-                // Check if we need to create a new tool or just toggle eraser mode
-                if app.tool_name() != "Brush" {
-                    let mut tool = BrushTool::new();
-                    tool.set_eraser_mode(self.eraser_mode);
-                    app.set_active_tool(Box::new(tool));
-                } else {
-                    // Tool is already Brush, just update eraser mode
-                    if let Some(brush_tool) = app.active_tool_mut().as_any_mut().downcast_mut::<BrushTool>() {
-                        brush_tool.set_eraser_mode(self.eraser_mode);
-                    }
-                }
-            }
-            ToolType::Selection => {
-                if app.tool_name() != "Selection" {
-                    app.set_active_tool(Box::new(SelectionTool::new()));
-                }
+        if self.active_tool == ToolType::Brush {
+            if app.tool_name() != "Brush" {
+                let mut tool = BrushTool::new();
+                tool.set_eraser_mode(self.eraser_mode);
+                app.set_active_tool(Box::new(tool));
+            } else if let Some(config) = app.active_tool_mut().as_brush_config() {
+                config.set_eraser_mode(self.eraser_mode);
             }
         }
     }

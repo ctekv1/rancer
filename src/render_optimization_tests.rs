@@ -12,7 +12,7 @@ fn canvas_version_increments_on_pixel_change() {
     // Change a pixel and mark dirty
     {
         let layer = canvas.active_layer_mut();
-        layer.content.image.set_pixel(10, 10, 255, 0, 0, 255);
+        layer.content.set_pixel(10, 10, 255, 0, 0, 255);
     }
     canvas.mark_dirty(10, 10);
     
@@ -51,7 +51,7 @@ fn canvas_version_increments_on_toggle_visibility() {
     let mut canvas = Canvas::new();
     let initial_version = canvas.version();
     
-    canvas.toggle_layer_visibility(0);
+    let _ = canvas.toggle_layer_visibility(0);
     
     assert!(canvas.version() > initial_version, "Version should increment on toggle_visibility");
 }
@@ -63,7 +63,7 @@ fn canvas_version_increments_on_set_layer_opacity() {
     let mut canvas = Canvas::new();
     let initial_version = canvas.version();
     
-    canvas.set_layer_opacity(0, 0.5);
+    let _ = canvas.set_layer_opacity(0, 0.5);
     
     assert!(canvas.version() > initial_version, "Version should increment on set_layer_opacity");
 }
@@ -113,7 +113,7 @@ fn dirty_rect_tracks_pixel_changes() {
     // Change a pixel and mark dirty
     {
         let layer = canvas.active_layer_mut();
-        layer.content.image.set_pixel(50, 50, 255, 0, 0, 255);
+        layer.content.set_pixel(50, 50, 255, 0, 0, 255);
     }
     canvas.mark_dirty(50, 50);
     
@@ -133,7 +133,7 @@ fn dirty_rect_clears_on_consume() {
     // Change a pixel
     {
         let layer = canvas.active_layer_mut();
-        layer.content.image.set_pixel(50, 50, 255, 0, 0, 255);
+        layer.content.set_pixel(50, 50, 255, 0, 0, 255);
     }
     
     // Consume the dirty rect
@@ -155,7 +155,7 @@ fn composite_all_visible_layers() {
     canvas.add_layer(None).unwrap();
     
     // Composite all visible layers
-    let composite = canvas.composite_all();
+    let composite = crate::compositor::Compositor::new().composite_all(&canvas);
     
     // Result should have correct dimensions
     assert_eq!(composite.width, 100);
@@ -176,16 +176,16 @@ fn composite_respects_layer_visibility() {
         let layer = canvas.active_layer_mut();
         for y in 0..100 {
             for x in 0..100 {
-                layer.content.image.set_pixel(x, y, 255, 0, 0, 255);
+                layer.content.set_pixel(x, y, 255, 0, 0, 255);
             }
         }
     }
     
     // Hide the layer
-    canvas.toggle_layer_visibility(0);
+    let _ = canvas.toggle_layer_visibility(0);
     
     // Composite should show background color (white) since no layers are visible
-    let composite = canvas.composite_all();
+    let composite = crate::compositor::Compositor::new().composite_all(&canvas);
     
     // All pixels should be the background color (white, opaque)
     for y in 0..100 {
@@ -211,14 +211,14 @@ fn composite_respects_layer_opacity() {
         let layer = canvas.active_layer_mut();
         for y in 0..100 {
             for x in 0..100 {
-                layer.content.image.set_pixel(x, y, 255, 0, 0, 255);
+                layer.content.set_pixel(x, y, 255, 0, 0, 255);
             }
         }
     }
-    canvas.set_layer_opacity(0, 0.5);
+    let _ = canvas.set_layer_opacity(0, 0.5);
     
     // Composite should blend red layer (50% opacity) over white background
-    let composite = canvas.composite_all();
+    let composite = crate::compositor::Compositor::new().composite_all(&canvas);
     
     // Expected result: RGB(255, ~127, ~127) with alpha 255
     // Red channel: (255*0.5 + 255*0.5) / 1.0 = 255
@@ -245,11 +245,11 @@ fn composite_rect_produces_correct_output_for_small_region() {
     // Draw a red pixel at center
     {
         let layer = canvas.active_layer_mut();
-        layer.content.image.set_pixel(10, 10, 255, 0, 0, 255);
+        layer.content.set_pixel(10, 10, 255, 0, 0, 255);
     }
     
     // Composite only a 5x5 region around the red pixel
-    let region = canvas.composite_rect(8, 8, 5, 5);
+    let region = crate::compositor::Compositor::new().composite_rect(&canvas, 8, 8, 5, 5);
     
     // Should be 5x5 RGBA
     assert_eq!(region.width, 5);
@@ -279,14 +279,14 @@ fn composite_rect_respects_layer_visibility() {
     // Draw a red pixel
     {
         let layer = canvas.active_layer_mut();
-        layer.content.image.set_pixel(10, 10, 255, 0, 0, 255);
+        layer.content.set_pixel(10, 10, 255, 0, 0, 255);
     }
     
     // Hide the layer
-    canvas.toggle_layer_visibility(0);
+    let _ = canvas.toggle_layer_visibility(0);
     
     // Composite the region - should be white background only
-    let region = canvas.composite_rect(8, 8, 5, 5);
+    let region = crate::compositor::Compositor::new().composite_rect(&canvas, 8, 8, 5, 5);
     
     // All pixels should be white (background color)
     for y in 0..5 {
@@ -307,7 +307,7 @@ fn composite_rect_clamps_to_canvas_bounds() {
     let canvas = Canvas::with_size(20, 20);
     
     // Request region that extends beyond canvas bounds
-    let region = canvas.composite_rect(15, 15, 10, 10);
+    let region = crate::compositor::Compositor::new().composite_rect(&canvas, 15, 15, 10, 10);
     
     // Should be clamped to 5x5 (remaining canvas area)
     assert_eq!(region.width, 5);
@@ -325,7 +325,7 @@ fn composite_rect_handles_empty_request() {
     let canvas = Canvas::with_size(20, 20);
     
     // Request zero-size region
-    let region = canvas.composite_rect(5, 5, 0, 0);
+    let region = crate::compositor::Compositor::new().composite_rect(&canvas, 5, 5, 0, 0);
     
     // Should return empty result
     assert_eq!(region.width, 0);
@@ -342,11 +342,11 @@ fn composite_rect_respects_layer_opacity() {
     // Draw opaque red
     {
         let layer = canvas.active_layer_mut();
-        layer.content.image.set_pixel(10, 10, 255, 0, 0, 255);
+        layer.content.set_pixel(10, 10, 255, 0, 0, 255);
     }
-    canvas.set_layer_opacity(0, 0.5);
+    let _ = canvas.set_layer_opacity(0, 0.5);
     
-    let region = canvas.composite_rect(8, 8, 5, 5);
+    let region = crate::compositor::Compositor::new().composite_rect(&canvas, 8, 8, 5, 5);
     
     // Center pixel should blend red with white background at 50%
     let center_idx = (2 * 5 + 2) * 4;

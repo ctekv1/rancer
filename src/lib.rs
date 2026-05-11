@@ -3,11 +3,11 @@
 //! This library provides the core canvas and drawing engine for the Rancer application.
 
 pub mod canvas;
-pub mod export;
+pub mod compositor;
+pub mod renderer;
 pub mod export_ui;
 pub mod logger;
 pub mod preferences;
-pub mod viewport;
 pub mod window;
 
 #[cfg(test)]
@@ -26,12 +26,6 @@ pub mod sdl2_event_tests;
 pub mod undo_tests;
 
 #[cfg(test)]
-pub mod selection_tests;
-
-#[cfg(test)]
-pub mod brush_tool_tests;
-
-#[cfg(test)]
 pub mod ui_tests;
 
 #[cfg(test)]
@@ -41,7 +35,6 @@ pub mod events;
 pub mod app;
 pub mod tools;
 pub mod commands;
-pub mod selection;
 pub mod brush;
 pub mod ui;
 

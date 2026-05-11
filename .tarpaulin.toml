@@ -23,12 +23,8 @@ exclude-files = [
 # Include source files - unit-testable modules only
 include-files = [
     "src/canvas.rs",
-    "src/export.rs",
-    "src/geometry/**/*.rs",
     "src/logger.rs",
     "src/preferences.rs",
-    "src/ui.rs",
-    "src/window_backend.rs",
 ]
 
 # Minimum coverage thresholds (optional - fail if below these)
