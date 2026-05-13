@@ -95,7 +95,7 @@ impl BrushTool {
                 r: self.paint_settings.color.r,
                 g: self.paint_settings.color.g,
                 b: self.paint_settings.color.b,
-                a: (self.paint_settings.opacity * 255.0) as u8,
+                a: (self.paint_settings.color.a as f32 * self.paint_settings.opacity) as u8,
             };
             
             let half = (self.paint_settings.size as f32 / 2.0).ceil() as i32;

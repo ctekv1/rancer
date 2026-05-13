@@ -25,6 +25,9 @@ pub struct UiState {
     // Theme
     pub use_dark_theme: bool,
     
+    // Persistent color picker state (avoids premultiplied-alpha drift during editing)
+    pub hsva: Option<egui_sdl2::egui::ecolor::Hsva>,
+    
 }
 
 impl UiState {
@@ -38,6 +41,7 @@ impl UiState {
             show_brush_panel: true,
             show_layer_panel: true,
             use_dark_theme: true,
+            hsva: None,
         }
     }
 

@@ -30,6 +30,8 @@ impl IconCache {
         cache.load_icon(ctx, "add_layer", crate::ui::icons::ADD_LAYER_ICON);
         cache.load_icon(ctx, "settings", crate::ui::icons::SETTINGS_ICON);
         cache.load_icon(ctx, "theme", crate::ui::icons::THEME_ICON);
+        cache.load_icon(ctx, "eye", crate::ui::icons::EYE_ICON);
+        cache.load_icon(ctx, "eye_off", crate::ui::icons::EYE_OFF_ICON);
         
         cache
     }
@@ -110,11 +112,16 @@ pub fn color_to_color32(color: crate::canvas::Color) -> Color32 {
 
 /// Convert egui::Color32 to our Color (RGBA u8)
 pub fn color32_to_color(c: Color32) -> crate::canvas::Color {
+    // Color32 stores premultiplied alpha; un-premultiply to recover the original RGB
+    let a = c.a();
+    if a == 0 {
+        return crate::canvas::Color { r: 0, g: 0, b: 0, a: 0 };
+    }
     crate::canvas::Color {
-        r: c.r(),
-        g: c.g(),
-        b: c.b(),
-        a: c.a(),
+        r: (c.r() as u16 * 255 / a as u16) as u8,
+        g: (c.g() as u16 * 255 / a as u16) as u8,
+        b: (c.b() as u16 * 255 / a as u16) as u8,
+        a,
     }
 }
 
@@ -281,21 +288,6 @@ pub fn show_ui(ctx: &Context, app: &mut AppState, ui_state: &mut UiState, icon_c
             }
             
             ui.add_space(4.0);
-            
-            // Opacity chips
-            for &op in &[25, 50, 75, 100] {
-                if ui.add(
-                    egui::Button::new(format!("{}%", op))
-                        .min_size(egui::vec2(38.0, 28.0))
-                        .corner_radius(6.0)
-                        .fill(theme.panel_alt)
-                        .stroke(Stroke::new(1.0, theme.border))
-                ).clicked() {
-                    // TODO: set opacity
-                }
-            }
-            
-            ui.add_space(4.0);
             ui.separator();
             ui.add_space(4.0);
             
@@ -303,15 +295,34 @@ pub fn show_ui(ctx: &Context, app: &mut AppState, ui_state: &mut UiState, icon_c
             let layer_count = app.canvas().layer_count();
             for i in 0..layer_count {
                 let is_active = app.canvas().active_layer() == i;
-                if ui.add(
-                    egui::Button::new(format!("Layer {}", i + 1))
-                        .min_size(egui::vec2(110.0, 32.0))
-                        .corner_radius(8.0)
-                        .fill(if is_active { theme.accent.linear_multiply(0.15) } else { theme.panel_alt })
-                        .stroke(if is_active { Stroke::new(1.0, theme.accent.linear_multiply(0.3)) } else { Stroke::NONE })
-                ).clicked() {
-                    // TODO: switch to layer i
-                }
+                let is_visible = app.canvas().layers()[i].visible;
+
+                let bg = if is_active { theme.accent.linear_multiply(0.15) } else { theme.panel_alt };
+                let stroke = if is_active { Stroke::new(1.0, theme.accent.linear_multiply(0.3)) } else { Stroke::NONE };
+
+                egui::Frame::NONE
+                    .fill(bg)
+                    .stroke(stroke)
+                    .corner_radius(6.0)
+                    .inner_margin(egui::Margin::symmetric(6, 4))
+                    .show(ui, |ui| {
+                        ui.set_min_width(110.0);
+                        ui.horizontal(|ui| {
+                            let eye_icon = if is_visible { "eye" } else { "eye_off" };
+                            if let Some(texture) = icon_cache.get(eye_icon) {
+                                if ui.add(
+                                    egui::Button::image(texture)
+                                        .min_size(egui::vec2(16.0, 16.0))
+                                        .frame(false)
+                                ).clicked() {
+                                    ui_state.toggle_layer_visibility(app, i);
+                                }
+                            }
+                            if ui.add(egui::Label::new(format!("Layer {}", i + 1)).sense(egui::Sense::click())).clicked() {
+                                let _ = app.canvas_mut().set_active_layer(i);
+                            }
+                        });
+                    });
             }
             
             // Add layer button with SVG icon
@@ -331,9 +342,17 @@ pub fn show_ui(ctx: &Context, app: &mut AppState, ui_state: &mut UiState, icon_c
     
     // Color picker popup (above bottom bar)
     if ui_state.color_picker_open {
-        let mut color32 = app.active_tool().brush_settings()
-            .map(|s| color_to_color32(s.color))
-            .unwrap_or(egui::Color32::BLACK);
+        // Initialize persistent Hsva from brush color when picker first opens.
+        // The Hsva is kept across frames during editing to avoid lossy
+        // premultiplied-alpha round-trips through Color32.
+        let hsva = ui_state.hsva.get_or_insert_with(|| {
+            let color = app.active_tool().brush_settings()
+                .map(|s| s.color)
+                .unwrap_or(crate::canvas::Color::BLACK);
+            egui::ecolor::Hsva::from_srgba_unmultiplied([
+                color.r, color.g, color.b, color.a,
+            ])
+        });
         
         egui::Window::new("color_picker")
             .open(&mut ui_state.color_picker_open)
@@ -349,14 +368,15 @@ pub fn show_ui(ctx: &Context, app: &mut AppState, ui_state: &mut UiState, icon_c
                     .show(ui, |ui| {
                         ui.set_max_width(280.0);
                         
-                        let changed = egui::widgets::color_picker::color_picker_color32(
+                        let changed = egui::widgets::color_picker::color_picker_hsva_2d(
                             ui,
-                            &mut color32,
+                            hsva,
                             egui::widgets::color_picker::Alpha::OnlyBlend,
                         );
                         
                         if changed {
-                            ui_state.pending_color = Some(color32_to_color(color32));
+                            let [r, g, b, a] = hsva.to_srgba_unmultiplied();
+                            ui_state.pending_color = Some(crate::canvas::Color { r, g, b, a });
                         }
                     });
             });
@@ -367,5 +387,8 @@ pub fn show_ui(ctx: &Context, app: &mut AppState, ui_state: &mut UiState, icon_c
                 config.set_brush_color(color);
             }
         }
+    } else {
+        // Reset Hsva when picker closes to avoid stale state on reopen
+        ui_state.hsva = None;
     }
 }

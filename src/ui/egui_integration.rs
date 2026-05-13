@@ -33,8 +33,9 @@ impl EguiIntegration {
     }
 
     /// Handle an SDL2 event and pass it to egui
-    pub fn handle_event(&mut self, window: &Window, event: &Event) {
-        let _ = self.egui.state.on_event(window, event);
+    /// Returns true if egui consumed the event (e.g. interacting with a widget)
+    pub fn handle_event(&mut self, window: &Window, event: &Event) -> bool {
+        self.egui.state.on_event(window, event).consumed
     }
 
     /// Run egui UI and render it on top of the canvas

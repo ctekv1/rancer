@@ -149,7 +149,12 @@ impl Sdl2App {
             let mut has_work = false;
             for event in event_pump.poll_iter() {
                 // Pass event to egui first
-                self.egui.handle_event(&self.window, &event);
+                let consumed = self.egui.handle_event(&self.window, &event);
+                
+                // Skip canvas events when egui consumed them (e.g. color picker interaction)
+                if consumed {
+                    continue;
+                }
                 
                 // Then convert to AppEvent for the app
                 if let Some(app_event) = sdl_event_to_app_event(event) {

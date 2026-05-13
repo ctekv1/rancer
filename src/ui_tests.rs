@@ -515,3 +515,42 @@ fn test_color_swatch_click_toggles_picker() {
     ui_state.color_picker_open = !ui_state.color_picker_open;
     assert!(!ui_state.color_picker_open);
 }
+
+/// Test that color conversion with alpha < 255 preserves RGB values
+/// within 1 of the original (integer rounding from premultiplied format).
+#[test]
+fn test_color_conversion_with_alpha_preserves_rgb() {
+    use crate::canvas::Color;
+    use crate::ui::egui_impl::{color_to_color32, color32_to_color};
+    
+    let color = Color { r: 200, g: 150, b: 100, a: 128 };
+    let color32 = color_to_color32(color);
+    let converted = color32_to_color(color32);
+    
+    assert_eq!(converted.a, 128);
+    // u8 premultiplied arithmetic loses at most 1 per channel
+    assert!(converted.r.abs_diff(200) <= 1);
+    assert!(converted.g.abs_diff(150) <= 1);
+    assert!(converted.b.abs_diff(100) <= 1);
+}
+
+/// Test that UiState hsva lifecycle matches picker open/close
+#[test]
+fn test_ui_state_hsva_lifecycle() {
+    use crate::ui::state::UiState;
+    
+    let mut state = UiState::new();
+    assert!(state.hsva.is_none());
+    
+    // Simulate picker opening: initialize Hsva from brush color
+    let color = crate::canvas::Color { r: 100, g: 150, b: 200, a: 255 };
+    state.hsva = Some(egui_sdl2::egui::ecolor::Hsva::from_srgba_unmultiplied([
+        color.r, color.g, color.b, color.a,
+    ]));
+    assert!(state.hsva.is_some());
+    
+    // Simulate picker closing: reset to None
+    state.color_picker_open = false;
+    state.hsva = None;
+    assert!(state.hsva.is_none());
+}
