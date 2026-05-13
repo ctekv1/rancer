@@ -149,6 +149,28 @@ fn sdl2_quit_maps_to_quit_event() {
 }
 
 #[test]
+fn sdl2_window_size_changed_maps_to_resize() {
+    use sdl2::event::Event;
+    use crate::events::AppEvent;
+    use crate::window::sdl2::sdl_event_to_app_event;
+
+    let sdl_event = Event::Window {
+        timestamp: 0,
+        window_id: 0,
+        win_event: sdl2::event::WindowEvent::SizeChanged(800, 600),
+    };
+
+    let result = sdl_event_to_app_event(sdl_event);
+    match result {
+        Some(AppEvent::Resize { width, height }) => {
+            assert_eq!(width, 800);
+            assert_eq!(height, 600);
+        }
+        _ => panic!("expected Resize event"),
+    }
+}
+
+#[test]
 fn unhandled_sdl_event_maps_to_none() {
     use sdl2::event::Event;
     use crate::window::sdl2::sdl_event_to_app_event;

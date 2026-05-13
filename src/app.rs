@@ -15,6 +15,8 @@ pub struct AppState {
     canvas: Canvas,
     active_tool: Box<dyn Tool>,
     history: Record<CanvasCommand>,
+    viewport_width: u32,
+    viewport_height: u32,
 }
 
 impl AppState {
@@ -25,6 +27,8 @@ impl AppState {
         canvas.resize(width, height);
 
         Self {
+            viewport_width: width,
+            viewport_height: height,
             canvas,
             active_tool: Box::new(BrushTool::new()),
             history: Record::new(),
@@ -34,6 +38,16 @@ impl AppState {
     /// Get a reference to the canvas
     pub fn canvas(&self) -> &Canvas {
         &self.canvas
+    }
+
+    /// Get the viewport width (window width)
+    pub fn viewport_width(&self) -> u32 {
+        self.viewport_width
+    }
+
+    /// Get the viewport height (window height)
+    pub fn viewport_height(&self) -> u32 {
+        self.viewport_height
     }
 
     /// Get a mutable reference to the canvas
@@ -76,20 +90,56 @@ impl AppState {
         self.history.can_redo()
     }
 
+    /// Translate window coordinates (SDL2, origin top-left) to canvas coordinates.
+    /// Returns None if the click is outside the canvas area (e.g. in the letterbox).
+    fn window_to_canvas(&self, win_x: f32, win_y: f32) -> Option<(f32, f32)> {
+        let cw = self.canvas.width() as f32;
+        let ch = self.canvas.height() as f32;
+        let vw = self.viewport_width as f32;
+        let vh = self.viewport_height as f32;
+
+        let (ox, oy) = if cw <= vw && ch <= vh {
+            // Canvas fits in window: centered
+            ((vw - cw) / 2.0, (vh - ch) / 2.0)
+        } else {
+            // Window smaller than canvas: canvas fills the viewport
+            (0.0, 0.0)
+        };
+
+        let cx = win_x - ox;
+        let cy = win_y - oy;
+
+        if cx >= 0.0 && cx < cw && cy >= 0.0 && cy < ch {
+            Some((cx, cy))
+        } else {
+            None
+        }
+    }
+
     /// Handle an application event
     pub fn handle_event(&mut self, event: AppEvent) {
         match event {
             AppEvent::Press { x, y } => {
-                self.active_tool.on_press(x, y, &mut self.canvas);
+                if let Some((cx, cy)) = self.window_to_canvas(x, y) {
+                    self.active_tool.on_press(cx, cy, &mut self.canvas);
+                }
             }
             AppEvent::Drag { x, y } => {
-                self.active_tool.on_drag(x, y, &mut self.canvas);
+                if let Some((cx, cy)) = self.window_to_canvas(x, y) {
+                    self.active_tool.on_drag(cx, cy, &mut self.canvas);
+                }
             }
             AppEvent::Release { x, y } => {
-                self.active_tool.on_release(x, y, &mut self.canvas);
+                if let Some((cx, cy)) = self.window_to_canvas(x, y) {
+                    self.active_tool.on_release(cx, cy, &mut self.canvas);
+                }
             }
             AppEvent::Key { code } => {
                 self.handle_key(&code);
+            }
+            AppEvent::Resize { width, height } => {
+                self.viewport_width = width;
+                self.viewport_height = height;
             }
             AppEvent::Quit => {
                 // Handled by SDL2 loop

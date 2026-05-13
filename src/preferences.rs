@@ -64,6 +64,14 @@ pub struct PalettePreferences {
     pub custom_colors: Vec<[u8; 3]>, // RGB custom colors (max 10)
 }
 
+impl Preferences {
+    /// Update the window dimensions in preferences
+    pub fn update_window_size(&mut self, width: u32, height: u32) {
+        self.window.width = width;
+        self.window.height = height;
+    }
+}
+
 impl Default for Preferences {
     fn default() -> Self {
         Self {
@@ -313,6 +321,18 @@ mod tests {
         assert_eq!(prefs.window.width, deserialized.window.width);
         assert_eq!(prefs.window.height, deserialized.window.height);
         assert_eq!(prefs.brush.default_size, deserialized.brush.default_size);
+    }
+
+    #[test]
+    fn test_preferences_update_window_size() {
+        let mut prefs = Preferences::default();
+        assert_eq!(prefs.window.width, 1280);
+        assert_eq!(prefs.window.height, 720);
+
+        prefs.update_window_size(800, 600);
+
+        assert_eq!(prefs.window.width, 800);
+        assert_eq!(prefs.window.height, 600);
     }
 
     #[test]

@@ -112,6 +112,39 @@ fn app_state_undo_redo_via_keyboard() {
 }
 
 #[test]
+fn app_state_resize_does_not_change_canvas_size() {
+    use crate::app::AppState;
+    use crate::events::AppEvent;
+
+    let mut state = AppState::new(1280, 720);
+    let (orig_w, orig_h) = state.canvas().size();
+
+    state.handle_event(AppEvent::Resize { width: 800, height: 600 });
+
+    assert_eq!(state.canvas().size(), (orig_w, orig_h));
+    assert_eq!(state.canvas().width(), 1280);
+    assert_eq!(state.canvas().height(), 720);
+}
+
+#[test]
+fn app_state_tracks_viewport_size_after_resize() {
+    use crate::app::AppState;
+    use crate::events::AppEvent;
+
+    let mut state = AppState::new(1280, 720);
+    assert_eq!(state.viewport_width(), 1280);
+    assert_eq!(state.viewport_height(), 720);
+
+    state.handle_event(AppEvent::Resize { width: 1920, height: 1080 });
+
+    assert_eq!(state.viewport_width(), 1920);
+    assert_eq!(state.viewport_height(), 1080);
+    // Canvas should still be original size
+    assert_eq!(state.canvas().width(), 1280);
+    assert_eq!(state.canvas().height(), 720);
+}
+
+#[test]
 fn app_state_undo_redo_methods() {
     use crate::app::AppState;
     

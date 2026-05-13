@@ -14,6 +14,8 @@ pub enum AppEvent {
     Release { x: f32, y: f32 },
     /// Keyboard event
     Key { code: String },
+    /// Window resized to new dimensions
+    Resize { width: u32, height: u32 },
     /// Application quit requested
     Quit,
 }

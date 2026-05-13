@@ -44,6 +44,13 @@ pub fn sdl_event_to_app_event(event: Event) -> Option<AppEvent> {
         } => Some(AppEvent::Key {
             code: format!("{:?}", keycode).to_lowercase(),
         }),
+        Event::Window {
+            win_event: sdl2::event::WindowEvent::SizeChanged(w, h) | sdl2::event::WindowEvent::Resized(w, h),
+            ..
+        } => Some(AppEvent::Resize {
+            width: w.max(0) as u32,
+            height: h.max(0) as u32,
+        }),
         _ => None,
     }
 }
@@ -58,6 +65,7 @@ pub struct Sdl2App {
     egui: EguiIntegration,
     compositor: crate::compositor::Compositor,
     renderer: crate::renderer::CanvasRenderer,
+    preferences: Preferences,
 }
 
 impl Sdl2App {
@@ -73,6 +81,7 @@ impl Sdl2App {
         let window = video
             .window(&preferences.window.title, window_width, window_height)
             .position_centered()
+            .resizable()
             .opengl()
             .build()
             .map_err(|e| format!("Failed to create window: {}", e))?;
@@ -122,6 +131,7 @@ impl Sdl2App {
             egui,
             compositor: crate::compositor::Compositor::new(),
             renderer,
+            preferences,
         })
     }
 
@@ -139,23 +149,34 @@ impl Sdl2App {
             .gl_set_swap_interval(1)
             .ok();
 
-        // Use canvas's actual background color for clear, not DEFAULT_CANVAS_COLOR
-        let bg = self.app_state.canvas().background_color;
-        let canvas_r = bg.r as f32 / 255.0;
-        let canvas_g = bg.g as f32 / 255.0;
-        let canvas_b = bg.b as f32 / 255.0;
-
         'running: loop {
             let mut has_work = false;
             for event in event_pump.poll_iter() {
-                // Pass event to egui first
+                // Handle resize before egui — egui must not swallow window resize
+                if let sdl2::event::Event::Window {
+                    win_event:
+                        sdl2::event::WindowEvent::SizeChanged(w, h)
+                        | sdl2::event::WindowEvent::Resized(w, h),
+                    ..
+                } = &event
+                {
+                    let w = (*w).max(0) as u32;
+                    let h = (*h).max(0) as u32;
+                    self.renderer.resize_viewport(&self.gl, w, h);
+                    self.preferences.update_window_size(w, h);
+                    let _ = crate::preferences::save(&self.preferences);
+                    self.app_state.handle_event(AppEvent::Resize { width: w, height: h });
+                    has_work = true;
+                }
+
+                // Pass event to egui (resize events also need to reach egui for layout)
                 let consumed = self.egui.handle_event(&self.window, &event);
-                
+
                 // Skip canvas events when egui consumed them (e.g. color picker interaction)
                 if consumed {
                     continue;
                 }
-                
+
                 // Then convert to AppEvent for the app
                 if let Some(app_event) = sdl_event_to_app_event(event) {
                     has_work = true;
@@ -167,7 +188,7 @@ impl Sdl2App {
             }
 
             // Render and swap
-            self.render_frame(canvas_r, canvas_g, canvas_b);
+            self.render_frame();
             
             // Render egui on top
                 self.egui.run_and_render(&self.window, |ctx: &egui_sdl2::egui::Context| {
@@ -184,11 +205,11 @@ impl Sdl2App {
         }
     }
 
-    fn render_frame(&mut self, r: f32, g: f32, b: f32) {
+    fn render_frame(&mut self) {
         if let Some((composite, x, y)) = self.compositor.render(&mut self.app_state.canvas_mut()) {
             self.renderer.upload(&self.gl, &composite, x, y);
         }
-        self.renderer.draw(&self.gl, r, g, b);
+        self.renderer.draw(&self.gl);
     }
 }
 
