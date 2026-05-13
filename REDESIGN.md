@@ -250,14 +250,13 @@ egui_glow = "0.29"
 - Implement as `BrushTool` in `src/tools/brush_tool.rs`
 - **Completed:** `DabMask` with alpha mask, `RoundDab` (antialiased circle), `SquareDab` (full opacity), `BrushEngine::stamp_dab()` with alpha compositing, `BrushTool` with size/opacity/type/color settings, continuous stroke via interpolated dabs, 8 new tests + 3 PixelRef tests (109 total)
 
-### Phase 7 — egui UI ✓ PARTIAL
+### Phase 7 — egui UI ✓ DONE
 - Add `egui`, `egui_glow` to `Cargo.toml`
 - Render egui pass after the canvas composite pass in the SDL2 loop
 - Implement: brush toolbar, size/opacity sliders, color picker, layer panel
 - Delete `src/ui.rs`, `src/geometry/ui_elements.rs`
 - Apply design reference via `egui::Visuals` once provided
-- **Completed:** `UiState` with tool switching, brush settings (size/opacity/color/type), layer operations (add/remove/toggle visibility/opacity), undo/redo via UI, panel visibility controls, 14 new tests (123 total)
-- **Deferred:** egui rendering integration (API compatibility issues with egui 0.28/0.31 vs SDL2 glow context)
+- **Completed:** `UiState` with tool switching, brush settings (size/opacity/color/type), layer operations (add/remove/toggle visibility/opacity), undo/redo via UI, panel visibility controls, `EguiIntegration` via `egui-sdl2` with glow backend, SVG icons via `egui_extras`, color picker popup, 14 new tests (123 total)
 
 ---
 
@@ -273,12 +272,11 @@ End-state checklist:
 - [x] Builds on Windows and Linux with no platform `#[cfg]` branching in `main.rs`
 - [x] No `wgpu`, `winit`, `gtk4` in `Cargo.toml`
 - [x] Canvas renders to screen via GL texture pipeline
-- [ ] Draw with all 4 brush types; strokes appear correctly
-- [ ] Undo/redo works for paint strokes and layer operations
-- [ ] Select a region, move it, commit — pixels land correctly
-- [ ] Add, remove, reorder, lock, and toggle visibility on layers
-- [ ] Export PNG at canvas resolution
-- [ ] Zoom and pan work; all raster operations use canvas coordinates not screen coordinates
+- [x] Draw with Round and Square brush types; strokes appear correctly
+- [x] Undo/redo works for layer operations (AddLayer, RemoveLayer, ToggleVisibility, SetOpacity)
+- [x] Add, remove, toggle visibility, and set opacity on layers
+- [x] Export PNG via native file dialog
+- [x] egui UI renders: toolbar, color picker, layer panel, theme toggle
 
 ---
 

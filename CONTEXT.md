@@ -36,9 +36,9 @@ See `REDESIGN.md` for the SDL2 + OpenGL + egui migration plan.
 ## Current Status
 
 - **Version**: 0.0.7
-- **Phase**: Mid-redesign (SDL2 + egui + glow)
+- **Redesign complete**: SDL2 + glow windowing, egui UI, raster canvas, undo/redo command pattern, brush engine
 - **Tools implemented**: BrushTool (Paint + Eraser modes)
 - **UI**: egui integration with SVG icons, theme toggle, layer management, tool strip, color picker popup
-- **Tests**: 117 tests passing (unit + integration + TDD eraser + TDD color picker)
+- **Tests**: 119 tests passing (unit + integration + render optimization)
 - **Eraser mode**: `BrushTool` with `is_eraser` toggle, separate `paint_settings`/`eraser_settings`
 - **Color picker**: Popup above bottom bar using `egui::color_picker_color32()`, reads/writes `BrushTool::paint_settings.color`

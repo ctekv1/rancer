@@ -18,8 +18,8 @@ Skills that read domain docs (`improve-codebase-architecture`, `diagnose`, `tdd`
 
 ## Current Status
 
-- [ ] `CONTEXT.md` — not yet created (planned)
-- [ ] `docs/adr/` — not yet created (planned)
+- [x] `CONTEXT.md` — exists
+- [x] `docs/adr/` — exists (3 ADRs)
 - [x] `docs/agents/domain.md` — exists (this file)
 - [x] `docs/agents/issue-tracker.md` — created
 - [x] `docs/agents/triage-labels.md` — created
