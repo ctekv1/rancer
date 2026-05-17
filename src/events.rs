@@ -16,6 +16,10 @@ pub enum AppEvent {
     Key { code: String },
     /// Window resized to new dimensions
     Resize { width: u32, height: u32 },
+    /// Mouse wheel scrolled at position; positive delta = zoom in, negative = zoom out
+    Wheel { x: f32, y: f32, delta: i32 },
+    /// Canvas panned by delta pixels (space+drag or middle-mouse)
+    Pan { dx: f32, dy: f32 },
     /// Application quit requested
     Quit,
 }

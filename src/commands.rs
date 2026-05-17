@@ -51,7 +51,7 @@ impl Edit for CanvasCommand {
 }
 
 /// Command to add a new layer to the canvas
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AddLayer {
     name: Option<String>,
     layer: Option<Layer>,
@@ -61,14 +61,6 @@ pub struct AddLayer {
 impl AddLayer {
     pub fn new(name: Option<String>) -> Self {
         Self { name, layer: None, insertion_index: None }
-    }
-
-    pub fn default() -> Self {
-        Self {
-            name: None,
-            layer: None,
-            insertion_index: None,
-        }
     }
 }
 

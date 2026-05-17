@@ -4,6 +4,8 @@
 
 use glow::HasContext;
 use sdl2::event::Event;
+use sdl2::keyboard::Keycode;
+use sdl2::mouse::MouseButton;
 
 use crate::app::AppState;
 use crate::events::AppEvent;
@@ -66,6 +68,10 @@ pub struct Sdl2App {
     compositor: crate::compositor::Compositor,
     renderer: crate::renderer::CanvasRenderer,
     preferences: Preferences,
+    mouse_x: f32,
+    mouse_y: f32,
+    space_held: bool,
+    middle_held: bool,
 }
 
 impl Sdl2App {
@@ -132,6 +138,10 @@ impl Sdl2App {
             compositor: crate::compositor::Compositor::new(),
             renderer,
             preferences,
+            mouse_x: 0.0,
+            mouse_y: 0.0,
+            space_held: false,
+            middle_held: false,
         })
     }
 
@@ -162,7 +172,6 @@ impl Sdl2App {
                 {
                     let w = (*w).max(0) as u32;
                     let h = (*h).max(0) as u32;
-                    self.renderer.resize_viewport(&self.gl, w, h);
                     self.preferences.update_window_size(w, h);
                     let _ = crate::preferences::save(&self.preferences);
                     self.app_state.handle_event(AppEvent::Resize { width: w, height: h });
@@ -174,6 +183,49 @@ impl Sdl2App {
 
                 // Skip canvas events when egui consumed them (e.g. color picker interaction)
                 if consumed {
+                    continue;
+                }
+
+                // --- Pan state tracking ---
+                if let sdl2::event::Event::KeyDown { keycode: Some(Keycode::Space), .. } = &event {
+                    self.space_held = true;
+                    has_work = true;
+                    continue;
+                }
+                if let sdl2::event::Event::KeyUp { keycode: Some(Keycode::Space), .. } = &event {
+                    self.space_held = false;
+                    has_work = true;
+                    continue;
+                }
+                if let sdl2::event::Event::MouseButtonDown { mouse_btn: MouseButton::Middle, .. } = &event {
+                    self.middle_held = true;
+                    has_work = true;
+                    continue;
+                }
+                if let sdl2::event::Event::MouseButtonUp { mouse_btn: MouseButton::Middle, .. } = &event {
+                    self.middle_held = false;
+                    has_work = true;
+                    continue;
+                }
+                // --- Pan motion ---
+                if let sdl2::event::Event::MouseMotion { x, y, xrel, yrel, mousestate, .. } = &event {
+                    self.mouse_x = *x as f32;
+                    self.mouse_y = *y as f32;
+                    if self.middle_held || (self.space_held && mousestate.left()) {
+                        self.app_state.handle_event(AppEvent::Pan { dx: *xrel as f32, dy: *yrel as f32 });
+                        has_work = true;
+                        continue;
+                    }
+                }
+
+                // Handle mouse wheel directly (needs tracked mouse position)
+                if let sdl2::event::Event::MouseWheel { y, .. } = &event && *y != 0 {
+                    self.app_state.handle_event(AppEvent::Wheel {
+                        x: self.mouse_x,
+                        y: self.mouse_y,
+                        delta: *y,
+                    });
+                    has_work = true;
                     continue;
                 }
 
@@ -206,10 +258,10 @@ impl Sdl2App {
     }
 
     fn render_frame(&mut self) {
-        if let Some((composite, x, y)) = self.compositor.render(&mut self.app_state.canvas_mut()) {
+        if let Some((composite, x, y)) = self.compositor.render(self.app_state.canvas_mut()) {
             self.renderer.upload(&self.gl, &composite, x, y);
         }
-        self.renderer.draw(&self.gl);
+        self.renderer.draw(&self.gl, self.app_state.viewport());
     }
 }
 

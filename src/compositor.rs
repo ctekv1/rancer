@@ -161,7 +161,7 @@ impl Compositor {
         }
 
         self.last_composited_version = current_version;
-        let dirty = canvas.dirty_rect().clone();
+        let dirty = *canvas.dirty_rect();
 
         let (result, x, y) = if !dirty.is_empty()
             && (dirty.width as u64 * dirty.height as u64)

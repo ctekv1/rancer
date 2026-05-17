@@ -4,6 +4,7 @@
 
 pub mod canvas;
 pub mod compositor;
+pub mod viewport;
 pub mod renderer;
 pub mod export_ui;
 pub mod logger;

@@ -101,13 +101,12 @@ impl Theme {
 pub fn color_to_color32(color: crate::canvas::Color) -> Color32 {
     // Color32 stores RGBA as u32, with a() returning the alpha byte
     // from_rgba_unmultiplied expects values in 0-255 range
-    let c = Color32::from_rgba_premultiplied(
+    Color32::from_rgba_premultiplied(
         (color.r as f32 * (color.a as f32 / 255.0)) as u8,
         (color.g as f32 * (color.a as f32 / 255.0)) as u8,
         (color.b as f32 * (color.a as f32 / 255.0)) as u8,
         color.a
-    );
-    c
+    )
 }
 
 /// Convert egui::Color32 to our Color (RGBA u8)
@@ -126,6 +125,7 @@ pub fn color32_to_color(c: Color32) -> crate::canvas::Color {
 }
 
 /// Show the main UI using egui
+#[allow(clippy::field_reassign_with_default)]
 pub fn show_ui(ctx: &Context, app: &mut AppState, ui_state: &mut UiState, icon_cache: &IconCache) {
     let theme = if ui_state.use_dark_theme { Theme::studio_dark() } else { Theme::studio_light() };
     
@@ -309,14 +309,12 @@ pub fn show_ui(ctx: &Context, app: &mut AppState, ui_state: &mut UiState, icon_c
                         ui.set_min_width(110.0);
                         ui.horizontal(|ui| {
                             let eye_icon = if is_visible { "eye" } else { "eye_off" };
-                            if let Some(texture) = icon_cache.get(eye_icon) {
-                                if ui.add(
-                                    egui::Button::image(texture)
-                                        .min_size(egui::vec2(16.0, 16.0))
-                                        .frame(false)
-                                ).clicked() {
-                                    ui_state.toggle_layer_visibility(app, i);
-                                }
+                            if let Some(texture) = icon_cache.get(eye_icon) && ui.add(
+                                egui::Button::image(texture)
+                                    .min_size(egui::vec2(16.0, 16.0))
+                                    .frame(false)
+                            ).clicked() {
+                                ui_state.toggle_layer_visibility(app, i);
                             }
                             if ui.add(egui::Label::new(format!("Layer {}", i + 1)).sense(egui::Sense::click())).clicked() {
                                 let _ = app.canvas_mut().set_active_layer(i);
@@ -337,6 +335,39 @@ pub fn show_ui(ctx: &Context, app: &mut AppState, ui_state: &mut UiState, icon_c
                     ui_state.add_layer(app);
                 }
             }
+
+            // Zoom controls — right-aligned
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(4.0);
+
+                // Zoom percentage
+                let zoom_pct = (app.viewport().scale * 100.0) as u32;
+                ui.label(RichText::new(format!("{}%", zoom_pct)).color(theme.text).size(13.0));
+
+                // Fit button
+                if ui.add(egui::Button::new("Fit").min_size(egui::vec2(36.0, 24.0)).corner_radius(4.0)).clicked() {
+                    app.viewport_mut().zoom_to_fit();
+                }
+
+                // 1:1 button
+                if ui.add(egui::Button::new("1:1").min_size(egui::vec2(36.0, 24.0)).corner_radius(4.0)).clicked() {
+                    app.viewport_mut().zoom_to_100();
+                }
+
+                // Zoom out
+                if ui.add(egui::Button::new("－").min_size(egui::vec2(28.0, 24.0)).corner_radius(4.0)).clicked() {
+                    app.viewport_mut().zoom_out();
+                }
+
+                // Zoom in
+                if ui.add(egui::Button::new("＋").min_size(egui::vec2(28.0, 24.0)).corner_radius(4.0)).clicked() {
+                    app.viewport_mut().zoom_in();
+                }
+
+                ui.add_space(4.0);
+            });
         });
     });
     
@@ -382,10 +413,10 @@ pub fn show_ui(ctx: &Context, app: &mut AppState, ui_state: &mut UiState, icon_c
             });
         
         // Apply color change after popup renders
-        if let Some(color) = ui_state.pending_color.take() {
-            if let Some(config) = app.active_tool_mut().as_brush_config() {
-                config.set_brush_color(color);
-            }
+        if let Some(color) = ui_state.pending_color.take()
+            && let Some(config) = app.active_tool_mut().as_brush_config()
+        {
+            config.set_brush_color(color);
         }
     } else {
         // Reset Hsva when picker closes to avoid stale state on reopen
