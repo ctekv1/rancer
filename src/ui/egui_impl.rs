@@ -357,12 +357,16 @@ pub fn show_ui(ctx: &Context, app: &mut AppState, ui_state: &mut UiState, icon_c
                 }
 
                 // Zoom out
-                if ui.add(egui::Button::new("－").min_size(egui::vec2(28.0, 24.0)).corner_radius(4.0)).clicked() {
+                if let Some(texture) = icon_cache.get("zoom_out") && ui.add(
+                    egui::Button::image(texture).min_size(egui::vec2(20.0, 20.0)).frame(false)
+                ).clicked() {
                     app.viewport_mut().zoom_out();
                 }
 
                 // Zoom in
-                if ui.add(egui::Button::new("＋").min_size(egui::vec2(28.0, 24.0)).corner_radius(4.0)).clicked() {
+                if let Some(texture) = icon_cache.get("zoom_in") && ui.add(
+                    egui::Button::image(texture).min_size(egui::vec2(20.0, 20.0)).frame(false)
+                ).clicked() {
                     app.viewport_mut().zoom_in();
                 }
 
