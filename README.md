@@ -7,26 +7,23 @@ A digital art application built in Rust with cross-platform support.
 
 ## Features
 
-- **GPU-accelerated rendering** — WGPU 28.0 with MSAA support, OpenGL for Linux
+- **GPU-accelerated rendering** — OpenGL via glow with SDL2 windowing
 - **Layer system** — Multiple layers with visibility toggle, opacity, lock, reorder (up to 20 layers)
-- **Zoom & Pan** — Mouse wheel zoom toward cursor, space+drag panning, zoom UI buttons
 - **HSV color picker** — Three sliders with click-and-drag, custom saved colors palette (FIFO, max 10)
-- **Brush types** — Square, Round (soft-edged), Spray (scattered dots), Calligraphy (45° broad-nib)
-- **Brush tools** — Adjustable size (3/5/10/25/50px), opacity presets (25%/50%/75%/100%), eraser toggle
-- **Selection tool** — Rectangular selection with move/copy, marching ants animation, whole-stroke capture
-- **Undo/Redo** — Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y
-- **Native export** — File save dialog, OS notifications, stroke bounding box export (up to 4096×4096)
-- **Cross-platform** — winit/WGPU for Windows, GTK4/OpenGL for Linux
+- **Brush types** — Round (soft-edged anti-aliased), Square (filled)
+- **Brush tools** — Adjustable size, opacity presets (25%/50%/75%/100%), eraser toggle, separate paint/eraser settings
+- **Undo/Redo** — Z/Y keyboard shortcuts, UI buttons, command pattern via `undo` crate
+- **Native export** — File save dialog via `rfd`, OS notifications
+- **Single backend** — SDL2 on both Linux and Windows (no platform `#[cfg]` branching)
 - **Auto-saving preferences** — TOML config with platform-specific storage
-- **Frame rate limiter** — User-configurable FPS cap (default 60, 0=unlimited, Windows only)
-- **Performance optimizations** — Committed stroke vertex caching, UI vertex caching
-- **Raster layers** — Bitmap layer support (in progress)
+- **Performance optimizations** — Dirty-rect compositing, version-based caching, partial texture uploads
+- **egui UI** — Immediate-mode GUI with SVG icons, theme toggle, color picker, layer panel
+- **Raster canvas** — CPU dab-based brush engine stamping into `RasterImage` pixel buffers
 
 ## Build & Run
 
 ```bash
-# Linux (GTK4)
-sudo apt install libgtk-4-dev
+# Linux
 cargo build
 cargo run
 
@@ -35,106 +32,93 @@ cargo build
 cargo run
 ```
 
+SDL2 is statically compiled via the `bundled` feature — no system library needed.
+
 ## Usage
 
 | Action | Control |
 |--------|---------|
 | Draw | Left click and drag |
-| Eraser | Right-click (hold), or press E to toggle |
-| Pan | Space + drag |
-| Zoom | Mouse wheel (toward cursor), or +/− buttons |
-| Brush size | Click size boxes, or +/− keys |
-| Brush type | Click type buttons (square, round, spray, calligraphy) |
-| Selection tool | Click tool button, drag on canvas to select |
-| Move selection | Click and drag inside selection |
-| Copy selection | Ctrl+drag inside selection |
-| Commit selection | Delete key |
-| Clear selection | Escape or Ctrl+D |
-| Undo | Ctrl+Z |
-| Redo | Ctrl+Y or Ctrl+Shift+Z |
-| Clear canvas | Ctrl+Delete |
+| Eraser | Press E to toggle, or set via UI |
+| Brush size | Click size buttons, or +/− keys |
+| Brush opacity | Click opacity presets (25/50/75/100%) |
+| Brush type | Click type buttons (round, square) |
+| Undo | Z key (or UI button) |
+| Redo | Y key (or UI button) |
+| Add layer | Click + button in layer panel |
+| Remove layer | Click − button in layer panel |
+| Toggle visibility | Click eye icon in layer panel |
 | Export | Click export button, or press S |
-| Navigate colors | Arrow Up/Down |
 
 ## Architecture
 
 ```
 src/
-├── canvas.rs          — Core data model: Stroke, Layer, Canvas, ActiveStroke, BrushType
-│                     RasterImage, RasterLayer, LayerContent (raster layer support)
-├── renderer.rs        — WGPU rendering (Windows): uses RenderFrame pattern
-│                     raster_texture_cache, raster_pipeline (infrastructure)
-├── opengl_renderer.rs — OpenGL rendering (Linux): uses GlRenderFrame pattern
-├── geometry/          — Vertex generation for strokes and UI elements
-│   ├── mod.rs         — Shared utilities (hex_to_color, generate_rect, hsv_to_rgb)
-│   ├── stroke.rs      — Stroke vertex generation (Square, Round, Spray, Calligraphy)
-│   └── ui_elements.rs — UI element vertex generation (sliders, buttons, layer panel)
-├── ui.rs              — Shared hit-testing logic across backends
-├── window_winit.rs    — Windows backend: winit event loop, input handling
-├── window_gtk4.rs     — Linux backend: GTK4 + OpenGL
-├── window_backend.rs  — Shared trait for window backends
-├── export.rs          — PNG export with bounding box computation
-│                     render_selection_region (raster selection support)
-├── export_ui.rs       — Export dialog helpers, OS notifications
-├── preferences.rs     — TOML-based config with platform-specific paths
-├── gl_loader.rs       — OpenGL function loader for Linux
-├── logger.rs          — Logging to file and stdout
-└── main.rs            — Entry point, platform detection
+├── app.rs             — AppState: canvas, active tool, undo history
+├── canvas.rs          — Core data model: Canvas, Layer, RasterImage, Color, DirtyRect
+├── commands.rs        — Command pattern: AddLayer, RemoveLayer, ToggleVisibility, SetOpacity
+├── compositor.rs      — Pixel compositing: composite_all, composite_rect, blend_pixel
+├── renderer.rs        — CanvasRenderer: OpenGL shaders, VAO, texture upload, draw
+├── events.rs          — AppEvent enum (Press, Drag, Release, Key, Quit)
+├── export_ui.rs       — Native file dialogs for save/export
+├── logger.rs          — File + console logging
+├── preferences.rs     — User settings persistence (TOML)
+│
+├── brush/             — CPU dab-based brush engine
+│   ├── mod.rs         — BrushType enum (Round, Square)
+│   ├── dab.rs         — DabMask — pixel-level brush stamp data
+│   ├── round.rs       — RoundDab — anti-aliased round dab generation
+│   └── engine.rs      — BrushEngine — stamp placement, alpha compositing
+│
+├── tools/             — Tool trait and implementations
+│   ├── mod.rs         — Tool trait, BrushConfig trait, BrushSettings
+│   └── brush_tool.rs  — BrushTool — paint and eraser modes
+│
+├── ui/                — egui-based UI
+│   ├── mod.rs
+│   ├── state.rs       — UiState — panel visibility, tool selection, theme
+│   ├── egui_impl.rs   — show_ui(), IconCache, color picker, layer panel
+│   ├── icons.rs       — SVG icon loading and caching
+│   └── egui_integration.rs  — egui-sdl2 glow-backed integration
+│
+└── window/
+    ├── mod.rs
+    └── sdl2.rs        — Sdl2App — event loop, render lifecycle, egui pass
 ```
+
+See `ARCHITECTURE.md` for detailed data flow and design patterns.
 
 ## Tech Stack
 
 - Rust 1.94+
-- WGPU 28.0 (GPU rendering — Windows)
-- winit 0.30 (window management — Windows)
-- GTK4 0.9 (window/UI — Linux)
-- OpenGL/glow 0.14 (GPU rendering — Linux)
-- image 0.24 (PNG export)
+- SDL2 0.38 (window management, GL context, input events)
+- glow 0.16 (OpenGL function loading and safe Rust bindings)
+- egui-sdl2 0.2 (egui integration with SDL2 + glow backend)
+- undo 0.52 (command pattern for undo/redo)
+- image 0.24 (PNG encoding, SVG loading)
+- resvg 0.45 (SVG rasterization for UI icons)
 - rfd 0.15 (native file dialogs)
+- serde + toml (serialization)
 - chrono 0.4 (timestamps)
 - dirs 5.0 (platform-specific config directories)
-- serde + toml (serialization)
 
 ## Configuration
 
-- **Windows:** `%APPDATA%\rancer\config.toml`
 - **Linux:** `~/.config/rancer/config.toml`
-
-### Adjustable Settings
-
-```toml
-[renderer]
-max_fps = 60        # Frame rate limit (0 = unlimited)
-msaa_samples = 4    # Anti-aliasing samples
-```
-
-- `max_fps`: Limits render rate to save power on laptops. Set to 0 for unlimited. (Currently Windows only)
-- `msaa_samples`: MSAA level (1, 2, 4, 8, 16). Higher = smoother lines but more GPU usage.
+- **Windows:** `%APPDATA%\rancer\config.toml`
 
 ## Status
 
-- [x] Cross-platform window backends (winit + GTK4)
-- [x] GPU-accelerated rendering (WGPU + OpenGL)
+- [x] SDL2 + OpenGL windowing (single cross-platform backend)
+- [x] Raster layer canvas (in-memory `RasterImage` layers)
+- [x] CPU dab-based brush engine (Round, Square)
+- [x] Brush tool with paint + eraser modes
+- [x] Undo/Redo via command pattern (AddLayer, RemoveLayer, ToggleVisibility, SetOpacity)
+- [x] egui UI with SVG icons, theme toggle, color picker, layer panel
 - [x] User preferences system with auto-save
-- [x] HSV color picker with custom colors
-- [x] Brush opacity control
-- [x] Undo/Redo system
-- [x] Eraser tool
-- [x] Canvas clear
 - [x] Export with native file dialog
-- [x] Zoom & Pan
-- [x] Layer system (visibility, opacity, lock, reorder)
-- [x] MSAA (WGPU backend)
-- [x] Export captures full canvas content (bounding box)
-- [x] Brush types (square, round, spray, calligraphy) with preference persistence
-- [x] Selection tool (rectangular selection with move/copy, marching ants animation)
-- [x] Frame rate limiter (configurable via config)
-- [ ] Transform tools (scale, rotate, flip)
-- [x] Raster pixel-edge selection (COMPLETE - Phases 1-3)
-  - Data structures: RasterImage, RasterLayer, LayerContent enum
-  - Selection stores bitmap, extracted on begin_selection
-  - commit_selection_to_raster() method
-  - Raster layer infrastructure ready (placeholder render)
+- [x] Dirty-rect compositing with version caching
+- [x] 119 unit/integration tests
 
 ## License
 
