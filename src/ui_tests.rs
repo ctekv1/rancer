@@ -85,6 +85,7 @@ fn test_ui_state_undo_redo() {
 /// This test verifies the integration can be created without panicking
 /// Note: SDL2 can only be initialized once, so we skip if already initialized
 #[test]
+#[ignore = "requires a display/GPU (fails on headless CI runners)"]
 fn test_egui_integration_creation() {
     // Skip if SDL2 already initialized (e.g., by another test)
     let sdl = match sdl2::init() {
@@ -123,6 +124,7 @@ fn test_egui_integration_creation() {
 
 /// Test that egui context is accessible
 #[test]
+#[ignore = "requires a display/GPU (fails on headless CI runners)"]
 fn test_egui_integration_ctx_access() {
     // Skip if SDL2 already initialized (e.g., by another test)
     let sdl = match sdl2::init() {
