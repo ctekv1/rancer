@@ -2,10 +2,10 @@
 
 #[test]
 fn sdl2_mouse_button_down_maps_to_press() {
-    use sdl2::event::Event;
-    use sdl2::mouse::MouseButton;
     use crate::events::AppEvent;
     use crate::window::sdl2::sdl_event_to_app_event;
+    use sdl2::event::Event;
+    use sdl2::mouse::MouseButton;
 
     let sdl_event = Event::MouseButtonDown {
         timestamp: 0,
@@ -29,10 +29,10 @@ fn sdl2_mouse_button_down_maps_to_press() {
 
 #[test]
 fn sdl2_mouse_button_up_maps_to_release() {
-    use sdl2::event::Event;
-    use sdl2::mouse::MouseButton;
     use crate::events::AppEvent;
     use crate::window::sdl2::sdl_event_to_app_event;
+    use sdl2::event::Event;
+    use sdl2::mouse::MouseButton;
 
     let sdl_event = Event::MouseButtonUp {
         timestamp: 0,
@@ -56,10 +56,10 @@ fn sdl2_mouse_button_up_maps_to_release() {
 
 #[test]
 fn sdl2_mouse_motion_with_left_button_maps_to_drag() {
-    use sdl2::event::Event;
-    use sdl2::mouse::MouseState;
     use crate::events::AppEvent;
     use crate::window::sdl2::sdl_event_to_app_event;
+    use sdl2::event::Event;
+    use sdl2::mouse::MouseState;
 
     let mouse_state = MouseState::from_sdl_state(1); // SDL_BUTTON_LMASK = 1
 
@@ -86,9 +86,9 @@ fn sdl2_mouse_motion_with_left_button_maps_to_drag() {
 
 #[test]
 fn sdl2_mouse_motion_without_button_maps_to_none() {
+    use crate::window::sdl2::sdl_event_to_app_event;
     use sdl2::event::Event;
     use sdl2::mouse::MouseState;
-    use crate::window::sdl2::sdl_event_to_app_event;
 
     let mouse_state = MouseState::from_sdl_state(0); // no buttons pressed
 
@@ -109,10 +109,10 @@ fn sdl2_mouse_motion_without_button_maps_to_none() {
 
 #[test]
 fn sdl2_key_down_maps_to_key_event() {
-    use sdl2::event::Event;
-    use sdl2::keyboard::Keycode;
     use crate::events::AppEvent;
     use crate::window::sdl2::sdl_event_to_app_event;
+    use sdl2::event::Event;
+    use sdl2::keyboard::Keycode;
 
     let sdl_event = Event::KeyDown {
         timestamp: 0,
@@ -135,9 +135,9 @@ fn sdl2_key_down_maps_to_key_event() {
 
 #[test]
 fn sdl2_quit_maps_to_quit_event() {
-    use sdl2::event::Event;
     use crate::events::AppEvent;
     use crate::window::sdl2::sdl_event_to_app_event;
+    use sdl2::event::Event;
 
     let sdl_event = Event::Quit { timestamp: 0 };
 
@@ -150,9 +150,9 @@ fn sdl2_quit_maps_to_quit_event() {
 
 #[test]
 fn sdl2_window_size_changed_maps_to_resize() {
-    use sdl2::event::Event;
     use crate::events::AppEvent;
     use crate::window::sdl2::sdl_event_to_app_event;
+    use sdl2::event::Event;
 
     let sdl_event = Event::Window {
         timestamp: 0,
@@ -172,8 +172,8 @@ fn sdl2_window_size_changed_maps_to_resize() {
 
 #[test]
 fn unhandled_sdl_event_maps_to_none() {
-    use sdl2::event::Event;
     use crate::window::sdl2::sdl_event_to_app_event;
+    use sdl2::event::Event;
 
     let sdl_event = Event::Window {
         timestamp: 0,

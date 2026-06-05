@@ -3,8 +3,8 @@
 //! Each tool implements this trait to handle user input events.
 //! Brush-specific configuration lives in the separate `BrushConfig` trait.
 
-use crate::canvas::{Canvas, Color};
 use crate::brush::BrushType;
+use crate::canvas::{Canvas, Color};
 
 /// Shared brush settings that tools can read/write
 #[derive(Debug, Clone, Copy)]
@@ -28,8 +28,12 @@ pub trait Tool {
     fn on_release(&mut self, x: f32, y: f32, canvas: &mut Canvas);
     fn on_key(&mut self, code: &str);
     fn name(&self) -> &str;
-    fn brush_settings(&self) -> Option<BrushSettings> { None }
-    fn as_brush_config(&mut self) -> Option<&mut dyn BrushConfig> { None }
+    fn brush_settings(&self) -> Option<BrushSettings> {
+        None
+    }
+    fn as_brush_config(&mut self) -> Option<&mut dyn BrushConfig> {
+        None
+    }
 }
 
 /// Brush-specific configuration (size, opacity, color, eraser mode).

@@ -2,24 +2,24 @@
 
 #[test]
 fn add_layer_command_edits_canvas() {
-    use undo::Record;
     use crate::canvas::Canvas;
     use crate::commands::AddLayer;
+    use undo::Record;
 
     let mut canvas = Canvas::new();
     assert_eq!(canvas.layer_count(), 1); // Starts with 1 default layer
 
     let mut record: Record<AddLayer> = Record::new();
     let _ = record.edit(&mut canvas, AddLayer::default());
-    
+
     assert_eq!(canvas.layer_count(), 2);
 }
 
 #[test]
 fn add_layer_command_undo_removes_layer() {
-    use undo::Record;
     use crate::canvas::Canvas;
     use crate::commands::AddLayer;
+    use undo::Record;
 
     let mut canvas = Canvas::new();
     let mut record: Record<AddLayer> = Record::new();
@@ -32,9 +32,9 @@ fn add_layer_command_undo_removes_layer() {
 
 #[test]
 fn add_layer_command_redo_adds_layer_back() {
-    use undo::Record;
     use crate::canvas::Canvas;
     use crate::commands::AddLayer;
+    use undo::Record;
 
     let mut canvas = Canvas::new();
     let mut record: Record<AddLayer> = Record::new();
@@ -48,9 +48,9 @@ fn add_layer_command_redo_adds_layer_back() {
 
 #[test]
 fn remove_layer_command_removes_and_undo_restores() {
-    use undo::Record;
     use crate::canvas::Canvas;
     use crate::commands::{AddLayer, RemoveLayer};
+    use undo::Record;
 
     let mut canvas = Canvas::new();
     let mut add_record: Record<AddLayer> = Record::new();
@@ -68,16 +68,16 @@ fn remove_layer_command_removes_and_undo_restores() {
 
 #[test]
 fn toggle_visibility_command_toggles_and_undo_restores() {
-    use undo::Record;
     use crate::canvas::Canvas;
     use crate::commands::ToggleVisibility;
+    use undo::Record;
 
     let mut canvas = Canvas::new();
     // Default layer is visible
     assert!(canvas.layers()[0].visible);
 
     let mut record: Record<ToggleVisibility> = Record::new();
-    let _ = record.edit(&mut canvas, ToggleVisibility::new(0));
+    record.edit(&mut canvas, ToggleVisibility::new(0));
     assert!(!canvas.layers()[0].visible);
 
     record.undo(&mut canvas);
@@ -86,15 +86,15 @@ fn toggle_visibility_command_toggles_and_undo_restores() {
 
 #[test]
 fn set_opacity_command_changes_and_undo_restores() {
-    use undo::Record;
     use crate::canvas::Canvas;
     use crate::commands::SetOpacity;
+    use undo::Record;
 
     let mut canvas = Canvas::new();
     assert_eq!(canvas.layers()[0].opacity, 1.0);
 
     let mut record: Record<SetOpacity> = Record::new();
-    let _ = record.edit(&mut canvas, SetOpacity::new(0, 0.5));
+    record.edit(&mut canvas, SetOpacity::new(0, 0.5));
     assert_eq!(canvas.layers()[0].opacity, 0.5);
 
     record.undo(&mut canvas);
@@ -103,26 +103,29 @@ fn set_opacity_command_changes_and_undo_restores() {
 
 #[test]
 fn canvas_undo_record_handles_multiple_commands() {
-    use undo::Record;
     use crate::canvas::Canvas;
-    use crate::commands::{CanvasCommand, AddLayer, ToggleVisibility};
+    use crate::commands::{AddLayer, CanvasCommand, ToggleVisibility};
+    use undo::Record;
 
     let mut canvas = Canvas::new();
     let mut record: Record<CanvasCommand> = Record::new();
-    
+
     // Add a layer
     let _ = record.edit(&mut canvas, CanvasCommand::AddLayer(AddLayer::default()));
     assert_eq!(canvas.layer_count(), 2);
-    
+
     // Toggle visibility
-    let _ = record.edit(&mut canvas, CanvasCommand::ToggleVisibility(ToggleVisibility::new(0)));
+    let _ = record.edit(
+        &mut canvas,
+        CanvasCommand::ToggleVisibility(ToggleVisibility::new(0)),
+    );
     assert!(!canvas.layers()[0].visible);
-    
+
     // Undo toggle
     record.undo(&mut canvas);
     assert!(canvas.layers()[0].visible);
     assert_eq!(canvas.layer_count(), 2);
-    
+
     // Undo add layer
     record.undo(&mut canvas);
     assert_eq!(canvas.layer_count(), 1);
@@ -130,20 +133,20 @@ fn canvas_undo_record_handles_multiple_commands() {
 
 #[test]
 fn canvas_can_undo_and_can_redo() {
-    use undo::Record;
     use crate::canvas::Canvas;
-    use crate::commands::{CanvasCommand, AddLayer};
+    use crate::commands::{AddLayer, CanvasCommand};
+    use undo::Record;
 
     let mut canvas = Canvas::new();
     let mut record: Record<CanvasCommand> = Record::new();
-    
+
     assert!(!record.can_undo());
     assert!(!record.can_redo());
-    
+
     let _ = record.edit(&mut canvas, CanvasCommand::AddLayer(AddLayer::default()));
     assert!(record.can_undo());
     assert!(!record.can_redo());
-    
+
     record.undo(&mut canvas);
     assert!(!record.can_undo());
     assert!(record.can_redo());

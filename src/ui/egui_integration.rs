@@ -2,9 +2,9 @@
 //!
 //! Provides egui rendering and event handling via the egui_sdl2 crate.
 
+use egui_sdl2::EguiGlow;
 use sdl2::event::Event;
 use sdl2::video::Window;
-use egui_sdl2::EguiGlow;
 use std::sync::Arc;
 
 /// Manages egui integration with SDL2 + glow

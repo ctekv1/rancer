@@ -4,4 +4,4 @@
 
 pub mod sdl2;
 
-pub use sdl2::{run_app, Sdl2App};
+pub use sdl2::{Sdl2App, run_app};

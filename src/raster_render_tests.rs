@@ -4,7 +4,7 @@
 fn canvas_has_layers() {
     use crate::canvas::Canvas;
     let canvas = Canvas::new();
-    assert!(canvas.layers().len() > 0);
+    assert!(!canvas.layers().is_empty());
 }
 
 #[test]

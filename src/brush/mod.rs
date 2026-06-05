@@ -3,12 +3,12 @@
 //! CPU-based dab painting system for raster canvas drawing.
 
 pub mod dab;
-pub mod round;
 pub mod engine;
+pub mod round;
 
 pub use dab::DabMask;
-pub use round::RoundDab;
 pub use engine::BrushEngine;
+pub use round::RoundDab;
 
 /// Available brush types
 #[derive(Debug, Clone, Copy, PartialEq)]

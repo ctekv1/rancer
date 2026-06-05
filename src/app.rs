@@ -124,7 +124,11 @@ impl AppState {
                 self.viewport.resize_window(width, height);
             }
             AppEvent::Wheel { x, y, delta } => {
-                let factor = if delta > 0 { crate::viewport::ZOOM_FACTOR } else { 1.0 / crate::viewport::ZOOM_FACTOR };
+                let factor = if delta > 0 {
+                    crate::viewport::ZOOM_FACTOR
+                } else {
+                    1.0 / crate::viewport::ZOOM_FACTOR
+                };
                 self.viewport.zoom_toward(x, y, factor);
             }
             AppEvent::Pan { dx, dy } => {
@@ -156,7 +160,10 @@ impl AppState {
 
     /// Add a new layer through the undo system
     pub fn add_layer(&mut self) {
-        let _ = self.history.edit(&mut self.canvas, CanvasCommand::AddLayer(AddLayer::default()));
+        let _ = self.history.edit(
+            &mut self.canvas,
+            CanvasCommand::AddLayer(AddLayer::default()),
+        );
     }
 
     /// Undo the last action

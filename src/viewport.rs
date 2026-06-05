@@ -13,8 +13,14 @@ pub struct ViewportState {
 }
 
 impl ViewportState {
-    pub fn new(canvas_width: u32, canvas_height: u32, window_width: u32, window_height: u32) -> Self {
-        let (offset_x, offset_y) = if canvas_width <= window_width && canvas_height <= window_height {
+    pub fn new(
+        canvas_width: u32,
+        canvas_height: u32,
+        window_width: u32,
+        window_height: u32,
+    ) -> Self {
+        let (offset_x, offset_y) = if canvas_width <= window_width && canvas_height <= window_height
+        {
             (
                 (window_width - canvas_width) as f64 / 2.0,
                 (window_height - canvas_height) as f64 / 2.0,
@@ -86,7 +92,10 @@ impl ViewportState {
         self.window_width = width;
         self.window_height = height;
         let (offset_x, offset_y) = if self.canvas_width <= width && self.canvas_height <= height {
-            ((width - self.canvas_width) as f64 / 2.0, (height - self.canvas_height) as f64 / 2.0)
+            (
+                (width - self.canvas_width) as f64 / 2.0,
+                (height - self.canvas_height) as f64 / 2.0,
+            )
         } else {
             (0.0, 0.0)
         };
@@ -97,7 +106,8 @@ impl ViewportState {
     pub fn screen_to_canvas(&self, sx: f32, sy: f32) -> Option<(f32, f32)> {
         let cx = (sx as f64 - self.offset_x) / self.scale;
         let cy = (sy as f64 - self.offset_y) / self.scale;
-        if cx >= 0.0 && cx < self.canvas_width as f64 && cy >= 0.0 && cy < self.canvas_height as f64 {
+        if cx >= 0.0 && cx < self.canvas_width as f64 && cy >= 0.0 && cy < self.canvas_height as f64
+        {
             Some((cx as f32, cy as f32))
         } else {
             None

@@ -80,7 +80,14 @@ impl Compositor {
         }
     }
 
-    pub fn composite_rect(&self, canvas: &Canvas, x: u32, y: u32, w: u32, h: u32) -> CompositeResult {
+    pub fn composite_rect(
+        &self,
+        canvas: &Canvas,
+        x: u32,
+        y: u32,
+        w: u32,
+        h: u32,
+    ) -> CompositeResult {
         if w == 0 || h == 0 {
             return CompositeResult {
                 width: 0,
@@ -167,7 +174,11 @@ impl Compositor {
             && (dirty.width as u64 * dirty.height as u64)
                 < (canvas.width as u64 * canvas.height as u64 / 2)
         {
-            (self.composite_rect(canvas, dirty.x, dirty.y, dirty.width, dirty.height), dirty.x, dirty.y)
+            (
+                self.composite_rect(canvas, dirty.x, dirty.y, dirty.width, dirty.height),
+                dirty.x,
+                dirty.y,
+            )
         } else {
             (self.composite_all(canvas), 0, 0)
         };

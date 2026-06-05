@@ -3,7 +3,7 @@
 //! Stamps brush dabs onto RasterImage buffers with alpha compositing.
 
 use crate::brush::DabMask;
-use crate::canvas::{RasterImage, Color};
+use crate::canvas::{Color, RasterImage};
 
 pub struct BrushEngine;
 
@@ -41,13 +41,7 @@ impl BrushEngine {
         }
     }
 
-    pub fn stamp_dab(
-        buffer: &mut RasterImage,
-        cx: i32,
-        cy: i32,
-        dab: &DabMask,
-        color: Color,
-    ) {
+    pub fn stamp_dab(buffer: &mut RasterImage, cx: i32, cy: i32, dab: &DabMask, color: Color) {
         let final_alpha_mul = color.a as f32 / 255.0;
         Self::apply_dab(buffer, cx, cy, dab, |dab_alpha, pixel| {
             let final_alpha = ((dab_alpha as f32 / 255.0) * final_alpha_mul * 255.0) as u8;
@@ -89,7 +83,12 @@ mod tests {
     fn test_stamp_dab_affects_pixels_at_center() {
         let mut buffer = RasterImage::new(10, 10);
         let dab = RoundDab::generate(3);
-        let color = Color { r: 255, g: 0, b: 0, a: 255 };
+        let color = Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        };
 
         BrushEngine::stamp_dab(&mut buffer, 5, 5, &dab, color);
 
@@ -101,7 +100,12 @@ mod tests {
     fn test_stamp_dab_does_not_affect_distant_pixels() {
         let mut buffer = RasterImage::new(10, 10);
         let dab = RoundDab::generate(3);
-        let color = Color { r: 255, g: 0, b: 0, a: 255 };
+        let color = Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        };
 
         BrushEngine::stamp_dab(&mut buffer, 0, 0, &dab, color);
 
@@ -113,7 +117,12 @@ mod tests {
     fn test_stamp_dab_respects_partial_transparency() {
         let mut buffer = RasterImage::new(10, 10);
         let dab = RoundDab::generate(3);
-        let color = Color { r: 255, g: 0, b: 0, a: 128 };
+        let color = Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 128,
+        };
 
         BrushEngine::stamp_dab(&mut buffer, 5, 5, &dab, color);
 
@@ -126,7 +135,12 @@ mod tests {
     fn test_stamp_dab_out_of_bounds_is_ignored() {
         let mut buffer = RasterImage::new(10, 10);
         let dab = RoundDab::generate(20);
-        let color = Color { r: 255, g: 0, b: 0, a: 255 };
+        let color = Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        };
 
         BrushEngine::stamp_dab(&mut buffer, -5, -5, &dab, color);
     }
@@ -135,7 +149,12 @@ mod tests {
     fn test_draw_line_produces_continuous_pixels() {
         let mut buffer = RasterImage::new(20, 20);
         let dab = RoundDab::generate(3);
-        let color = Color { r: 50, g: 50, b: 50, a: 200 };
+        let color = Color {
+            r: 50,
+            g: 50,
+            b: 50,
+            a: 200,
+        };
 
         for t in [0.0_f32, 0.5, 1.0] {
             let x = (0.0 + (10.0 - 0.0) * t) as i32;
@@ -153,6 +172,17 @@ mod tests {
     fn test_small_dab_does_not_panic() {
         let mut buffer = RasterImage::new(3, 3);
         let dab = RoundDab::generate(1);
-        BrushEngine::stamp_dab(&mut buffer, 1, 1, &dab, Color { r: 100, g: 100, b: 100, a: 200 });
+        BrushEngine::stamp_dab(
+            &mut buffer,
+            1,
+            1,
+            &dab,
+            Color {
+                r: 100,
+                g: 100,
+                b: 100,
+                a: 200,
+            },
+        );
     }
 }

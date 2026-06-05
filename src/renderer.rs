@@ -27,7 +27,9 @@ void main() {
 
 fn create_shader_program(gl: &glow::Context, vs: &str, fs: &str) -> Result<glow::Program, String> {
     unsafe {
-        let vshader = gl.create_shader(glow::VERTEX_SHADER).map_err(|e| e.to_string())?;
+        let vshader = gl
+            .create_shader(glow::VERTEX_SHADER)
+            .map_err(|e| e.to_string())?;
         gl.shader_source(vshader, vs);
         gl.compile_shader(vshader);
         if !gl.get_shader_compile_status(vshader) {
@@ -36,7 +38,9 @@ fn create_shader_program(gl: &glow::Context, vs: &str, fs: &str) -> Result<glow:
             return Err(format!("Vertex shader compilation failed: {}", log));
         }
 
-        let fshader = gl.create_shader(glow::FRAGMENT_SHADER).map_err(|e| e.to_string())?;
+        let fshader = gl
+            .create_shader(glow::FRAGMENT_SHADER)
+            .map_err(|e| e.to_string())?;
         gl.shader_source(fshader, fs);
         gl.compile_shader(fshader);
         if !gl.get_shader_compile_status(fshader) {
@@ -81,7 +85,10 @@ fn compute_bg_uv(w: u32, h: u32) -> [f32; 8] {
     [0.0, 0.0, uw, 0.0, uw, vh, 0.0, vh]
 }
 
-fn create_bg_quad_vao(gl: &glow::Context, texcoords: &[f32; 8]) -> Result<(glow::VertexArray, glow::Buffer), String> {
+fn create_bg_quad_vao(
+    gl: &glow::Context,
+    texcoords: &[f32; 8],
+) -> Result<(glow::VertexArray, glow::Buffer), String> {
     unsafe {
         let vao = gl.create_vertex_array().map_err(|e| e.to_string())?;
         gl.bind_vertex_array(Some(vao));
@@ -89,13 +96,28 @@ fn create_bg_quad_vao(gl: &glow::Context, texcoords: &[f32; 8]) -> Result<(glow:
         let pos: [f32; 8] = [-1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0];
         let pos_buf = gl.create_buffer().map_err(|e| e.to_string())?;
         gl.bind_buffer(glow::ARRAY_BUFFER, Some(pos_buf));
-        gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, &pos.to_vec().iter().flat_map(|f| f32::to_le_bytes(*f)).collect::<Vec<u8>>(), glow::STATIC_DRAW);
+        gl.buffer_data_u8_slice(
+            glow::ARRAY_BUFFER,
+            &pos.to_vec()
+                .iter()
+                .flat_map(|f| f32::to_le_bytes(*f))
+                .collect::<Vec<u8>>(),
+            glow::STATIC_DRAW,
+        );
         gl.enable_vertex_attrib_array(0);
         gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 0, 0);
 
         let tex_buf = gl.create_buffer().map_err(|e| e.to_string())?;
         gl.bind_buffer(glow::ARRAY_BUFFER, Some(tex_buf));
-        gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, &texcoords.to_vec().iter().flat_map(|f| f32::to_le_bytes(*f)).collect::<Vec<u8>>(), glow::DYNAMIC_DRAW);
+        gl.buffer_data_u8_slice(
+            glow::ARRAY_BUFFER,
+            &texcoords
+                .to_vec()
+                .iter()
+                .flat_map(|f| f32::to_le_bytes(*f))
+                .collect::<Vec<u8>>(),
+            glow::DYNAMIC_DRAW,
+        );
         gl.enable_vertex_attrib_array(1);
         gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, 0, 0);
 
@@ -105,7 +127,10 @@ fn create_bg_quad_vao(gl: &glow::Context, texcoords: &[f32; 8]) -> Result<(glow:
     }
 }
 
-fn create_quad_vao(gl: &glow::Context, texcoords: &[f32; 8]) -> Result<(glow::VertexArray, glow::Buffer), String> {
+fn create_quad_vao(
+    gl: &glow::Context,
+    texcoords: &[f32; 8],
+) -> Result<(glow::VertexArray, glow::Buffer), String> {
     unsafe {
         let vao = gl.create_vertex_array().map_err(|e| e.to_string())?;
         gl.bind_vertex_array(Some(vao));
@@ -113,13 +138,28 @@ fn create_quad_vao(gl: &glow::Context, texcoords: &[f32; 8]) -> Result<(glow::Ve
         let pos: [f32; 8] = [-1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0];
         let pos_buf = gl.create_buffer().map_err(|e| e.to_string())?;
         gl.bind_buffer(glow::ARRAY_BUFFER, Some(pos_buf));
-        gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, &pos.to_vec().iter().flat_map(|f| f32::to_le_bytes(*f)).collect::<Vec<u8>>(), glow::STATIC_DRAW);
+        gl.buffer_data_u8_slice(
+            glow::ARRAY_BUFFER,
+            &pos.to_vec()
+                .iter()
+                .flat_map(|f| f32::to_le_bytes(*f))
+                .collect::<Vec<u8>>(),
+            glow::STATIC_DRAW,
+        );
         gl.enable_vertex_attrib_array(0);
         gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 0, 0);
 
         let tex_buf = gl.create_buffer().map_err(|e| e.to_string())?;
         gl.bind_buffer(glow::ARRAY_BUFFER, Some(tex_buf));
-        gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, &texcoords.to_vec().iter().flat_map(|f| f32::to_le_bytes(*f)).collect::<Vec<u8>>(), glow::DYNAMIC_DRAW);
+        gl.buffer_data_u8_slice(
+            glow::ARRAY_BUFFER,
+            &texcoords
+                .to_vec()
+                .iter()
+                .flat_map(|f| f32::to_le_bytes(*f))
+                .collect::<Vec<u8>>(),
+            glow::DYNAMIC_DRAW,
+        );
         gl.enable_vertex_attrib_array(1);
         gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, 0, 0);
 
@@ -148,10 +188,26 @@ impl CanvasRenderer {
         let texture = unsafe { gl.create_texture().map_err(|e| e.to_string())? };
         unsafe {
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MIN_FILTER,
+                glow::LINEAR as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MAG_FILTER,
+                glow::LINEAR as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_WRAP_S,
+                glow::CLAMP_TO_EDGE as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_WRAP_T,
+                glow::CLAMP_TO_EDGE as i32,
+            );
         }
 
         let initial_uv = [0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0];
@@ -161,8 +217,16 @@ impl CanvasRenderer {
         let checker_texture = unsafe { gl.create_texture().map_err(|e| e.to_string())? };
         unsafe {
             gl.bind_texture(glow::TEXTURE_2D, Some(checker_texture));
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MIN_FILTER,
+                glow::NEAREST as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MAG_FILTER,
+                glow::NEAREST as i32,
+            );
             gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::REPEAT as i32);
             gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::REPEAT as i32);
             gl.tex_image_2d(
@@ -202,13 +266,7 @@ impl CanvasRenderer {
         self.canvas_height
     }
 
-    pub fn upload(
-        &self,
-        gl: &glow::Context,
-        composite: &CompositeResult,
-        x: u32,
-        y: u32,
-    ) {
+    pub fn upload(&self, gl: &glow::Context, composite: &CompositeResult, x: u32, y: u32) {
         unsafe {
             let cw = self.canvas_width;
             let ch = self.canvas_height;
@@ -262,7 +320,15 @@ impl CanvasRenderer {
             // Update background checker UVs
             let bg_uv = compute_bg_uv(vp.window_width, vp.window_height);
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.bg_texcoord_buf));
-            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, &bg_uv.to_vec().iter().flat_map(|f| f32::to_le_bytes(*f)).collect::<Vec<u8>>(), glow::DYNAMIC_DRAW);
+            gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                &bg_uv
+                    .to_vec()
+                    .iter()
+                    .flat_map(|f| f32::to_le_bytes(*f))
+                    .collect::<Vec<u8>>(),
+                glow::DYNAMIC_DRAW,
+            );
             gl.bind_buffer(glow::ARRAY_BUFFER, None);
             gl.bind_vertex_array(Some(self.bg_vao));
             gl.draw_arrays(glow::TRIANGLE_FAN, 0, 4);
@@ -274,7 +340,14 @@ impl CanvasRenderer {
             // Update canvas UVs
             let uv = vp.texture_uv();
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.texcoord_buf));
-            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, &uv.to_vec().iter().flat_map(|f| f32::to_le_bytes(*f)).collect::<Vec<u8>>(), glow::DYNAMIC_DRAW);
+            gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                &uv.to_vec()
+                    .iter()
+                    .flat_map(|f| f32::to_le_bytes(*f))
+                    .collect::<Vec<u8>>(),
+                glow::DYNAMIC_DRAW,
+            );
             gl.bind_buffer(glow::ARRAY_BUFFER, None);
             gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
             gl.bind_vertex_array(Some(self.vao));
@@ -285,5 +358,3 @@ impl CanvasRenderer {
         }
     }
 }
-
-

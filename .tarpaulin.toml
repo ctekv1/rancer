@@ -1,53 +1,21 @@
-# Tarpaulin code coverage configuration for Rancer
-# https://github.com/xd009642/tarpaulin
-
 [coverage]
-# Exclude test modules, generated files, and platform-specific GUI code
-# These modules require a display or GPU and cannot be unit tested:
-# - window_gtk4.rs, window_winit.rs: GTK4/winit backends need display
-# - opengl_renderer.rs, renderer.rs: GPU-specific rendering
-# - gl_loader.rs: OpenGL function loading
+# Files excluded because they require a display or GPU (cannot be unit tested):
+# - main.rs: Application entry point
+# - renderer.rs: OpenGL GPU rendering
+# - window/sdl2.rs: SDL2 window, GL context, event loop
 # - export_ui.rs: Native file dialogs
-# - main.rs: Application entry point (integration)
+# - ui/egui_integration.rs: egui-SDL2 integration needs display
 exclude-files = [
     "target/**",
-    "tests/**",
-    "src/window_gtk4.rs",
-    "src/window_winit.rs",
-    "src/opengl_renderer.rs",
-    "src/gl_loader.rs",
-    "src/renderer.rs",
-    "src/export_ui.rs",
     "src/main.rs",
-]
-# Include source files - unit-testable modules only
-include-files = [
-    "src/canvas.rs",
-    "src/logger.rs",
-    "src/preferences.rs",
+    "src/renderer.rs",
+    "src/window/sdl2.rs",
+    "src/export_ui.rs",
+    "src/ui/egui_integration.rs",
 ]
 
-# Minimum coverage thresholds (optional - fail if below these)
-# Rancer targets 70%+ coverage for professional quality
-# threshold-lines = 70
-# threshold-functions = 70
-# threshold-branches = 70
-
-# Output options
 report-dir = "coverage"
 output-format = ["Html", "Json", "Xml"]
 
-# Ignore dead code (allow(dead_code) marked code doesn't count against coverage)
-# Note: This helps focus on tested code rather than infrastructure
-ignore-panics = false
-
-# Run options
 clean = true
-# Don't count skipped tests as covered
-skip-skipped = true
-
-# Debug
-# verbose = true
-
-# Only run tests (excludes doctests)
 run-tests = true

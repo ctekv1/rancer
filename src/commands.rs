@@ -60,7 +60,11 @@ pub struct AddLayer {
 
 impl AddLayer {
     pub fn new(name: Option<String>) -> Self {
-        Self { name, layer: None, insertion_index: None }
+        Self {
+            name,
+            layer: None,
+            insertion_index: None,
+        }
     }
 }
 

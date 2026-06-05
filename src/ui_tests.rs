@@ -3,8 +3,8 @@
 //! Tests for egui integration with SDL2, UI state management,
 //! and tool switching via the egui toolbar.
 
-use crate::ui::{UiState, ToolType};
 use crate::ui::egui_integration::EguiIntegration;
+use crate::ui::{ToolType, UiState};
 
 /// Test that UiState initializes with correct defaults
 #[test]
@@ -23,7 +23,7 @@ fn test_ui_state_defaults() {
 fn test_ui_state_tool_switching() {
     let mut ui_state = UiState::new();
     assert_eq!(ui_state.active_tool, ToolType::Brush);
-    
+
     ui_state.set_tool(ToolType::Brush);
     assert_eq!(ui_state.active_tool, ToolType::Brush);
 }
@@ -32,10 +32,10 @@ fn test_ui_state_tool_switching() {
 #[test]
 fn test_ui_state_apply_to_app() {
     use crate::app::AppState;
-    
+
     let mut app = AppState::new(800, 600);
     let mut ui_state = UiState::new();
-    
+
     ui_state.apply_to_app(&mut app);
     assert_eq!(app.tool_name(), "Brush");
 }
@@ -44,14 +44,14 @@ fn test_ui_state_apply_to_app() {
 #[test]
 fn test_ui_state_layer_operations() {
     use crate::app::AppState;
-    
+
     let mut app = AppState::new(800, 600);
     let mut ui_state = UiState::new();
-    
+
     // Add a layer
     ui_state.add_layer(&mut app);
     assert!(app.canvas().layer_count() >= 2); // Started with 1, added 1
-    
+
     // Remove a layer (not index 0)
     let layer_count_before = app.canvas().layer_count();
     if layer_count_before > 1 {
@@ -64,18 +64,18 @@ fn test_ui_state_layer_operations() {
 #[test]
 fn test_ui_state_undo_redo() {
     use crate::app::AppState;
-    
+
     let mut app = AppState::new(800, 600);
     let mut ui_state = UiState::new();
-    
+
     // Do an action that can be undone
     ui_state.add_layer(&mut app);
     let layer_count_after_add = app.canvas().layer_count();
-    
+
     // Undo
     ui_state.undo(&mut app);
     assert_eq!(app.canvas().layer_count(), layer_count_after_add - 1);
-    
+
     // Redo
     ui_state.redo(&mut app);
     assert_eq!(app.canvas().layer_count(), layer_count_after_add);
@@ -95,26 +95,30 @@ fn test_egui_integration_creation() {
         }
     };
     let video = sdl.video().expect("Failed to init video");
-    
+
     let window = video
         .window("Test", 800, 600)
         .opengl()
         .build()
         .expect("Failed to create window");
-    
+
     let gl_context = window
         .gl_create_context()
         .expect("Failed to create GL context");
-    
+
     let gl = unsafe {
         glow::Context::from_loader_function(|s| {
             video.gl_get_proc_address(s) as *const std::os::raw::c_void
         })
     };
-    
+
     // This should not panic
     let result = EguiIntegration::new(&window, &gl_context, &gl);
-    assert!(result.is_ok(), "EguiIntegration creation failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "EguiIntegration creation failed: {:?}",
+        result.err()
+    );
 }
 
 /// Test that egui context is accessible
@@ -129,26 +133,26 @@ fn test_egui_integration_ctx_access() {
         }
     };
     let video = sdl.video().expect("Failed to init video");
-    
+
     let window = video
         .window("Test", 800, 600)
         .opengl()
         .build()
         .expect("Failed to create window");
-    
+
     let gl_context = window
         .gl_create_context()
         .expect("Failed to create GL context");
-    
+
     let gl = unsafe {
         glow::Context::from_loader_function(|s| {
             video.gl_get_proc_address(s) as *const std::os::raw::c_void
         })
     };
-    
-    let mut egui = EguiIntegration::new(&window, &gl_context, &gl)
-        .expect("Failed to create EguiIntegration");
-    
+
+    let mut egui =
+        EguiIntegration::new(&window, &gl_context, &gl).expect("Failed to create EguiIntegration");
+
     // Should be able to get context (just check it's not null)
     let _ctx = egui.ctx(); // If this doesn't panic, it's working
 }
@@ -164,7 +168,7 @@ fn test_tool_type_consistency() {
 fn test_tool_switching_via_ui() {
     let mut ui_state = UiState::new();
     assert_eq!(ui_state.active_tool, ToolType::Brush);
-    
+
     ui_state.set_tool(ToolType::Brush);
     assert_eq!(ui_state.active_tool, ToolType::Brush);
 }
@@ -173,13 +177,13 @@ fn test_tool_switching_via_ui() {
 #[test]
 fn test_apply_to_app_switches_tools() {
     use crate::app::AppState;
-    
+
     let mut app = AppState::new(800, 600);
     let mut ui_state = UiState::new();
-    
+
     ui_state.apply_to_app(&mut app);
     assert_eq!(app.tool_name(), "Brush");
-    
+
     ui_state.set_tool(ToolType::Brush);
     ui_state.apply_to_app(&mut app);
     assert_eq!(app.tool_name(), "Brush");
@@ -190,16 +194,16 @@ fn test_apply_to_app_switches_tools() {
 fn test_tool_switching_preserves_settings() {
     use crate::app::AppState;
     use crate::brush::BrushType;
-    
+
     let mut app = AppState::new(800, 600);
     let mut ui_state = UiState::new();
-    
+
     if let Some(config) = app.active_tool_mut().as_brush_config() {
         config.set_brush_size(25);
         config.set_brush_opacity(0.5);
         config.set_brush_type(BrushType::Square);
     }
-    
+
     ui_state.set_tool(ToolType::Brush);
     ui_state.apply_to_app(&mut app);
     assert_eq!(app.tool_name(), "Brush");
@@ -209,15 +213,15 @@ fn test_tool_switching_preserves_settings() {
 #[test]
 fn test_rapid_tool_switching() {
     use crate::app::AppState;
-    
+
     let mut app = AppState::new(800, 600);
     let mut ui_state = UiState::new();
-    
+
     for _ in 0..10 {
         ui_state.set_tool(ToolType::Brush);
         ui_state.apply_to_app(&mut app);
     }
-    
+
     assert_eq!(app.tool_name(), "Brush");
 }
 
@@ -225,10 +229,10 @@ fn test_rapid_tool_switching() {
 #[test]
 fn test_click_brush_tool_icon() {
     use crate::app::AppState;
-    
+
     let mut app = AppState::new(800, 600);
     let mut ui_state = UiState::new();
-    
+
     // Simulate clicking Brush tool (should already be Brush)
     ui_state.set_tool(ToolType::Brush);
     ui_state.apply_to_app(&mut app);
@@ -240,10 +244,10 @@ fn test_click_brush_tool_icon() {
 #[test]
 fn test_apply_to_app_no_recreate() {
     use crate::app::AppState;
-    
+
     let mut app = AppState::new(800, 600);
     let mut ui_state = UiState::new();
-    
+
     // Apply when already Brush (should not recreate)
     ui_state.apply_to_app(&mut app);
     assert_eq!(app.tool_name(), "Brush");
@@ -256,7 +260,7 @@ fn test_icon_does_not_disappear_on_hover() {
     // This is a visual test - we can't test hover state directly in unit tests
     // But we can verify the icon loading works correctly
     use crate::ui::icons;
-    
+
     // Verify all icons can be loaded as SVG
     let icon_list = [
         ("Brush", icons::BRUSH_ICON),
@@ -267,7 +271,7 @@ fn test_icon_does_not_disappear_on_hover() {
         ("Redo", icons::REDO_ICON),
         ("Add Layer", icons::ADD_LAYER_ICON),
     ];
-    
+
     for (name, svg) in &icon_list {
         // SVG should be valid and loadable
         assert!(!svg.is_empty(), "{} icon SVG is empty", name);
@@ -284,14 +288,18 @@ fn test_tool_button_fixed_size() {
     // uses min_size(36.0, 36.0) and not shrink_to_fit()
     use std::fs;
     let ui_impl = fs::read_to_string("src/ui/egui_impl.rs").expect("Failed to read egui_impl.rs");
-    
+
     // Should use min_size for fixed dimensions
-    assert!(ui_impl.contains("min_size(egui::vec2(36.0, 36.0))"), 
-               "Tool buttons should use min_size(36, 36) to prevent shrinkage");
-    
+    assert!(
+        ui_impl.contains("min_size(egui::vec2(36.0, 36.0))"),
+        "Tool buttons should use min_size(36, 36) to prevent shrinkage"
+    );
+
     // Should NOT use shrink_to_fit or similar
-    assert!(!ui_impl.contains("shrink_to_fit"), 
-               "Tool buttons should not shrink on hover");
+    assert!(
+        !ui_impl.contains("shrink_to_fit"),
+        "Tool buttons should not shrink on hover"
+    );
 }
 
 /// Test that icon is drawn ONCE (no duplication)
@@ -299,21 +307,25 @@ fn test_tool_button_fixed_size() {
 fn test_icon_not_duplicated() {
     use std::fs;
     let ui_impl = fs::read_to_string("src/ui/egui_impl.rs").expect("Failed to read egui_impl.rs");
-    
+
     // Should use Button::image() which draws icon once
-    assert!(ui_impl.contains("Button::image("), 
-               "Should use Button::image() to draw icon once");
-    
+    assert!(
+        ui_impl.contains("Button::image("),
+        "Should use Button::image() to draw icon once"
+    );
+
     // Should NOT have manual painter().image() calls that duplicate
-    assert!(!ui_impl.contains("painter().image("), 
-               "Should not have painter().image() calls that cause duplication");
+    assert!(
+        !ui_impl.contains("painter().image("),
+        "Should not have painter().image() calls that cause duplication"
+    );
 }
 
 /// Test that SVG icon module exists and has expected icons
 #[test]
 fn test_svg_icons_exist() {
     use crate::ui::icons;
-    
+
     // Verify icon constants exist and are non-empty
     assert!(!icons::BRUSH_ICON.is_empty());
     assert!(!icons::ERASER_ICON.is_empty());
@@ -322,7 +334,7 @@ fn test_svg_icons_exist() {
     assert!(!icons::UNDO_ICON.is_empty());
     assert!(!icons::REDO_ICON.is_empty());
     assert!(!icons::ADD_LAYER_ICON.is_empty());
-    
+
     // Verify icons contain SVG header
     assert!(icons::BRUSH_ICON.contains("<svg"));
     assert!(icons::ERASER_ICON.contains("<svg"));
@@ -333,7 +345,7 @@ fn test_svg_icons_exist() {
 #[test]
 fn test_svg_icons_valid_xml() {
     use crate::ui::icons;
-    
+
     // All icons should have opening and closing svg tags
     let icon_list = [
         icons::BRUSH_ICON,
@@ -356,7 +368,7 @@ fn test_svg_icons_valid_xml() {
         icons::SETTINGS_ICON,
         icons::THEME_ICON,
     ];
-    
+
     for (i, svg) in icon_list.iter().enumerate() {
         // Check basic SVG structure
         assert!(svg.contains("<svg"), "Icon {} missing <svg> tag", i);
@@ -372,14 +384,17 @@ fn test_svg_icons_valid_xml() {
 fn test_svg_icon_loading() {
     // Test that egui_extras can load SVG bytes
     use crate::ui::icons;
-    
+
     // Try to load brush icon (this tests the API without needing egui context)
     let svg_bytes = icons::BRUSH_ICON.as_bytes();
     assert!(!svg_bytes.is_empty());
-    
+
     // Verify SVG has expected elements for a brush icon
     let svg_str = std::str::from_utf8(svg_bytes).expect("SVG should be valid UTF-8");
-    assert!(svg_str.contains("path"), "Brush icon should have path elements");
+    assert!(
+        svg_str.contains("path"),
+        "Brush icon should have path elements"
+    );
 }
 
 /// Test UiState has theme toggle field
@@ -394,7 +409,7 @@ fn test_ui_state_theme_toggle() {
 #[test]
 fn test_svg_icon_size_consistency() {
     use crate::ui::icons;
-    
+
     // Parse SVG to check viewBox or width/height
     // All icons should be 24x24 based on our design
     let icon_list = [
@@ -403,12 +418,24 @@ fn test_svg_icon_size_consistency() {
         ("Zoom In", icons::ZOOM_IN_ICON),
         ("Undo", icons::UNDO_ICON),
     ];
-    
+
     for (name, svg) in icon_list {
         // Check width and height are 24
-        assert!(svg.contains("width=\"24\""), "{} icon should be 24px wide", name);
-        assert!(svg.contains("height=\"24\""), "{} icon should be 24px tall", name);
-        assert!(svg.contains("viewBox=\"0 0 24 24\""), "{} icon should have 24x24 viewBox", name);
+        assert!(
+            svg.contains("width=\"24\""),
+            "{} icon should be 24px wide",
+            name
+        );
+        assert!(
+            svg.contains("height=\"24\""),
+            "{} icon should be 24px tall",
+            name
+        );
+        assert!(
+            svg.contains("viewBox=\"0 0 24 24\""),
+            "{} icon should have 24x24 viewBox",
+            name
+        );
     }
 }
 
@@ -417,12 +444,17 @@ fn test_svg_icon_size_consistency() {
 fn test_color_conversion_functions() {
     use crate::canvas::Color;
     use crate::ui::egui_impl::{color_to_color32, color32_to_color};
-    
+
     // Test basic RGB color (opaque)
-    let color = Color { r: 255, g: 128, b: 64, a: 255 };
+    let color = Color {
+        r: 255,
+        g: 128,
+        b: 64,
+        a: 255,
+    };
     let color32 = color_to_color32(color);
     let converted = color32_to_color(color32);
-    
+
     assert_eq!(converted.r, 255);
     assert_eq!(converted.g, 128);
     assert_eq!(converted.b, 64);
@@ -434,11 +466,11 @@ fn test_color_conversion_functions() {
 fn test_color_conversion_black() {
     use crate::canvas::Color;
     use crate::ui::egui_impl::{color_to_color32, color32_to_color};
-    
+
     let color = Color::BLACK; // r:0, g:0, b:0, a:255
     let color32 = color_to_color32(color);
     let converted = color32_to_color(color32);
-    
+
     assert_eq!(converted, Color::BLACK);
 }
 
@@ -447,11 +479,11 @@ fn test_color_conversion_black() {
 fn test_color_conversion_white() {
     use crate::canvas::Color;
     use crate::ui::egui_impl::{color_to_color32, color32_to_color};
-    
+
     let color = Color::WHITE; // r:255, g:255, b:255, a:255
     let color32 = color_to_color32(color);
     let converted = color32_to_color(color32);
-    
+
     assert_eq!(converted, Color::WHITE);
 }
 
@@ -461,16 +493,16 @@ fn test_color_swatch_shows_brush_color() {
     use crate::app::AppState;
     use crate::canvas::Color;
     use crate::ui::egui_impl::color_to_color32;
-    
+
     let app = AppState::new(800, 600);
-    
+
     // Get current brush color (default is black)
     let settings = app.active_tool().brush_settings().unwrap();
     let color32 = color_to_color32(settings.color);
-    
+
     // Default color should be black (0,0,0,255)
     assert_eq!(settings.color, Color::BLACK);
-    
+
     // Color32 should match
     let expected = color_to_color32(Color::BLACK);
     assert_eq!(color32, expected);
@@ -482,20 +514,25 @@ fn test_changing_brush_color_updates_swatch() {
     use crate::app::AppState;
     use crate::canvas::Color;
     use crate::ui::egui_impl::{color_to_color32, color32_to_color};
-    
+
     let mut app = AppState::new(800, 600);
-    
+
     // Change brush color to red via BrushConfig
-    let red = Color { r: 255, g: 0, b: 0, a: 255 };
+    let red = Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
     if let Some(config) = app.active_tool_mut().as_brush_config() {
         config.set_brush_color(red);
     }
-    
+
     // Now swatch should show red
     let settings = app.active_tool().brush_settings().unwrap();
     let color32 = color_to_color32(settings.color);
     let converted = color32_to_color(color32);
-    
+
     assert_eq!(converted, red);
 }
 
@@ -503,14 +540,14 @@ fn test_changing_brush_color_updates_swatch() {
 #[test]
 fn test_color_swatch_click_toggles_picker() {
     let mut ui_state = UiState::new();
-    
+
     // Initially closed
     assert!(!ui_state.color_picker_open);
-    
+
     // Simulate click: toggle open
     ui_state.color_picker_open = !ui_state.color_picker_open;
     assert!(ui_state.color_picker_open);
-    
+
     // Simulate click again: toggle closed
     ui_state.color_picker_open = !ui_state.color_picker_open;
     assert!(!ui_state.color_picker_open);
@@ -522,11 +559,16 @@ fn test_color_swatch_click_toggles_picker() {
 fn test_color_conversion_with_alpha_preserves_rgb() {
     use crate::canvas::Color;
     use crate::ui::egui_impl::{color_to_color32, color32_to_color};
-    
-    let color = Color { r: 200, g: 150, b: 100, a: 128 };
+
+    let color = Color {
+        r: 200,
+        g: 150,
+        b: 100,
+        a: 128,
+    };
     let color32 = color_to_color32(color);
     let converted = color32_to_color(color32);
-    
+
     assert_eq!(converted.a, 128);
     // u8 premultiplied arithmetic loses at most 1 per channel
     assert!(converted.r.abs_diff(200) <= 1);
@@ -538,17 +580,22 @@ fn test_color_conversion_with_alpha_preserves_rgb() {
 #[test]
 fn test_ui_state_hsva_lifecycle() {
     use crate::ui::state::UiState;
-    
+
     let mut state = UiState::new();
     assert!(state.hsva.is_none());
-    
+
     // Simulate picker opening: initialize Hsva from brush color
-    let color = crate::canvas::Color { r: 100, g: 150, b: 200, a: 255 };
+    let color = crate::canvas::Color {
+        r: 100,
+        g: 150,
+        b: 200,
+        a: 255,
+    };
     state.hsva = Some(egui_sdl2::egui::ecolor::Hsva::from_srgba_unmultiplied([
         color.r, color.g, color.b, color.a,
     ]));
     assert!(state.hsva.is_some());
-    
+
     // Simulate picker closing: reset to None
     state.color_picker_open = false;
     state.hsva = None;

@@ -43,7 +43,7 @@ fn app_event_release_is_constructed() {
 fn app_state_has_canvas() {
     use crate::app::AppState;
     let state = AppState::new(1280, 720);
-    assert!(state.canvas().layers().len() > 0);
+    assert!(!state.canvas().layers().is_empty());
 }
 
 #[test]
@@ -57,7 +57,7 @@ fn app_state_has_active_tool() {
 fn app_state_handle_press_modifies_canvas() {
     use crate::app::AppState;
     use crate::events::AppEvent;
-    
+
     let mut state = AppState::new(1280, 720);
     state.handle_event(AppEvent::Press { x: 10.0, y: 10.0 });
     // Press event should be handled without error
@@ -68,7 +68,7 @@ fn app_state_handle_press_modifies_canvas() {
 fn app_state_handle_drag_updates_state() {
     use crate::app::AppState;
     use crate::events::AppEvent;
-    
+
     let mut state = AppState::new(1280, 720);
     state.handle_event(AppEvent::Press { x: 10.0, y: 10.0 });
     state.handle_event(AppEvent::Drag { x: 20.0, y: 20.0 });
@@ -79,7 +79,7 @@ fn app_state_handle_drag_updates_state() {
 fn app_state_handle_release_completes_stroke() {
     use crate::app::AppState;
     use crate::events::AppEvent;
-    
+
     let mut state = AppState::new(1280, 720);
     state.handle_event(AppEvent::Press { x: 10.0, y: 10.0 });
     state.handle_event(AppEvent::Drag { x: 20.0, y: 20.0 });
@@ -91,23 +91,27 @@ fn app_state_handle_release_completes_stroke() {
 fn app_state_undo_redo_via_keyboard() {
     use crate::app::AppState;
     use crate::events::AppEvent;
-    
+
     let mut state = AppState::new(1280, 720);
     assert!(!state.can_undo());
-    
+
     // Add a layer
     state.add_layer();
     assert_eq!(state.canvas().layers.len(), 2);
     assert!(state.can_undo());
-    
+
     // Undo via key
-    state.handle_event(AppEvent::Key { code: "z".to_string() });
+    state.handle_event(AppEvent::Key {
+        code: "z".to_string(),
+    });
     assert_eq!(state.canvas().layers.len(), 1);
     assert!(!state.can_undo());
     assert!(state.can_redo());
-    
+
     // Redo via key
-    state.handle_event(AppEvent::Key { code: "y".to_string() });
+    state.handle_event(AppEvent::Key {
+        code: "y".to_string(),
+    });
     assert_eq!(state.canvas().layers.len(), 2);
 }
 
@@ -119,7 +123,10 @@ fn app_state_resize_does_not_change_canvas_size() {
     let mut state = AppState::new(1280, 720);
     let (orig_w, orig_h) = state.canvas().size();
 
-    state.handle_event(AppEvent::Resize { width: 800, height: 600 });
+    state.handle_event(AppEvent::Resize {
+        width: 800,
+        height: 600,
+    });
 
     assert_eq!(state.canvas().size(), (orig_w, orig_h));
     assert_eq!(state.canvas().width(), 1280);
@@ -135,7 +142,10 @@ fn app_state_tracks_viewport_size_after_resize() {
     assert_eq!(state.viewport_width(), 1280);
     assert_eq!(state.viewport_height(), 720);
 
-    state.handle_event(AppEvent::Resize { width: 1920, height: 1080 });
+    state.handle_event(AppEvent::Resize {
+        width: 1920,
+        height: 1080,
+    });
 
     assert_eq!(state.viewport_width(), 1920);
     assert_eq!(state.viewport_height(), 1080);
@@ -147,14 +157,14 @@ fn app_state_tracks_viewport_size_after_resize() {
 #[test]
 fn app_state_undo_redo_methods() {
     use crate::app::AppState;
-    
+
     let mut state = AppState::new(1280, 720);
     state.add_layer();
     assert_eq!(state.canvas().layers.len(), 2);
-    
+
     state.undo();
     assert_eq!(state.canvas().layers.len(), 1);
-    
+
     state.redo();
     assert_eq!(state.canvas().layers.len(), 2);
 }
@@ -162,7 +172,11 @@ fn app_state_undo_redo_methods() {
 #[test]
 fn app_event_wheel_contains_position_and_delta() {
     use crate::events::AppEvent;
-    let evt = AppEvent::Wheel { x: 100.0, y: 200.0, delta: 1 };
+    let evt = AppEvent::Wheel {
+        x: 100.0,
+        y: 200.0,
+        delta: 1,
+    };
     match evt {
         AppEvent::Wheel { x, y, delta } => {
             assert_eq!(x, 100.0);
@@ -209,7 +223,11 @@ fn wheel_event_zooms_in() {
     let mut state = AppState::new(1280, 720);
     let orig_scale = state.viewport().scale;
 
-    state.handle_event(AppEvent::Wheel { x: 640.0, y: 360.0, delta: 1 });
+    state.handle_event(AppEvent::Wheel {
+        x: 640.0,
+        y: 360.0,
+        delta: 1,
+    });
 
     assert!(state.viewport().scale > orig_scale);
 }
@@ -223,7 +241,11 @@ fn wheel_event_zooms_out() {
     state.viewport_mut().scale = 2.0;
     let orig_scale = state.viewport().scale;
 
-    state.handle_event(AppEvent::Wheel { x: 640.0, y: 360.0, delta: -1 });
+    state.handle_event(AppEvent::Wheel {
+        x: 640.0,
+        y: 360.0,
+        delta: -1,
+    });
 
     assert!(state.viewport().scale < orig_scale);
 }
@@ -235,7 +257,10 @@ fn app_state_press_at_centered_viewport_maps_to_canvas_coord() {
 
     let mut state = AppState::new(1280, 720);
     // Resize viewport larger than canvas to trigger centering
-    state.handle_event(AppEvent::Resize { width: 1920, height: 1080 });
+    state.handle_event(AppEvent::Resize {
+        width: 1920,
+        height: 1080,
+    });
 
     // Screen (400, 200) → canvas (80, 20) when canvas is centered in 1920x1080
     state.handle_event(AppEvent::Press { x: 400.0, y: 200.0 });

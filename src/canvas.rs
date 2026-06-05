@@ -21,9 +21,24 @@ pub struct Color {
 }
 
 impl Color {
-    pub const WHITE: Self = Self { r: 255, g: 255, b: 255, a: 255 };
-    pub const BLACK: Self = Self { r: 0, g: 0, b: 0, a: 255 };
-    pub const TRANSPARENT: Self = Self { r: 0, g: 0, b: 0, a: 0 };
+    pub const WHITE: Self = Self {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
+    };
+    pub const BLACK: Self = Self {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    pub const TRANSPARENT: Self = Self {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 0,
+    };
 }
 
 pub const MAX_CUSTOM_COLORS: usize = 10;
@@ -38,7 +53,11 @@ pub struct HsvColor {
 
 impl Default for HsvColor {
     fn default() -> Self {
-        Self { h: 0.0, s: 100.0, v: 100.0 }
+        Self {
+            h: 0.0,
+            s: 100.0,
+            v: 100.0,
+        }
     }
 }
 
@@ -112,15 +131,31 @@ pub struct PixelRef<'a> {
 }
 
 impl<'a> PixelRef<'a> {
-    pub fn r(&self) -> u8 { self.data[0] }
-    pub fn g(&self) -> u8 { self.data[1] }
-    pub fn b(&self) -> u8 { self.data[2] }
-    pub fn a(&self) -> u8 { self.data[3] }
+    pub fn r(&self) -> u8 {
+        self.data[0]
+    }
+    pub fn g(&self) -> u8 {
+        self.data[1]
+    }
+    pub fn b(&self) -> u8 {
+        self.data[2]
+    }
+    pub fn a(&self) -> u8 {
+        self.data[3]
+    }
 
-    pub fn set_r(&mut self, r: u8) { self.data[0] = r; }
-    pub fn set_g(&mut self, g: u8) { self.data[1] = g; }
-    pub fn set_b(&mut self, b: u8) { self.data[2] = b; }
-    pub fn set_a(&mut self, a: u8) { self.data[3] = a; }
+    pub fn set_r(&mut self, r: u8) {
+        self.data[0] = r;
+    }
+    pub fn set_g(&mut self, g: u8) {
+        self.data[1] = g;
+    }
+    pub fn set_b(&mut self, b: u8) {
+        self.data[2] = b;
+    }
+    pub fn set_a(&mut self, a: u8) {
+        self.data[3] = a;
+    }
 }
 
 /// Raster image data (RGBA pixels)
@@ -169,7 +204,9 @@ impl RasterImage {
             return None;
         }
         let idx = ((y * self.width + x) * 4) as usize;
-        Some(PixelRef { data: &mut self.data[idx..idx + 4] })
+        Some(PixelRef {
+            data: &mut self.data[idx..idx + 4],
+        })
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -194,7 +231,7 @@ mod pixel_ref_tests {
     fn test_pixel_ref_reads_correct_values() {
         let mut image = RasterImage::new(2, 2);
         image.set_pixel(0, 0, 10, 20, 30, 40);
-        
+
         if let Some(pixel) = image.get_pixel_mut(0, 0) {
             assert_eq!(pixel.r(), 10);
             assert_eq!(pixel.g(), 20);
@@ -208,14 +245,14 @@ mod pixel_ref_tests {
     #[test]
     fn test_pixel_ref_writes_correct_values() {
         let mut image = RasterImage::new(2, 2);
-        
+
         if let Some(mut pixel) = image.get_pixel_mut(0, 0) {
             pixel.set_r(100);
             pixel.set_g(150);
             pixel.set_b(200);
             pixel.set_a(250);
         }
-        
+
         assert_eq!(image.get_pixel(0, 0), Some((100, 150, 200, 250)));
     }
 
@@ -311,7 +348,11 @@ impl DirtyRect {
     }
 
     pub fn contains(&self, x: u32, y: u32) -> bool {
-        self.is_dirty && x >= self.x && x < self.x + self.width && y >= self.y && y < self.y + self.height
+        self.is_dirty
+            && x >= self.x
+            && x < self.x + self.width
+            && y >= self.y
+            && y < self.y + self.height
     }
 
     pub fn mark_pixel(&mut self, x: u32, y: u32) {
@@ -503,7 +544,8 @@ impl Canvas {
             return Err("Maximum number of layers reached".to_string());
         }
         let layer_name = name.unwrap_or_else(|| format!("Layer {}", self.layers.len()));
-        self.layers.push(Layer::new(layer_name, self.width, self.height, 1.0));
+        self.layers
+            .push(Layer::new(layer_name, self.width, self.height, 1.0));
         self.invalidate();
         Ok(self.layers.len() - 1)
     }

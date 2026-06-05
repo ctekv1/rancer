@@ -13,21 +13,20 @@ pub use crate::tools::ToolType;
 pub struct UiState {
     // Tool selection
     pub active_tool: ToolType,
-    pub eraser_mode: bool,  // true = eraser mode (BrushTool with is_eraser=true)
-    pub color_picker_open: bool,  // Color picker popup state
-    pub pending_color: Option<crate::canvas::Color>,  // Color to apply after picker closes
-    
+    pub eraser_mode: bool, // true = eraser mode (BrushTool with is_eraser=true)
+    pub color_picker_open: bool, // Color picker popup state
+    pub pending_color: Option<crate::canvas::Color>, // Color to apply after picker closes
+
     // Panel visibility
     pub show_tool_panel: bool,
     pub show_brush_panel: bool,
     pub show_layer_panel: bool,
-    
+
     // Theme
     pub use_dark_theme: bool,
-    
+
     // Persistent color picker state (avoids premultiplied-alpha drift during editing)
     pub hsva: Option<egui_sdl2::egui::ecolor::Hsva>,
-    
 }
 
 impl UiState {
@@ -78,7 +77,9 @@ impl UiState {
     /// Toggle layer visibility
     pub fn toggle_layer_visibility(&mut self, app: &mut AppState, index: usize) {
         if index < app.canvas().layer_count() {
-            app.execute_command(CanvasCommand::ToggleVisibility(ToggleVisibility::new(index)));
+            app.execute_command(CanvasCommand::ToggleVisibility(ToggleVisibility::new(
+                index,
+            )));
         }
     }
 

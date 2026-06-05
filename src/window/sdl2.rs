@@ -10,8 +10,8 @@ use sdl2::mouse::MouseButton;
 use crate::app::AppState;
 use crate::events::AppEvent;
 use crate::preferences::Preferences;
-use crate::ui::egui_integration::EguiIntegration;
 use crate::ui::UiState;
+use crate::ui::egui_integration::EguiIntegration;
 
 /// Convert an SDL2 event to an AppEvent
 pub fn sdl_event_to_app_event(event: Event) -> Option<AppEvent> {
@@ -26,10 +26,7 @@ pub fn sdl_event_to_app_event(event: Event) -> Option<AppEvent> {
             y: y as f32,
         }),
         Event::MouseMotion {
-            x,
-            y,
-            mousestate,
-            ..
+            x, y, mousestate, ..
         } => {
             if mousestate.left() {
                 Some(AppEvent::Drag {
@@ -47,7 +44,8 @@ pub fn sdl_event_to_app_event(event: Event) -> Option<AppEvent> {
             code: format!("{:?}", keycode).to_lowercase(),
         }),
         Event::Window {
-            win_event: sdl2::event::WindowEvent::SizeChanged(w, h) | sdl2::event::WindowEvent::Resized(w, h),
+            win_event:
+                sdl2::event::WindowEvent::SizeChanged(w, h) | sdl2::event::WindowEvent::Resized(w, h),
             ..
         } => Some(AppEvent::Resize {
             width: w.max(0) as u32,
@@ -119,14 +117,14 @@ impl Sdl2App {
 
         let app_state = AppState::new(width, height);
         let ui_state = UiState::new();
-        
+
         // Create egui integration
         let mut egui = EguiIntegration::new(&window, &gl_context, &gl)
             .map_err(|e| format!("Failed to create egui integration: {}", e))?;
-        
+
         // Create icon cache (needs egui context)
         let icon_cache = crate::ui::egui_impl::IconCache::new(egui.ctx());
-        
+
         Ok(Self {
             window,
             gl,
@@ -146,7 +144,10 @@ impl Sdl2App {
     }
 
     pub fn run(&mut self) {
-        let mut event_pump = self.window.subsystem().sdl()
+        let mut event_pump = self
+            .window
+            .subsystem()
+            .sdl()
             .event_pump()
             .map_err(|e| format!("Failed to create event pump: {}", e))
             .unwrap();
@@ -154,7 +155,10 @@ impl Sdl2App {
         self.window.gl_make_current(&self.gl_context).ok();
 
         // Enable VSync to prevent screen tearing/flash
-        self.window.subsystem().sdl().video()
+        self.window
+            .subsystem()
+            .sdl()
+            .video()
             .unwrap()
             .gl_set_swap_interval(1)
             .ok();
@@ -174,7 +178,10 @@ impl Sdl2App {
                     let h = (*h).max(0) as u32;
                     self.preferences.update_window_size(w, h);
                     let _ = crate::preferences::save(&self.preferences);
-                    self.app_state.handle_event(AppEvent::Resize { width: w, height: h });
+                    self.app_state.handle_event(AppEvent::Resize {
+                        width: w,
+                        height: h,
+                    });
                     has_work = true;
                 }
 
@@ -187,39 +194,68 @@ impl Sdl2App {
                 }
 
                 // --- Pan state tracking ---
-                if let sdl2::event::Event::KeyDown { keycode: Some(Keycode::Space), .. } = &event {
+                if let sdl2::event::Event::KeyDown {
+                    keycode: Some(Keycode::Space),
+                    ..
+                } = &event
+                {
                     self.space_held = true;
                     has_work = true;
                     continue;
                 }
-                if let sdl2::event::Event::KeyUp { keycode: Some(Keycode::Space), .. } = &event {
+                if let sdl2::event::Event::KeyUp {
+                    keycode: Some(Keycode::Space),
+                    ..
+                } = &event
+                {
                     self.space_held = false;
                     has_work = true;
                     continue;
                 }
-                if let sdl2::event::Event::MouseButtonDown { mouse_btn: MouseButton::Middle, .. } = &event {
+                if let sdl2::event::Event::MouseButtonDown {
+                    mouse_btn: MouseButton::Middle,
+                    ..
+                } = &event
+                {
                     self.middle_held = true;
                     has_work = true;
                     continue;
                 }
-                if let sdl2::event::Event::MouseButtonUp { mouse_btn: MouseButton::Middle, .. } = &event {
+                if let sdl2::event::Event::MouseButtonUp {
+                    mouse_btn: MouseButton::Middle,
+                    ..
+                } = &event
+                {
                     self.middle_held = false;
                     has_work = true;
                     continue;
                 }
                 // --- Pan motion ---
-                if let sdl2::event::Event::MouseMotion { x, y, xrel, yrel, mousestate, .. } = &event {
+                if let sdl2::event::Event::MouseMotion {
+                    x,
+                    y,
+                    xrel,
+                    yrel,
+                    mousestate,
+                    ..
+                } = &event
+                {
                     self.mouse_x = *x as f32;
                     self.mouse_y = *y as f32;
                     if self.middle_held || (self.space_held && mousestate.left()) {
-                        self.app_state.handle_event(AppEvent::Pan { dx: *xrel as f32, dy: *yrel as f32 });
+                        self.app_state.handle_event(AppEvent::Pan {
+                            dx: *xrel as f32,
+                            dy: *yrel as f32,
+                        });
                         has_work = true;
                         continue;
                     }
                 }
 
                 // Handle mouse wheel directly (needs tracked mouse position)
-                if let sdl2::event::Event::MouseWheel { y, .. } = &event && *y != 0 {
+                if let sdl2::event::Event::MouseWheel { y, .. } = &event
+                    && *y != 0
+                {
                     self.app_state.handle_event(AppEvent::Wheel {
                         x: self.mouse_x,
                         y: self.mouse_y,
@@ -241,13 +277,19 @@ impl Sdl2App {
 
             // Render and swap
             self.render_frame();
-            
+
             // Render egui on top
-                self.egui.run_and_render(&self.window, |ctx: &egui_sdl2::egui::Context| {
+            self.egui
+                .run_and_render(&self.window, |ctx: &egui_sdl2::egui::Context| {
                     self.ui_state.apply_to_app(&mut self.app_state);
-                    crate::ui::show_ui(ctx, &mut self.app_state, &mut self.ui_state, &self.icon_cache);
+                    crate::ui::show_ui(
+                        ctx,
+                        &mut self.app_state,
+                        &mut self.ui_state,
+                        &self.icon_cache,
+                    );
                 });
-            
+
             self.window.gl_swap_window();
 
             // Yield CPU when idle
