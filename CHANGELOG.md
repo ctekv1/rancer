@@ -1,3 +1,26 @@
+## [0.0.8] - 2026-06-05
+
+### Added
+- **Upcoming merge of `feature/unified-opengl`** — See README for full details
+- Unified SDL2 + OpenGL backend replacing dual winit/GTK4 backends
+- egui immediate-mode GUI with SVG icons, theme toggle, integrated color picker
+- CPU dab-based brush engine (Round, Square) in `brush/` module
+- Tool trait system with paint/eraser modes in `tools/` module
+- Command pattern undo/redo for layer operations
+- Viewport system for zoom/pan state management
+- Performance optimizations: dirty-rect compositing, version-based caching, partial texture uploads
+- Raster-only canvas model — pure `RasterImage`-based layers (no vector strokes)
+
+### Changed
+- Replaced winit + GTK4 with SDL2 for unified cross-platform windowing
+- Replaced WGPU + OpenGL/gl_loader with single OpenGL via glow `bundled` feature
+- Source reorganized into `app.rs`, `commands.rs`, `compositor.rs`, `brush/`, `tools/`, `ui/`, `window/`
+
+### Removed
+- `geometry/` module (vertex generation for strokes/UI elements)
+- `shaders/` directory (WGPU shader files)
+- `export.rs`, `opengl_renderer.rs`, `gl_loader.rs`, `window_winit.rs`, `window_gtk4.rs`, `window_backend.rs`, `ui.rs`
+
 ## [0.0.7] - 2026-04-04
 
 ### Added

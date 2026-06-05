@@ -270,7 +270,7 @@ pub fn run_app(preferences: Preferences) {
         eprintln!("Warning: File logging failed ({e}), using console-only logging");
     }
 
-    crate::logger::info("Starting Rancer v0.0.7 with SDL2...");
+    crate::logger::info("Starting Rancer v0.0.8 with SDL2...");
 
     match Sdl2App::new(preferences) {
         Ok(mut app) => {

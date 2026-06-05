@@ -2,7 +2,7 @@
 
 A digital art application built in Rust with cross-platform support.
 
-**Version:** 0.0.7  
+**Version:** 0.0.8  
 **License:** [GNU GPL-3.0](LICENSE)
 
 ## Features
@@ -106,6 +106,23 @@ See `ARCHITECTURE.md` for detailed data flow and design patterns.
 
 - **Linux:** `~/.config/rancer/config.toml`
 - **Windows:** `%APPDATA%\rancer\config.toml`
+
+## Merge: `feature/unified-opengl`
+
+The `feature/unified-opengl` branch has been merged into `main` for v0.0.8. This was a major architectural overhaul that replaced the dual-backend approach with a single cross-platform SDL2 + OpenGL backend. Key changes:
+
+- **Unified backend** — SDL2 replaces both winit (Windows) and GTK4 (Linux), eliminating all platform `#[cfg]` branching
+- **egui UI** — Immediate-mode GUI replaces the custom vertex-based UI, with SVG icon support, theme toggle, and integrated color picker
+- **CPU dab-based brush engine** — New `brush/` module generating pixel-level dab stamps (Round, Square) with proper alpha compositing
+- **Tool trait system** — `tools/` module with `BrushTool` supporting paint and eraser modes, separate brush/eraser settings
+- **Command pattern undo/redo** — `commands.rs` using the `undo` crate for layer operations (AddLayer, RemoveLayer, ToggleVisibility, SetOpacity)
+- **Viewport system** — `viewport.rs` with zoom/pan state management
+- **Performance** — Dirty-rect compositing, version-based caching, partial texture uploads
+- **Simplified structure** — Source reorganized into `app.rs`, `commands.rs`, `compositor.rs`, `window/`, `brush/`, `tools/`, `ui/` modules
+- **Raster-only canvas** — Pure `RasterImage`-based layer model, no vector strokes
+- **Removed** — Geometry module, shader files, WGPU pipeline, GL function loader (now via glow `bundled` feature)
+
+Build requirements changed to: SDL2 is statically compiled via the `bundled` feature with no system library needed.
 
 ## Status
 
